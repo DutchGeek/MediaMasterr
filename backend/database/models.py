@@ -47,6 +47,7 @@ class User(Base):
     permissions: Mapped[list[str]] = mapped_column(JSON, default_factory=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     require_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
 
     # metadata
     avatar_path: Mapped[str | None] = mapped_column(String(500), default=None)
@@ -62,6 +63,14 @@ class User(Base):
     notification_settings: Mapped[list[NotificationSetting]] = relationship(
         back_populates="user", default_factory=list, lazy="noload", repr=False
     )
+
+    def bump_token_version(self) -> None:
+        """
+        Increment token version to invalidate existing sessions.
+
+        Must be called within a session commit block to take effect.
+        """
+        self.token_version += 1
 
 
 class NotificationSetting(Base):
