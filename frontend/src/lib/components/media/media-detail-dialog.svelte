@@ -290,7 +290,7 @@
           <Dialog.Footer class="mt-6 border-t border-border/60 pt-4">
             <Button
               variant="secondary"
-              class="text-gray-100 bg-muted-foreground hover:bg-muted-foreground/90 cursor-pointer"
+              class="bg-primary hover:bg-primary-hover cursor-pointer"
               onclick={handleClose}>Close</Button
             >
             {#if canRequestExceptions && !media.status.is_blacklisted && !media.status.has_pending_request}
