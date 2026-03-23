@@ -33,6 +33,10 @@
   const libraryTotal = $derived(
     (dashboard?.kpis.total_movies ?? 0) + (dashboard?.kpis.total_series ?? 0),
   );
+  const librarySizeTotal = $derived(
+    (dashboard?.kpis.total_movies_size_gb ?? 0) +
+      (dashboard?.kpis.total_series_size_gb ?? 0),
+  );
   const showSyncNotice = $derived(
     (dashboard?.media_server_configured ?? false) && libraryTotal === 0,
   );
@@ -207,8 +211,9 @@
                 {dashboard.kpis.total_movies}
               </p>
               <p class="text-xs text-muted-foreground mt-2">
-                {libraryTotal > 0
-                  ? `${formatPercent((dashboard.kpis.total_movies / libraryTotal) * 100)} of library`
+                {librarySizeTotal > 0
+                  ? `${formatPercent((dashboard.kpis.total_movies_size_gb / librarySizeTotal) * 100)} of ` +
+                    "library by size"
                   : "No library items yet"}
               </p>
             </article>
@@ -222,8 +227,8 @@
                 {dashboard.kpis.total_series}
               </p>
               <p class="text-xs text-muted-foreground mt-2">
-                {libraryTotal > 0
-                  ? `${formatPercent((dashboard.kpis.total_series / libraryTotal) * 100)} of library`
+                {librarySizeTotal > 0
+                  ? `${formatPercent((dashboard.kpis.total_series_size_gb / librarySizeTotal) * 100)} of library by size`
                   : "No library items yet"}
               </p>
             </article>

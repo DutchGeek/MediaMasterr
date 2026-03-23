@@ -16,7 +16,7 @@
 
 ~~[ ] - Enabling tagging on a rule could be greyed out when tagging is not enabled? Or maybe show a warning.~~
 
-[ ] - The percentages on dashboard are a bit misleading, as they're just on numbers of seasons vs number of movies - using data % might be a fairer reflection?
+[x] - The percentages on dashboard are a bit misleading, as they're just on numbers of seasons vs number of movies - using data % might be a fairer reflection?
 
 [x] - Dashboard - Plex shows last sync: never even when manually synced via task run
 

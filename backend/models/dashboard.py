@@ -6,6 +6,8 @@ from pydantic import BaseModel
 class DashboardKpis(BaseModel):
     total_movies: int
     total_series: int
+    total_movies_size_gb: float
+    total_series_size_gb: float
     reclaimable_movies_gb: float
     reclaimable_series_gb: float
     reclaimable_total_gb: float

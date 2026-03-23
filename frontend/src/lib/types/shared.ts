@@ -298,6 +298,8 @@ export interface BlacklistEntry {
 export interface DashboardKpis {
   total_movies: number;
   total_series: number;
+  total_movies_size_gb: number;
+  total_series_size_gb: number;
   reclaimable_movies_gb: number;
   reclaimable_series_gb: number;
   reclaimable_total_gb: number;

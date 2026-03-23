@@ -76,6 +76,16 @@ async def get_dashboard(
                 .where(ReclaimCandidate.media_type == MediaType.SERIES)
                 .scalar_subquery()
                 .label("series_size_total"),
+                select(func.coalesce(func.sum(Movie.size), 0))
+                .select_from(Movie)
+                .where(Movie.removed_at.is_(None))
+                .scalar_subquery()
+                .label("all_movies_size"),
+                select(func.coalesce(func.sum(Series.size), 0))
+                .select_from(Series)
+                .where(Series.removed_at.is_(None))
+                .scalar_subquery()
+                .label("all_series_size"),
                 select(func.count())
                 .select_from(ExceptionRequest)
                 .where(ExceptionRequest.status == ExceptionRequestStatus.PENDING)
@@ -135,6 +145,8 @@ async def get_dashboard(
     series_count = summary_row.series_count or 0
     movie_size_total = summary_row.movie_size_total or 0
     series_size_total = summary_row.series_size_total or 0
+    all_movies_size = summary_row.all_movies_size or 0
+    all_series_size = summary_row.all_series_size or 0
     pending_requests = summary_row.pending_requests or 0
     approved_7d = summary_row.approved_7d or 0
     denied_7d = summary_row.denied_7d or 0
@@ -306,6 +318,8 @@ async def get_dashboard(
     kpis = DashboardKpis(
         total_movies=movie_count,
         total_series=series_count,
+        total_movies_size_gb=round(float(bytes_to_gb(all_movies_size)), 2),
+        total_series_size_gb=round(float(bytes_to_gb(all_series_size)), 2),
         reclaimable_movies_gb=round(float(bytes_to_gb(movie_size_total)), 2),
         reclaimable_series_gb=round(float(bytes_to_gb(series_size_total)), 2),
         reclaimable_total_gb=round(
