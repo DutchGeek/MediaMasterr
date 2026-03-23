@@ -372,7 +372,7 @@
               </p>
               {#each group.tabs as tab}
                 <button
-                  class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors 
+                  class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors
                     cursor-pointer
                     {activeTab === tab.id
                     ? 'bg-primary/10 text-primary font-medium'
