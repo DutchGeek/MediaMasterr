@@ -194,6 +194,10 @@
     entries.filter((e) => selectedIds.has(e.id)),
   );
 
+  const selectedTotalGb = $derived(
+    selectedEntries.reduce((acc, e) => acc + (e.estimated_space_gb ?? 0), 0),
+  );
+
   $effect(() => {
     sortBy;
     sortOrder;
@@ -698,6 +702,9 @@
     >
       <span class="text-sm text-foreground font-medium">
         {selectedIds.size} item{selectedIds.size !== 1 ? "s" : ""} selected
+        <span class="text-muted-foreground font-normal">
+          - {selectedTotalGb.toFixed(2)} GB
+        </span>
       </span>
       <div class="flex gap-2">
         <Button
