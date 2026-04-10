@@ -21,7 +21,7 @@
 </script>
 
 <div
-  class="w-16 shrink-0 rounded-md border border-border bg-muted/40 flex items-center justify-center"
+  class="w-16 shrink-0 rounded-md border border-border bg-muted/40 flex items-center justify-center aspect-2/3"
 >
   {#if normalizedPosterUrl}
     <img
