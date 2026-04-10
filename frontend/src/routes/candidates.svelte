@@ -32,6 +32,7 @@
   import MediaTypeBadge from "$lib/components/requests/media-type-badge.svelte";
   import PosterThumb from "$lib/components/requests/poster-thumb.svelte";
   import ShieldBan from "@lucide/svelte/icons/shield-ban";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   // display row (either a flat entry or a season group)
   type FlatRow = { kind: "flat"; entry: ReclaimCandidateEntry };
@@ -708,24 +709,38 @@
           Clear
         </Button>
         {#if isAdmin}
-          <Button
-            size="sm"
-            class="cursor-pointer"
-            onclick={() => (bulkDialogOpen = true)}
-          >
-            <ShieldBan class="size-4" />
-            Protect {selectedIds.size}
-          </Button>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              <Button
+                size="sm"
+                class="cursor-pointer"
+                onclick={() => (bulkDialogOpen = true)}
+              >
+                <ShieldBan class="size-4" />
+                Protect {selectedIds.size}
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>
+              <p>Protect</p>
+            </Tooltip.Content>
+          </Tooltip.Root>
         {/if}
         {#if canDelete}
-          <Button
-            size="sm"
-            class="cursor-pointer bg-destructive/80 hover:bg-destructive/60"
-            onclick={() => (bulkDeleteDialogOpen = true)}
-          >
-            <Trash class="size-4" />
-            Delete {selectedIds.size}
-          </Button>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              <Button
+                size="sm"
+                class="cursor-pointer bg-destructive/80 hover:bg-destructive/60"
+                onclick={() => (bulkDeleteDialogOpen = true)}
+              >
+                <Trash class="size-4" />
+                Delete {selectedIds.size}
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>
+              <p>Delete</p>
+            </Tooltip.Content>
+          </Tooltip.Root>
         {/if}
       </div>
     </div>
@@ -840,22 +855,36 @@
                     {#if entry.has_pending_request}
                       <span class="text-xs text-blue-400">Pending request</span>
                     {:else}
-                      <Button
-                        size="icon"
-                        class="cursor-pointer rounded-full"
-                        onclick={() => openSingleRequest(entry)}
-                      >
-                        <ShieldBan class="size-4" />
-                      </Button>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          <Button
+                            size="icon"
+                            class="cursor-pointer rounded-full"
+                            onclick={() => openSingleRequest(entry)}
+                          >
+                            <ShieldBan class="size-4" />
+                          </Button>
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>
+                          <p>Protect</p>
+                        </Tooltip.Content>
+                      </Tooltip.Root>
                     {/if}
                     {#if canDelete}
-                      <Button
-                        size="icon"
-                        class="cursor-pointer rounded-full bg-destructive/80 hover:bg-destructive/60"
-                        onclick={() => openSingleDelete(entry)}
-                      >
-                        <Trash class="size-4" />
-                      </Button>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          <Button
+                            size="icon"
+                            class="cursor-pointer rounded-full bg-destructive/80 hover:bg-destructive/60"
+                            onclick={() => openSingleDelete(entry)}
+                          >
+                            <Trash class="size-4" />
+                          </Button>
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>
+                          <p>Delete</p>
+                        </Tooltip.Content>
+                      </Tooltip.Root>
                     {/if}
                   </div>
                 </td>
@@ -983,22 +1012,36 @@
                             >Pending request</span
                           >
                         {:else}
-                          <Button
-                            size="icon"
-                            class="cursor-pointer rounded-full size-7"
-                            onclick={() => openSingleRequest(season)}
-                          >
-                            <ShieldBan class="size-3.5" />
-                          </Button>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger>
+                              <Button
+                                size="icon"
+                                class="cursor-pointer rounded-full size-7"
+                                onclick={() => openSingleRequest(season)}
+                              >
+                                <ShieldBan class="size-3.5" />
+                              </Button>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content>
+                              <p>Protect</p>
+                            </Tooltip.Content>
+                          </Tooltip.Root>
                         {/if}
                         {#if canDelete}
-                          <Button
-                            size="icon"
-                            class="cursor-pointer rounded-full size-7 bg-destructive/80 hover:bg-destructive/60"
-                            onclick={() => openSingleDelete(season)}
-                          >
-                            <Trash class="size-3.5" />
-                          </Button>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger>
+                              <Button
+                                size="icon"
+                                class="cursor-pointer rounded-full size-7 bg-destructive/80 hover:bg-destructive/60"
+                                onclick={() => openSingleDelete(season)}
+                              >
+                                <Trash class="size-3.5" />
+                              </Button>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content>
+                              <p>Delete</p>
+                            </Tooltip.Content>
+                          </Tooltip.Root>
                         {/if}
                       </div>
                     </td>
