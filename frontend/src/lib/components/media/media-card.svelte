@@ -78,7 +78,7 @@
   <!-- main card -->
   <div
     class="relative aspect-2/3 bg-gray-800 rounded-lg overflow-hidden border-2 border-gray-400
-      dark:border-gray-700 hover:scale-105"
+      transition-transform duration-150 dark:border-gray-700 hover:scale-105"
   >
     <!-- poster image -->
     {#if media.poster_url}
