@@ -12,6 +12,7 @@ from backend.database.models import (
     GeneralSettings,
     Movie,
     ProtectedMedia,
+    ProtectionRequest,
     ReclaimCandidate,
     ReclaimRule,
     Season,
@@ -1416,6 +1417,16 @@ async def _delete_season_candidates(
             )
             season_db = result.scalar_one_or_none()
             if season_db:
+                await db.execute(
+                    delete(ProtectionRequest).where(
+                        ProtectionRequest.season_id == season_db.id
+                    )
+                )
+                await db.execute(
+                    delete(ProtectedMedia).where(
+                        ProtectedMedia.season_id == season_db.id
+                    )
+                )
                 await db.delete(season_db)
 
             await db.commit()
