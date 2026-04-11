@@ -481,7 +481,6 @@ async def approve_request(
     3. Remove it from candidates if present
     4. Notify the requester
     """
-    print("TESTING 123", flush=True)
     # get request
     result = await db.execute(
         select(ProtectionRequest).where(ProtectionRequest.id == request_id)
@@ -504,13 +503,21 @@ async def approve_request(
         media_result = await db.execute(
             select(Movie).where(Movie.id == request.movie_id)
         )
-        media = media_result.scalar_one()
+        media = media_result.scalar_one_or_none()
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
+            )
         media_id = request.movie_id
     else:
         media_result = await db.execute(
             select(Series).where(Series.id == request.series_id)
         )
-        media = media_result.scalar_one()
+        media = media_result.scalar_one_or_none()
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Series not found"
+            )
         media_id = request.series_id
 
     # update request status
@@ -661,13 +668,21 @@ async def deny_request(
         media_result = await db.execute(
             select(Movie).where(Movie.id == request.movie_id)
         )
-        media = media_result.scalar_one()
+        media = media_result.scalar_one_or_none()
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
+            )
         media_id = request.movie_id
     else:
         media_result = await db.execute(
             select(Series).where(Series.id == request.series_id)
         )
-        media = media_result.scalar_one()
+        media = media_result.scalar_one_or_none()
+        if media is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Series not found"
+            )
         media_id = request.series_id
 
     # update request status
