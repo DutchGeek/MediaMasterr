@@ -47,4 +47,56 @@ As a result, this project will **not** accept pull requests that are large, AI g
 
 # Install
 
-TBD
+## Desktop
+
+You can use the latest [release](https://github.com/jessielw/Reclaimerr/releases) for your platform if there is a build available.
+
+## Docker
+
+**Example .env**
+
+```yaml
+# directory to store application data (database, logs, static files, etc.)
+DATA_DIR=./data
+
+# API configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000
+
+# required secrets (replace with strong random values before production use)
+JWT_SECRET=replace-with-a-long-random-jwt-secret-of-at-least-32-characters
+ENCRYPTION_KEY=replace-with-a-long-random-encryption-key-of-at-least-32-characters
+
+# logging (options: DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# LOG_LEVEL=INFO
+
+# set to true when serving over HTTPS
+# COOKIE_SECURE=false
+```
+
+**Example compose**
+
+```yaml
+services:
+  reclaimerr:
+    image: ghcr.io/jessielw/reclaimerr:latest
+    container_name: reclaimerr
+    restart: unless-stopped
+    env_file: ".env"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+```
+
+## Preview
+
+![image](public/dashboard.png)
+![image](public/movies.png)
+![image](public/series.png)
+![image](public/reclaim-candidates.png)
+![image](public/settings-notifications.png)
+![image](public/settings-servers.png)
+![image](public/settings-tasks.png)
+![image](public/settings-users.png)
