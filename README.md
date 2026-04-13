@@ -6,6 +6,8 @@
     [![Desktop Build](https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml) [![Docker Build](https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml) [![Format Frontend](https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml) [![Format Backend](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml)
 </p>
 
+[![Format Backend](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml)
+
 **Reclaimerr** is designed to help you reclaim disk space from your media library. I was inspired to create Reclaimerr when the 100TB of storage on my home server was nearly full and I saw the rising cost of new drives. I realized it was time to start cleaning up all the unwatched and low-rated media on my server.
 
 I explored numerous open source applications for server cleanup, and [Maintainerr](https://github.com/Maintainerr/Maintainerr) stood out as a major inspiration for Reclaimerr's design. When I began development, Maintainerr didn't support Jellyfin, though support was added in [v3.0.0](https://github.com/Maintainerr/Maintainerr/releases/tag/v3.0.0), it still didn't fully meet my needs.
