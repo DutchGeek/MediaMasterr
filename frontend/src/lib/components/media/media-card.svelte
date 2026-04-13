@@ -5,7 +5,7 @@
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import Ticket from "@lucide/svelte/icons/ticket";
   import TicketMinus from "@lucide/svelte/icons/ticket-minus";
-  import ShieldBan from "@lucide/svelte/icons/shield-ban";
+  import Shield from "@lucide/svelte/icons/shield";
   import FileImage from "@lucide/svelte/icons/file-image";
   import { auth } from "$lib/stores/auth";
   import {
@@ -113,7 +113,7 @@
         >
           <Tooltip.Root>
             <Tooltip.Trigger>
-              <ShieldBan class="size-5 text-white cursor-help" />
+              <Shield class="size-5 text-white cursor-help" />
             </Tooltip.Trigger>
             <Tooltip.Content>
               <p>Protected</p>

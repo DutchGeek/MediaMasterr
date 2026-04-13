@@ -36,7 +36,7 @@
   import ProtectionRequestDialog from "$lib/components/media/protection-request-dialog.svelte";
   import MediaTypeBadge from "$lib/components/requests/media-type-badge.svelte";
   import PosterThumb from "$lib/components/requests/poster-thumb.svelte";
-  import ShieldBan from "@lucide/svelte/icons/shield-ban";
+  import Shield from "@lucide/svelte/icons/shield";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   // display row (either a flat entry or a season group)
@@ -772,7 +772,7 @@
                 class="cursor-pointer"
                 onclick={() => (bulkDialogOpen = true)}
               >
-                <ShieldBan class="size-4" />
+                <Shield class="size-4" />
                 Protect {selectedIds.size}
               </Button>
             </Tooltip.Trigger>
@@ -918,7 +918,7 @@
                             class="cursor-pointer rounded-full"
                             onclick={() => openSingleRequest(entry)}
                           >
-                            <ShieldBan class="size-4" />
+                            <Shield class="size-4" />
                           </Button>
                         </Tooltip.Trigger>
                         <Tooltip.Content>
@@ -1075,7 +1075,7 @@
                                 class="cursor-pointer rounded-full size-7"
                                 onclick={() => openSingleRequest(season)}
                               >
-                                <ShieldBan class="size-3.5" />
+                                <Shield class="size-3.5" />
                               </Button>
                             </Tooltip.Trigger>
                             <Tooltip.Content>

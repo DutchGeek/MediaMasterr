@@ -12,7 +12,7 @@
   import DoorClosed from "@lucide/svelte/icons/door-closed";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Ticket from "@lucide/svelte/icons/ticket";
-  import ShieldBan from "@lucide/svelte/icons/shield-ban";
+  import Shield from "@lucide/svelte/icons/shield";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toTitleCase } from "$lib/utils/strings";
   import * as Avatar from "$lib/components/ui/avatar/index.js";
@@ -35,7 +35,7 @@
     {
       path: "/protected",
       label: "Protected",
-      icon: ShieldBan,
+      icon: Shield,
       adminOnly: false,
     },
     {
