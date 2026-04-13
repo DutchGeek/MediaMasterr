@@ -2,7 +2,20 @@
     <img height="100px" alt="Reclaimerr's logo with name" src="frontend/src/lib/assets/logo_name.png" />
 </p>
 
-[![Desktop Build](https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml) [![Docker Build](https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml) [![Format Frontend](https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml) [![Format Backend](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml/badge.svg)](https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml)
+<p align="center">
+  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml">
+    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml/badge.svg" alt="Desktop Build" />
+  </a>
+  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml">
+    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml/badge.svg" alt="Docker Build" />
+  </a>
+  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml">
+    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml/badge.svg" alt="Format Frontend" />
+  </a>
+  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml">
+    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml/badge.svg" alt="Format Backend" />
+  </a>
+</p>
 
 **Reclaimerr** is designed to help you reclaim disk space from your media library. I was inspired to create Reclaimerr when the 100TB of storage on my home server was nearly full and I saw the rising cost of new drives. I realized it was time to start cleaning up all the unwatched and low-rated media on my server.
 
