@@ -2,10 +2,9 @@ name: Desktop
 
 on:
   push:
-    branches:
-      - main
-    # tags:
-    #   - "v*"
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
 
 concurrency:
   group: desktop-${{ github.ref }}
@@ -42,7 +41,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm install
 
       - name: Set up Python
         uses: actions/setup-python@v5
