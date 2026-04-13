@@ -16,6 +16,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toTitleCase } from "$lib/utils/strings";
   import * as Avatar from "$lib/components/ui/avatar/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   // optional callback to close sidebar on mobile after navigation
   let { onNavigate = () => {} }: { onNavigate?: () => void } = $props();
@@ -23,28 +24,57 @@
   // nav items: path = route path, label = display text, icon = icon component
   // adminOnly = whether to show item only for admin users
   const navItems = [
-    { path: "/", label: "Dashboard", icon: House, adminOnly: false },
-    { path: "/movies", label: "Movies", icon: ClapperBoard, adminOnly: false },
-    { path: "/series", label: "Series", icon: Tv, adminOnly: false },
+    {
+      path: "/",
+      label: "Dashboard",
+      icon: House,
+      adminOnly: false,
+      tooltip: null,
+    },
+    {
+      path: "/movies",
+      label: "Movies",
+      icon: ClapperBoard,
+      adminOnly: false,
+      tooltip: null,
+    },
+    {
+      path: "/series",
+      label: "Series",
+      icon: Tv,
+      adminOnly: false,
+      tooltip: null,
+    },
     {
       path: "/protection-requests",
       label: "Requests",
       icon: Ticket,
       adminOnly: false,
+      tooltip: "View and manage media deletion requests submitted by users",
     },
     {
       path: "/protected",
       label: "Protected",
       icon: Shield,
       adminOnly: false,
+      tooltip:
+        "View and manage protected media that won't be automatically deleted",
     },
     {
       path: "/candidates",
       label: "Candidates",
       icon: TriangleAlert,
       adminOnly: false,
+      tooltip:
+        "Review media that are candidates for deletion based on your retention settings",
     },
-    { path: "/settings", label: "Settings", icon: Settings, adminOnly: false },
+    {
+      path: "/settings",
+      label: "Settings",
+      icon: Settings,
+      adminOnly: false,
+      tooltip: null,
+    },
   ];
 
   // vars
@@ -80,18 +110,25 @@
   <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
     {#each navItems as item}
       {#if !item.adminOnly || $auth.user?.role === "admin"}
-        <a
-          href={item.path}
-          use:link
-          onclick={onNavigate}
-          class="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors duration-200
-               {isActive(item.path)
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
-        >
-          <item.icon />
-          <span class="font-medium">{item.label}</span>
-        </a>
+        <Tooltip.Root>
+          <Tooltip.Trigger disabled={!item.tooltip}>
+            <a
+              href={item.path}
+              use:link
+              onclick={onNavigate}
+              class="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors duration-200
+                  {isActive(item.path)
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
+            >
+              <item.icon />
+              <span class="font-medium">{item.label}</span>
+            </a>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>{item.tooltip}</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
       {/if}
     {/each}
   </nav>
