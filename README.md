@@ -81,9 +81,10 @@ API_HOST=0.0.0.0
 API_PORT=8000
 CORS_ORIGINS=http://localhost:3000
 
-# required secrets (replace with strong random values before production use)
-JWT_SECRET=replace-with-a-long-random-jwt-secret-of-at-least-32-characters
-ENCRYPTION_KEY=replace-with-a-long-random-encryption-key-of-at-least-32-characters
+# secrets — leave blank to auto-generate stable values on first launch (recommended),
+# or set your own (min 32 characters, e.g. `openssl rand -hex 32`)
+# JWT_SECRET=
+# ENCRYPTION_KEY=
 
 # logging (options: DEBUG, INFO, WARNING, ERROR, CRITICAL)
 # LOG_LEVEL=INFO
