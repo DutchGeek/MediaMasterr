@@ -3,18 +3,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml">
-    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/desktop.yml/badge.svg" alt="Desktop Build" />
-  </a>
-  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml">
-    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/docker.yml/badge.svg" alt="Docker Build" />
-  </a>
-  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml">
-    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/frontend.yml/badge.svg" alt="Format Frontend" />
-  </a>
-  <a href="https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml">
-    <img src="https://github.com/jessielw/Reclaimerr/actions/workflows/ruff.yml/badge.svg" alt="Format Backend" />
-  </a>
+<!-- desktop build -->  <picture><img alt="Desktop Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fdesktop.yml?style=flat&logo=github&logoColor=white&label=Desktop%20Build"></picture>
+<!-- docker build -->  <picture><img alt="Docker Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fdocker.yml?style=flat&logo=docker&logoColor=white&label=Docker%20Build"></picture>
+<!-- frontend -->  <picture><img alt="Frontend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Ffrontend.yml?style=flat&logo=svelte&logoColor=white&label=Frontend"></picture>
+<!-- backend -->  <picture><img alt="Backend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fruff.yml?style=flat&logo=python&logoColor=white&label=Backend"></picture>
+<!-- latest release -->  <picture><img alt="GitHub Release" src="https://img.shields.io/github/v/release/jessielw/reclaimerr?style=flat&logo=github&logoColor=white&label=Latest%20Release"></picture>
+<!-- commits since release -->  <picture><img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/jessielw/reclaimerr/latest?style=flat&logo=github&logoColor=white"></picture>
+<!-- stars -->  <picture><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/jessielw/reclaimerr?style=flat&logo=github&logoColor=white&label=Stars"></picture>
+<!-- commit activity -->  <picture><img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/jessielw/reclaimerr?style=flat&logo=github&logoColor=white&label=Commits"></picture>
+<!-- issues Open -->  <picture><img alt="GitHub Issues" src="https://img.shields.io/github/issues/jessielw/reclaimerr?style=flat&logo=github&logoColor=white"></picture>
+<!-- issues Closed -->  <picture><img alt="GitHub Issues or Pull Requests" src="https://img.shields.io/github/issues-closed/jessielw/reclaimerr?style=flat&logo=github&logoColor=white"></picture>
+<!-- license -->  <picture><img alt="GitHub License" src="https://img.shields.io/github/license/jessielw/reclaimerr?style=flat"></picture>
 </p>
 
 **Reclaimerr** is designed to help you reclaim disk space from your media library. I was inspired to create Reclaimerr when the 100TB of storage on my home server was nearly full and I saw the rising cost of new drives. I realized it was time to start cleaning up all the unwatched and low-rated media on my server.
