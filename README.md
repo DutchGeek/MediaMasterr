@@ -41,7 +41,7 @@ As a result, this project will **not** accept pull requests that are large, AI g
 
 # Addition Info
 
-- While Reclaimerr is in early beta, the task to **automatically delete** media will **not** be enabled or visible in the UI. I expect there may be **some bugs**, and I do not want to risk permanent deletion of anyone's media until the things have been **thoroughly tested**.
+- While Reclaimerr is in early beta, the task to **automatically delete** media will **not** be enabled or visible in the UI. I expect there may be **some bugs**, and I do not want to risk permanent deletion of anyone's media (due to a bug) until the things have been **thoroughly tested**.
   - For now, only admins or users with appropriate permissions can manage deletions through the UI or API
   - Once automatic deletions are added it will be **opt in**
 
