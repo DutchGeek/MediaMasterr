@@ -36,7 +36,7 @@ class JellyfinService:
 
     def __init__(self, api_key: str, jellyfin_url: str) -> None:
         self.api_key = api_key
-        self.jellyfin_url = jellyfin_url
+        self.jellyfin_url = jellyfin_url.rstrip("/")
         self.session = niquests.AsyncSession(timeout=300)
         self.session.headers.update(
             {

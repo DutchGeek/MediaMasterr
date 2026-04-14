@@ -31,7 +31,7 @@ class PlexService:
 
     def __init__(self, token: str, plex_url: str) -> None:
         self.token = token
-        self.plex_url = plex_url
+        self.plex_url = plex_url.rstrip("/")
         self.session = niquests.AsyncSession(timeout=300)
         self.session.headers.update(
             {

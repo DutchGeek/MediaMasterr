@@ -207,7 +207,7 @@
       const payload: Record<string, unknown> = {
         service_type: serviceId,
         enabled: config.enabled,
-        base_url: config.baseUrl,
+        base_url: config.baseUrl.replace(/\/+$/, ""),
       };
       if (config.apiKey) payload.api_key = config.apiKey;
       const response: boolean = await post_api(
@@ -244,7 +244,7 @@
       } = await post_api("/api/settings/save/service", {
         service_type: serviceId,
         enabled: config.enabled,
-        base_url: config.baseUrl,
+        base_url: config.baseUrl.replace(/\/+$/, ""),
         // only send api_key if the user typed a new one (backend resolves existing key otherwise)
         ...(config.apiKey ? { api_key: config.apiKey } : {}),
       });
