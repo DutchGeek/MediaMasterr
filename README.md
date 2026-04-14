@@ -161,3 +161,9 @@ The backend is available at [http://localhost:8000](http://localhost:8000) and t
 ## Contributing
 
 ![Contribution guide](docs/CONTRIBUTING.md)
+
+## Credits
+
+- [Maintainerr](https://github.com/Maintainerr/Maintainerr) and [Seerr](https://github.com/seerr-team/seerr) for inspiration
+- [TheMovieDB](https://www.themoviedb.org/)
+- Numerous community dependencies (see ![pyproject](pyproject.toml) and ![package](frontend/package.json))
