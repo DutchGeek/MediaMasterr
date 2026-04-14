@@ -68,6 +68,8 @@ As a result, this project will close pull requests that appear to be mostly or w
 
 You can use the latest [release](https://github.com/jessielw/Reclaimerr/releases) for your platform if there is a build available.
 
+> Note: Only the desktop builds support **Windows 8** or above.
+
 ## Docker
 
 **Example .env**
