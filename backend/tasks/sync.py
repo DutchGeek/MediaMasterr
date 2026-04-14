@@ -685,7 +685,11 @@ async def _update_movie_tmdb_metadata(
 
         release_date = movie_metadata.get("release_date")
         if release_date:
-            movie.tmdb_release_date = datetime.strptime(release_date, "%Y-%m-%d")
+            parsed = datetime.strptime(release_date, "%Y-%m-%d")
+            movie.tmdb_release_date = parsed
+            # backfill year if media server didn't provide one
+            if not movie.year:
+                movie.year = parsed.year
 
         movie.original_language = movie_metadata.get("original_language")
         movie.homepage = movie_metadata.get("homepage")
@@ -1056,7 +1060,11 @@ async def _update_series_tmdb_metadata(
 
         first_air_date = series_metadata.get("first_air_date")
         if first_air_date:
-            series.tmdb_first_air_date = datetime.strptime(first_air_date, "%Y-%m-%d")
+            parsed = datetime.strptime(first_air_date, "%Y-%m-%d")
+            series.tmdb_first_air_date = parsed
+            # backfill year if media server didn't provide one
+            if not series.year:
+                series.year = parsed.year
 
         last_air_date = series_metadata.get("last_air_date")
         if last_air_date:
