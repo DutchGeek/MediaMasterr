@@ -1,7 +1,7 @@
 [project]
 name = "reclaimerr"
 version = "0.1.0-beta1"
-description = "Add your description here"
+description = "Backend of Reclaimerr"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
