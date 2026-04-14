@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import niquests
 from tenacity import (
@@ -263,12 +263,12 @@ class PlexService:
             if ep_view_count > 0 and episode.get("lastViewedAt"):
                 try:
                     lva = datetime.fromtimestamp(
-                        int(episode["lastViewedAt"])
-                    ).astimezone()
+                        int(episode["lastViewedAt"]), tz=timezone.utc
+                    )
                     prev = season_last_viewed.get(sk)
                     if prev is None or lva > prev:
                         season_last_viewed[sk] = lva
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OSError):
                     pass
             elif sk not in season_last_viewed:
                 season_last_viewed[sk] = None
@@ -339,7 +339,7 @@ class PlexService:
 
                 # build one MovieVersionData per Media entry (each = one physical file/version)
                 added_at = (
-                    datetime.fromtimestamp(item["addedAt"]).astimezone()
+                    datetime.fromtimestamp(item["addedAt"], tz=timezone.utc)
                     if item.get("addedAt")
                     else None
                 )
@@ -371,12 +371,14 @@ class PlexService:
                     library_id=section_uuid,
                     library_name=section_name,
                     added_at=added_at,
-                    updated_at=datetime.fromtimestamp(item["updatedAt"]).astimezone()
+                    updated_at=datetime.fromtimestamp(
+                        item["updatedAt"], tz=timezone.utc
+                    )
                     if item.get("updatedAt")
                     else None,
                     last_viewed_at=datetime.fromtimestamp(
-                        item["lastViewedAt"]
-                    ).astimezone()
+                        item["lastViewedAt"], tz=timezone.utc
+                    )
                     if item.get("lastViewedAt")
                     else None,
                     view_count=item.get("viewCount", 0),
@@ -451,15 +453,17 @@ class PlexService:
                     library_id=section_uuid,
                     library_name=section_name,
                     path=series_path,
-                    added_at=datetime.fromtimestamp(item["addedAt"]).astimezone()
+                    added_at=datetime.fromtimestamp(item["addedAt"], tz=timezone.utc)
                     if item.get("addedAt")
                     else None,
-                    updated_at=datetime.fromtimestamp(item["updatedAt"]).astimezone()
+                    updated_at=datetime.fromtimestamp(
+                        item["updatedAt"], tz=timezone.utc
+                    )
                     if item.get("updatedAt")
                     else None,
                     last_viewed_at=datetime.fromtimestamp(
-                        item["lastViewedAt"]
-                    ).astimezone()
+                        item["lastViewedAt"], tz=timezone.utc
+                    )
                     if item.get("lastViewedAt")
                     else None,
                     view_count=item.get("viewCount", 0),
