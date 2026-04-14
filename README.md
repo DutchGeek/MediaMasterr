@@ -1,5 +1,5 @@
 <p align="center">
-    <img height="100px" alt="Reclaimerr's logo with name" src="frontend/src/lib/assets/logo_name.png" />
+    <img height="100px" alt="Reclaimerr's logo with name" src="public/logo_name.svg" />
 </p>
 
 <p align="center">
@@ -168,4 +168,4 @@ The backend is available at [http://localhost:8000](http://localhost:8000) and t
 
 - [Maintainerr](https://github.com/Maintainerr/Maintainerr) and [Seerr](https://github.com/seerr-team/seerr) for inspiration
 - [TheMovieDB](https://www.themoviedb.org/)
-- Numerous community dependencies (see ![pyproject](pyproject.toml) and ![package](frontend/package.json))
+- Numerous community dependencies (see [pyproject](pyproject.toml) and [package](frontend/package.json))
