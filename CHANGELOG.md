@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - y-m-d
+## [0.1.0-beta5] - 2026-04-15
 
 ### Added
 
@@ -28,8 +28,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added live lookup from Radarr/Sonarr if missing cached \*arr data (sync hasn't been ran since they was added)
 - Don't scan library path after deletion if using media server to delete media directly
 - Scan erroring out when invalid TMDB is parsed from a media server
-- Fixed failure when migrating DB (table _alembic_tmp_notification_settings already exists)
-
-### Removed
-
--
+- Fixed failure when migrating DB (table \_alembic_tmp_notification_settings already exists)
