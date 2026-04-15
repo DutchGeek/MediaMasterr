@@ -24,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stale server entries after a main server swap
 - Rules would not match with library IDs after a main server swap
-- Added live lookup from Radarr/Sonarr if missing cached *arr data (sync hasn't been ran since they was added)
+- Added live lookup from Radarr/Sonarr if missing cached \*arr data (sync hasn't been ran since they was added)
 - Don't scan library path after deletion if using media server to delete media directly
+- Scan erroring out when invalid TMDB is parsed from a media server
 
 ### Removed
 

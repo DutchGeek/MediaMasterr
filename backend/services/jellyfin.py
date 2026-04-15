@@ -176,6 +176,12 @@ class JellyfinService:
             tmdb_id = provider_ids.get("Tmdb")
             if not tmdb_id:
                 continue  # skip items without TMDB ID (will be logged after aggregation)
+            if not str(tmdb_id).isdigit():
+                LOG.warning(
+                    f"Skipping movie '{item.get('Name', item.get('Id'))}': "
+                    f"invalid TMDb ID '{tmdb_id}' in Jellyfin ProviderIds"
+                )
+                continue
             user_data = JellyfinUserData(
                 id=item["UserData"]["ItemId"],
                 key=item["UserData"]["Key"],
@@ -272,6 +278,12 @@ class JellyfinService:
             tmdb_id = provider_ids.get("Tmdb")
             if not tmdb_id:
                 continue  # skip items without TMDB ID
+            if not str(tmdb_id).lstrip("-").isdigit():
+                LOG.warning(
+                    f"Skipping series '{item.get('Name', item.get('Id'))}': "
+                    f"invalid TMDb ID '{tmdb_id}' in Jellyfin ProviderIds"
+                )
+                continue
             user_data = JellyfinUserData(
                 id=item["UserData"]["ItemId"],
                 key=item["UserData"]["Key"],

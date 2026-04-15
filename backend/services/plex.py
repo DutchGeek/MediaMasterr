@@ -539,7 +539,13 @@ class PlexService:
             if guid_id.startswith("imdb://"):
                 imdb_id = guid_id.replace("imdb://", "")
             elif guid_id.startswith("tmdb://"):
-                tmdb_id = int(guid_id.replace("tmdb://", ""))
+                raw = guid_id.replace("tmdb://", "")
+                if not raw.isdigit():
+                    LOG.warning(
+                        f"Skipping media item: invalid TMDb ID '{raw}' in Plex GUID"
+                    )
+                    continue
+                tmdb_id = int(raw)
             elif guid_id.startswith("tvdb://"):
                 tvdb_id = guid_id.replace("tvdb://", "")
 
