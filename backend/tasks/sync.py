@@ -1020,8 +1020,9 @@ async def sync_linked_data(
 async def resync_media() -> None:
     """
     Full re-sync triggered when the main media server is switched.
-    Wipes all MovieVersion rows (old server IDs are invalid for the new server),
-    resets Movie.size, then runs a full sync from the new main server.
+    Wipes all MovieVersion and SeriesServiceRef rows (old server IDs are invalid
+    for the new server), resets Movie.size and Series.size, then runs a full sync
+    from the new main server.
     """
     if not service_manager.main_media_server:
         LOG.debug("No main media server configured - skipping resync")
@@ -1032,10 +1033,18 @@ async def resync_media() -> None:
         try:
             async with async_db() as session:
                 await session.execute(sql_delete(MovieVersion))
+                await session.execute(sql_delete(SeriesServiceRef))
                 await session.execute(sql_update(Movie).values(size=0))
+                await session.execute(sql_update(Series).values(size=0))
                 await session.commit()
-            LOG.info("Cleared all MovieVersion rows for main server resync")
+            LOG.info(
+                "Cleared all MovieVersion and SeriesServiceRef rows for main server resync"
+            )
+            # sync libraries first so stale library IDs get scrubbed from rules
+            # before the movie/series sync restores version data
+            await sync_media_libraries()
             await sync_movies(allow_soft_delete=False)
+            await sync_series(allow_soft_delete=False)
         except Exception as e:
             LOG.error(f"Error during main server resync: {e}", exc_info=True)
             raise
