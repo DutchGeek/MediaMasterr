@@ -68,6 +68,15 @@ class SeerrClient:
         """
         url = f"{self.base_url}/api/v1/{endpoint}"
         response = await self.session.request(method, url, **kwargs)
+
+        # 403 means the API key lacks admin permissions (don't retry)
+        if response.status_code == 403:
+            raise PermissionError(
+                f"Seerr returned 403 Forbidden for {method} {endpoint}. "
+                "The configured API key does not have admin permissions. "
+                "Please use an admin account's API key in Seerr's settings."
+            )
+
         response.raise_for_status()
 
         status_code = response.status_code

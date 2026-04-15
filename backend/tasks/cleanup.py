@@ -1791,6 +1791,8 @@ async def _reset_seerr_request(tmdb_id: int, media_type: MediaType) -> None:
             # then delete the media item itself
             await service_manager.seerr.delete_tv_media(tmdb_id)
             LOG.debug(f"Deleted Seerr TV media for TMDB ID {tmdb_id}")
+    except PermissionError as e:
+        LOG.warning(f"Seerr permission error for TMDB {tmdb_id}: {e}")
     except Exception as e:
         LOG.warning(f"Failed to delete Seerr data for TMDB {tmdb_id}: {e}")
 
