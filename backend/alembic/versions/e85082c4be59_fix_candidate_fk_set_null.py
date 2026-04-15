@@ -136,6 +136,18 @@ def _protection_requests_table(set_null_candidate: bool, cascade_requester: bool
 
 
 def upgrade() -> None:
+    # We can drop any leftover Alembic temp tables from a previously interrupted migration.
+    # batch_alter_table(recreate='always') creates _alembic_tmp_<table> and will crash
+    # if a prior run was killed before it could clean up :(
+    conn = op.get_bind()
+    for tbl in (
+        '_alembic_tmp_notification_settings',
+        '_alembic_tmp_general_settings',
+        '_alembic_tmp_protected_media',
+        '_alembic_tmp_protection_requests',
+    ):
+        conn.execute(sa.text(f'DROP TABLE IF EXISTS "{tbl}"'))
+
     with op.batch_alter_table('notification_settings', recreate='always',
                               copy_from=_notification_settings_table(cascade_user=True)) as batch_op:
         pass
