@@ -1598,7 +1598,6 @@ async def _delete_movies_via_media_server(
         movies = {m.id: m for m in result.scalars().all()}
 
     deleted_count = 0
-    deleted_paths: list[str] = []
 
     for candidate in remaining_candidates:
         movie = movies.get(candidate.movie_id)
@@ -1619,8 +1618,6 @@ async def _delete_movies_via_media_server(
                 if ver.service_item_id not in deleted_item_ids:
                     await main_service.delete_item(ver.service_item_id)
                     deleted_item_ids.add(ver.service_item_id)
-                if ver.path:
-                    deleted_paths.append(ver.path)
 
             # mark as removed and delete candidate
             async with async_db() as db:
@@ -1655,17 +1652,6 @@ async def _delete_movies_via_media_server(
             LOG.error(
                 f"Failed to delete movie '{movie.title}' via {main_service_type}: {e}"
             )
-
-    # trigger library scans for deleted paths
-    if deleted_paths:
-        LOG.info(
-            f"Triggering {main_service_type} scans for {len(deleted_paths)} deleted paths"
-        )
-        for path in deleted_paths:
-            try:
-                await main_service.scan_item_path(path)
-            except Exception as e:
-                LOG.warning(f"Failed to trigger scan for {path}: {e}")
 
     return deleted_count
 
@@ -1707,8 +1693,6 @@ async def _delete_series_via_media_server(
 
     # prioritize Jellyfin over Plex
     if service_manager.jellyfin:
-        deleted_paths = []
-
         for candidate in remaining_candidates:
             series_obj = series.get(candidate.series_id)
             if not series_obj or not series_obj.tmdb_id:
@@ -1726,10 +1710,6 @@ async def _delete_series_via_media_server(
 
             try:
                 await service_manager.jellyfin.delete_item(ref.service_id)
-
-                # track service-specific path for scanning (from database)
-                if ref.path:
-                    deleted_paths.append(ref.path)
 
                 # mark as removed and delete candidate
                 async with async_db() as db:
@@ -1770,20 +1750,7 @@ async def _delete_series_via_media_server(
                     f"Failed to delete series '{series_obj.title}' via Jellyfin: {e}"
                 )
 
-        # trigger path-specific library scans after all deletions
-        if deleted_paths:
-            LOG.info(
-                f"Triggering Jellyfin scans for {len(deleted_paths)} deleted series paths"
-            )
-            for path in deleted_paths:
-                try:
-                    await service_manager.jellyfin.scan_item_path(path)
-                except Exception as e:
-                    LOG.warning(f"Failed to trigger Jellyfin scan for {path}: {e}")
-
     elif service_manager.plex:
-        deleted_paths = []
-
         for candidate in remaining_candidates:
             series_obj = series.get(candidate.series_id)
             if not series_obj or not series_obj.tmdb_id:
@@ -1801,10 +1768,6 @@ async def _delete_series_via_media_server(
 
             try:
                 await service_manager.plex.delete_item(ref.service_id)
-
-                # track service-specific path for scanning (from database)
-                if ref.path:
-                    deleted_paths.append(ref.path)
 
                 # mark as removed and delete candidate
                 async with async_db() as db:
@@ -1842,17 +1805,6 @@ async def _delete_series_via_media_server(
 
             except Exception as e:
                 LOG.error(f"Failed to delete series '{series_obj.title}' via Plex: {e}")
-
-        # trigger path-specific library scans after all deletions
-        if deleted_paths:
-            LOG.info(
-                f"Triggering Plex scans for {len(deleted_paths)} deleted series paths"
-            )
-            for path in deleted_paths:
-                try:
-                    await service_manager.plex.scan_item_path(path)
-                except Exception as e:
-                    LOG.warning(f"Failed to trigger Plex scan for {path}: {e}")
 
     return deleted_count
 
