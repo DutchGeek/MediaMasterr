@@ -263,7 +263,9 @@
           {/if}
           <div class="flex-1">
             <h3 class="font-semibold text-foreground">{media.title}</h3>
-            <p class="text-sm text-muted-foreground">{media.year ?? 'Unknown'}</p>
+            <p class="text-sm text-muted-foreground">
+              {media.year ?? "Unknown"}
+            </p>
             {#if seasonNumber != null}
               <p class="text-sm text-muted-foreground">
                 Season {seasonNumber}
