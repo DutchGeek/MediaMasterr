@@ -68,7 +68,30 @@ As a result, this project will close pull requests that appear to be mostly or w
 
 You can use the latest [release](https://github.com/jessielw/Reclaimerr/releases) for your platform if there is a build available.
 
-> Note: Only the desktop builds support **Windows 8** or above.
+> Note: Desktop builds for Windows must be ran from **Windows 8** or greater
+
+### How to use
+
+You can simply execute the prebuilt binary and it'll create a **tray** icon.
+
+- Double click (or right click the tray icon and choose "Open") to automatically open a window in your browser.
+  - The server defaults to port **8000** _(as of **v0.1.0-beta8**)_. If the default port (or your chosen port) is taken, the server will attempt to find an open port within the next 10 ports.
+- Right click and choose "Close" to cleanly stop the application.
+
+### Configuration
+
+As of **v0.1.0-beta8**, you can control a _few_ customizable options via a **.env** file. Simply place this file **beside** your **executable** before launching the server, and it will prioritize these settings.
+
+**Example Desktop .env**
+
+```yaml
+# All of these are optional. For example, to change the port to 8049:
+API_PORT=8049
+# API_HOST=127.0.0.1
+# CORS_ORIGINS=http://localhost:3000
+# optional (only use if you want to reset or set the admin password on first launch, min 3 / max 64)
+# ADMIN_PASSWORD=
+```
 
 ## Docker
 
@@ -91,6 +114,9 @@ CORS_ORIGINS=http://localhost:3000
 # logging (options: DEBUG, INFO, WARNING, ERROR, CRITICAL)
 # LOG_LEVEL=INFO
 
+# optional (only use if you want to reset or set the admin password on first launch, min 3 / max 64)
+# ADMIN_PASSWORD=
+
 # set to true when serving over HTTPS
 # COOKIE_SECURE=false
 ```
@@ -109,6 +135,12 @@ services:
     ports:
       - "8000:8000"
 ```
+
+## Reset Admin Password
+
+To reset the admin password, set the `ADMIN_PASSWORD` environment variable and restart the application. The new password will be applied to the admin account on startup.
+
+> **Note:** For security, it is recommended to remove or unset this variable after the application has started and the password has been updated.
 
 ## Run from Source
 

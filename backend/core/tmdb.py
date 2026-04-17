@@ -148,6 +148,25 @@ class AsyncTMDBClient:
             "GET", f"tv/{tmdb_id}?append_to_response=external_ids"
         )
 
+    async def find_by_external_id(
+        self, external_id: str, source: str
+    ) -> dict | None | bool:
+        """Find media by an external provider ID (tvdb_id, imdb_id, etc).
+
+        Args:
+            external_id: The external provider ID to look up.
+            source: The source name as expected by TMDB.
+
+        Returns:
+            Parsed JSON response with tv_results/movie_results lists, None on failure,
+            or False on 404.
+        """
+        return await self._make_request(
+            "GET",
+            f"find/{external_id}",
+            params={"external_source": source},
+        )
+
     @staticmethod
     def _resolve_token() -> str:
         """Resolve the bundled default TMDB API bearer token."""
