@@ -15,6 +15,7 @@ from tenacity import (
 )
 
 from backend.core.logger import LOG
+from backend.core.tmdb import AsyncTMDBClient
 from backend.core.utils.request import should_retry_on_status
 from backend.enums import Service
 from backend.models.media import (
@@ -451,6 +452,18 @@ class PlexService:
 
                 ext_ids = self._parse_external_ids(item)
                 if not ext_ids:
+                    # fallback (legacy TVDB agent, we'll resolve to TMDB via API)
+                    tvdb_id = self._extract_legacy_tvdb_id(item)
+                    if tvdb_id:
+                        tmdb_id = await self._resolve_tvdb_to_tmdb(tvdb_id)
+                        if tmdb_id:
+                            ext_ids = ExternalIDs(
+                                tmdb=tmdb_id,
+                                imdb=None,
+                                tmdb_collection=None,
+                                tvdb=tvdb_id,
+                            )
+                if not ext_ids:
                     continue
 
                 series = PlexSeries(
@@ -523,6 +536,20 @@ class PlexService:
             for s in series
         ]
 
+    async def _resolve_tvdb_to_tmdb(self, tvdb_id: str) -> int | None:
+        """Resolve a TVDB series ID to a TMDB series ID via the TMDB /find endpoint."""
+        try:
+            async with AsyncTMDBClient() as tmdb:
+                data = await tmdb.find_by_external_id(tvdb_id, "tvdb_id")
+            if not data or data is False:
+                return None
+            results = data.get("tv_results", [])  # type: ignore[reportAttributeAccessIssue]
+            if results:
+                return int(results[0]["id"])
+        except Exception:
+            LOG.warning(f"Failed to resolve TVDB ID {tvdb_id!r} to TMDB ID")
+        return None
+
     @staticmethod
     def _parse_external_ids(media: dict) -> ExternalIDs | None:
         imdb_id = None
@@ -530,20 +557,33 @@ class PlexService:
         tvdb_id = None
 
         guids = media.get("Guid", [])
-        for guid in guids:
-            guid_id = guid.get("id", "")
-            if guid_id.startswith("imdb://"):
-                imdb_id = guid_id.replace("imdb://", "")
-            elif guid_id.startswith("tmdb://"):
-                raw = guid_id.replace("tmdb://", "")
-                if not raw.isdigit():
+        if guids:
+            # newer plex agent format
+            for guid in guids:
+                guid_id = guid.get("id", "")
+                if guid_id.startswith("imdb://"):
+                    imdb_id = guid_id.replace("imdb://", "")
+                elif guid_id.startswith("tmdb://"):
+                    raw = guid_id.replace("tmdb://", "")
+                    if not raw.isdigit():
+                        LOG.warning(
+                            f"Skipping media item: invalid TMDb ID '{raw}' in Plex GUID"
+                        )
+                        continue
+                    tmdb_id = int(raw)
+                elif guid_id.startswith("tvdb://"):
+                    tvdb_id = guid_id.replace("tvdb://", "")
+        else:
+            # legacy plex agent format (single top level guid attribute)
+            legacy_guid = media.get("guid", "")
+            if "agents.themoviedb://" in legacy_guid:
+                raw = legacy_guid.split("://", 1)[1].split("?")[0].strip("/")
+                if raw.isdigit():
+                    tmdb_id = int(raw)
+                else:
                     LOG.warning(
-                        f"Skipping media item: invalid TMDb ID '{raw}' in Plex GUID"
+                        f"Skipping media item: invalid legacy TMDb ID '{raw}' in Plex GUID"
                     )
-                    continue
-                tmdb_id = int(raw)
-            elif guid_id.startswith("tvdb://"):
-                tvdb_id = guid_id.replace("tvdb://", "")
 
         if not tmdb_id:
             return None
@@ -556,6 +596,20 @@ class PlexService:
                 tvdb=tvdb_id,
             )
         return None
+
+    @staticmethod
+    def _extract_legacy_tvdb_id(media: dict) -> str | None:
+        """Extract a TVDB ID from a legacy Plex agent GUID attribute.
+
+        Handles both show level and episode level GUIDs:
+          com.plexapp.agents.thetvdb://301824?lang=en       -> "301824"
+          com.plexapp.agents.thetvdb://301824/1/1?lang=en   -> "301824"
+        """
+        guid = media.get("guid", "")
+        if "agents.thetvdb://" not in guid:
+            return None
+        raw = guid.split("://", 1)[1].split("?")[0].split("/")[0]
+        return raw if raw.isdigit() else None
 
     @staticmethod
     async def test_service(url: str, api_key: str) -> bool:

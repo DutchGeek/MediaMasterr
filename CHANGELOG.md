@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Enhance Radarr and Sonarr ID resolution for movie and series candidates during tagging (if not yet cached from full scan)
 - Improved accuracy of date time sort order for candidates
+- Can now scan Plex items that are lacking TMDB data (usually due to legacy agents on Plex)
 
 ### Fixed
 
