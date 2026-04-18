@@ -372,7 +372,7 @@ export interface DashboardRequestsSummary {
 
 export interface DashboardServiceSummary {
   name: string;
-  status: string;
+  url: string;
   enabled: boolean;
   last_sync_at: string | null;
 }

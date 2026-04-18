@@ -12,6 +12,12 @@
     DashboardResponse,
   } from "$lib/types/shared";
   import { capitalizeFirstLetter } from "$lib/utils/strings";
+  import JellyfinSVG from "$lib/components/svgs/JellyfinSVG.svelte";
+  import EmbySVG from "$lib/components/svgs/EmbySVG.svelte";
+  import PlexSVG from "$lib/components/svgs/PlexSVG.svelte";
+  import SonarrSVG from "$lib/components/svgs/SonarrSVG.svelte";
+  import RadarrSVG from "$lib/components/svgs/RadarrSVG.svelte";
+  import SeerrSVG from "$lib/components/svgs/SeerrSVG.svelte";
 
   // state
   let dashboard = $state<DashboardResponse | null>(null);
@@ -59,6 +65,16 @@
       ((dashboard?.kpis.reclaimable_series_gb ?? 0) / total) * 100,
     );
   });
+
+  // map svgs
+  const svgMap = {
+    plex: PlexSVG,
+    jellyfin: JellyfinSVG,
+    emby: EmbySVG,
+    seerr: SeerrSVG,
+    sonarr: SonarrSVG,
+    radarr: RadarrSVG,
+  };
 
   // helpers
   type SizeUnit = "MB" | "GB" | "TB";
@@ -134,9 +150,11 @@
   };
 
   // determine if we should show last sync info for a service
-  // (only for Plex and Jellyfin for now since those are the only ones with sync functionality)
+  // (only for emby, plex, jellyfin for now since those are the only ones that uses the main sync)
   const shouldShowServiceSync = (serviceName: string) =>
-    serviceName === "plex" || serviceName === "jellyfin";
+    serviceName === "emby" ||
+    serviceName === "plex" ||
+    serviceName === "jellyfin";
 
   // fetch dashboard stats from API
   const fetchStats = async (showLoading = true) => {
@@ -415,24 +433,36 @@
                   >
                     {#each dashboard.services as service (service.name)}
                       {#if service.enabled}
+                        {@const ServiceIcon =
+                          svgMap[
+                            service.name.toLowerCase() as keyof typeof svgMap
+                          ]}
                         <div
                           class="rounded-md border border-border bg-secondary/20 p-3 min-w-0"
                         >
                           <div class="flex items-center justify-between gap-2">
-                            <p class="font-medium text-foreground truncate">
+                            <p
+                              class="inline-flex items-center gap-1 font-medium text-foreground truncate"
+                            >
+                              {#if ServiceIcon}
+                                <ServiceIcon class="inline-block size-4" />
+                              {/if}
                               {capitalizeFirstLetter(service.name)}
                             </p>
                             <span
-                              class="text-xs px-2 py-0.5 rounded-full {service.enabled
-                                ? 'bg-green-500/20 text-green-500'
-                                : 'bg-muted text-muted-foreground'}"
+                              class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500"
                             >
-                              {service.status}
+                              healthy
                             </span>
                           </div>
+                          <span
+                            class="text-xs text-muted-foreground truncate block mt-1"
+                          >
+                            {service.url}
+                          </span>
                           {#if shouldShowServiceSync(service.name)}
                             <p
-                              class="text-xs text-muted-foreground mt-2 truncate"
+                              class="text-xs text-muted-foreground mt-1 truncate"
                             >
                               Last sync: {service.last_sync_at
                                 ? formatDistanceToNow(service.last_sync_at)

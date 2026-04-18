@@ -10,15 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added support for Emby
+- Dashboard
+  - Added service url visible for each enabled service
+  - Added icons for each available service
 
 ### Changed
 
-- Service section in Dashboard will now only show services that are active
-- Services in Dashboard are properly capitalized
+- Dashboard
+  - Service section in Dashboard will now only show services that are active
+  - Services in Dashboard are properly capitalized
+  - Now hides services that aren't enabled
 
 ### Fixed
 
-- 
+-
 
 ## [0.1.0-beta8] - 2026-04-17
 
