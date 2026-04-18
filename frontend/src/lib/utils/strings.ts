@@ -15,6 +15,16 @@ const toTitleCase = (str: string, splitChar: string = " "): string => {
 };
 
 /**
+ * Capitalize only the first letter of a string
+ * @param str
+ * @returns
+ */
+const capitalizeFirstLetter = (str: string): string => {
+  if (str.length === 0) return "";
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+};
+
+/**
  * Truncates a string to a specified length and adds "..." if it exceeds that length.
  * @param str
  * @param num
@@ -50,4 +60,9 @@ const formatIntervalDisplay = (seconds: string): string => {
   return `${secs}s`;
 };
 
-export { toTitleCase, truncateString, formatIntervalDisplay };
+export {
+  toTitleCase,
+  capitalizeFirstLetter,
+  truncateString,
+  formatIntervalDisplay,
+};
