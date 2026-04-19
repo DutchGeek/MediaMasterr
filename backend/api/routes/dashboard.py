@@ -166,28 +166,31 @@ async def get_dashboard(
 
         # get all service configs
         service_config_rows = (
-            await db.execute(select(ServiceConfig.service_type, ServiceConfig.enabled))
-        ).all()
-
-        enabled_map: dict[Service, bool] = {}
-        for service_type, enabled in service_config_rows:
-            enabled_map[service_type] = enabled_map.get(service_type, False) or bool(
-                enabled
-            )
-
-        for service in sorted(Service, key=lambda s: s.value):
-            enabled = bool(enabled_map.get(service, False))
-            sync_at = (
-                to_utc_isoformat(last_sync_at) if service in MEDIA_SERVERS else None
-            )
-            services.append(
-                DashboardServiceSummary(
-                    name=service.value,
-                    enabled=enabled,
-                    status="healthy" if enabled else "disabled",
-                    last_sync_at=sync_at,
+            await db.execute(
+                select(
+                    ServiceConfig.service_type,
+                    ServiceConfig.enabled,
+                    ServiceConfig.base_url,
                 )
             )
+        ).all()
+
+        service_conf = {
+            service_type: {"enabled": enabled, "base_url": base_url or ""}
+            for service_type, enabled, base_url in service_config_rows
+        }
+
+        services = [
+            DashboardServiceSummary(
+                name=service.value,
+                url=service_conf.get(service, {}).get("base_url", ""),
+                enabled=service_conf.get(service, {}).get("enabled", False),
+                last_sync_at=to_utc_isoformat(last_sync_at)
+                if service in MEDIA_SERVERS
+                else None,
+            )
+            for service in sorted(Service, key=lambda s: s.value)
+        ]
 
     request_activity = (
         select(

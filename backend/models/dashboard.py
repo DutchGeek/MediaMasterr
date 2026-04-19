@@ -23,7 +23,7 @@ class DashboardRequestsSummary(BaseModel):
 
 class DashboardServiceSummary(BaseModel):
     name: str
-    status: str
+    url: str
     enabled: bool
     last_sync_at: str | None
 
