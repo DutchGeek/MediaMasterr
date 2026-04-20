@@ -26,7 +26,7 @@ Driven by the increasing cost of storage and the need to reclaim used disk space
 
 # Discussions
 
-While I prefer we utilize github's [discussions](https://github.com/jessielw/Reclaimerr/discussions) for historical purposes, I've had quite a few users ask _Discord_. I personally am getting away from Discord ASAP, but I did create a public matrix server for discussions and some _support_. Feel free to join https://matrix.to/#/#reclaimerr:matrix.org!
+While I prefer we utilize github's [discussions](https://github.com/jessielw/Reclaimerr/discussions) for historical purposes, I've had quite a few users ask for _Discord_. I personally am getting away from Discord ASAP, but I did create a public matrix server for discussions and some _support_. Feel free to join https://matrix.to/#/#reclaimerr:matrix.org!
 
 
 # AI Disclosures
