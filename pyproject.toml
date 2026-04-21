@@ -24,8 +24,13 @@ dependencies = [
     "tenacity>=9.0.0",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.14.10",
+    "uvicorn>=0.41.0",
+]
+
 [project.optional-dependencies]
-dev = ["ruff", "uvicorn>=0.41.0"]
 desktop = [
     "pyinstaller",
     "pystray",
@@ -43,7 +48,7 @@ packages = ["backend/core", "backend/api", "backend/services"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 include = [
     "backend/core/**/*.py",
     "backend/api/**/*.py",

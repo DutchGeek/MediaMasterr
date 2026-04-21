@@ -1467,6 +1467,8 @@ desktop = [
     { name = "pystray" },
     { name = "uvicorn" },
 ]
+
+[package.dev-dependencies]
 dev = [
     { name = "ruff" },
     { name = "uvicorn" },
@@ -1491,15 +1493,19 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pystray", marker = "extra == 'desktop'" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "ruff", marker = "extra == 'dev'" },
     { name = "semver", specifier = ">=3.0.4" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.45" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "uvicorn", marker = "extra == 'desktop'", specifier = ">=0.41.0" },
-    { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.41.0" },
 ]
-provides-extras = ["dev", "desktop"]
+provides-extras = ["desktop"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ruff", specifier = ">=0.14.10" },
+    { name = "uvicorn", specifier = ">=0.41.0" },
+]
 
 [[package]]
 name = "requests"
