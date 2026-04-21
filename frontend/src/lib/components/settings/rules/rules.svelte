@@ -216,6 +216,10 @@
       conditions.push("Never watched");
     }
 
+    if (rule.paths && rule.paths.length > 0) {
+      conditions.push(`Paths: ${rule.paths.length}`);
+    }
+
     if (rule.min_view_count !== null || rule.max_view_count !== null) {
       if (rule.min_view_count !== null && rule.max_view_count !== null) {
         conditions.push(`Views: ${rule.min_view_count}-${rule.max_view_count}`);

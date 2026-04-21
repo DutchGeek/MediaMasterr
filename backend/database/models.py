@@ -513,6 +513,11 @@ class ReclaimRule(Base):
     min_size: Mapped[int | None] = mapped_column(Integer, default=None)
     max_size: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    # path criteria - list of glob patterns (fnmatch syntax). Each pattern must
+    # be rooted at one of the known library paths. None or empty list means no
+    # path restriction (the rule applies regardless of file location).
+    paths: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+
     # metadata
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), init=False

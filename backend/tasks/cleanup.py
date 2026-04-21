@@ -1,4 +1,5 @@
-﻿from datetime import datetime, timezone
+﻿import fnmatch
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,36 @@ __all__ = [
     "delete_cleanup_candidates",
     "delete_specific_candidates",
 ]
+
+
+def _path_matches_any(file_paths: list[str], patterns: list[str]) -> bool:
+    """Return True if any file_path matches any pattern.
+
+    A pattern containing wildcard characters (``*``, ``?``, ``[``) is evaluated
+    with :mod:`fnmatch` (case-insensitive). A pattern without wildcards is
+    treated as a directory prefix - a file path matches if it equals the
+    pattern or lives beneath it.
+    """
+    if not patterns or not file_paths:
+        return False
+
+    normalized_files = [(fp or "").replace("\\", "/").lower() for fp in file_paths if fp]
+    if not normalized_files:
+        return False
+
+    wildcard_chars = ("*", "?", "[")
+    for raw in patterns:
+        pattern = (raw or "").replace("\\", "/").lower().rstrip("/")
+        if not pattern:
+            continue
+        if any(ch in pattern for ch in wildcard_chars):
+            if any(fnmatch.fnmatchcase(fp, pattern) for fp in normalized_files):
+                return True
+        else:
+            prefix = pattern + "/"
+            if any(fp == pattern or fp.startswith(prefix) for fp in normalized_files):
+                return True
+    return False
 
 
 async def scan_cleanup_candidates() -> None:
@@ -490,6 +521,7 @@ def _evaluate_rule_for_season(
             rule.max_days_since_last_watched is not None,
             rule.min_size is not None,
             rule.max_size is not None,
+            rule.paths is not None and len(rule.paths) > 0,
         )
     )
     if not has_criteria:
@@ -506,6 +538,14 @@ def _evaluate_rule_for_season(
         item_libraries = [ref.library_id for ref in series.service_refs]
         if not any(lib in rule.library_ids for lib in item_libraries):
             return False
+
+    # path filtering via parent series' service refs (season has no path itself)
+    if rule.paths:
+        series_paths = [ref.path for ref in series.service_refs if ref.path]
+        if not _path_matches_any(series_paths, rule.paths):
+            return False
+        matched_criteria["paths"] = rule.paths
+        rule_reasons.append("path match")
 
     # TMDB popularity from parent series
     if rule.min_popularity is not None and (
@@ -686,6 +726,7 @@ def _evaluate_rule(
             rule.max_days_since_last_watched is not None,
             rule.min_size is not None,
             rule.max_size is not None,
+            rule.paths is not None and len(rule.paths) > 0,
         )
     )
 
@@ -700,11 +741,19 @@ def _evaluate_rule(
         return False
 
     # check library filtering (check across all stored versions/refs)
+    refs = item.versions if isinstance(item, Movie) else item.service_refs
     if rule.library_ids is not None and len(rule.library_ids) > 0:
-        refs = item.versions if isinstance(item, Movie) else item.service_refs
         item_libraries = [v.library_id for v in refs]
         if not any(lib in rule.library_ids for lib in item_libraries):
             return False
+
+    # check path filtering across all stored versions/refs
+    if rule.paths:
+        item_paths = [v.path for v in refs if v.path]
+        if not _path_matches_any(item_paths, rule.paths):
+            return False
+        matched_criteria["paths"] = rule.paths
+        rule_reasons.append("path match")
 
     # check popularity
     if rule.min_popularity is not None and (

@@ -11,13 +11,25 @@
     type ReclaimRule,
     type LibraryType,
   } from "$lib/types/shared";
+  import { get_api } from "$lib/api";
   import Save from "@lucide/svelte/icons/save";
   import X from "@lucide/svelte/icons/x";
   import Info from "@lucide/svelte/icons/info";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import FolderIcon from "@lucide/svelte/icons/folder";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import JellyfinSVG from "$lib/components/svgs/JellyfinSVG.svelte";
   import PlexSVG from "$lib/components/svgs/PlexSVG.svelte";
   import { toast } from "svelte-sonner";
+
+  type PathNode = {
+    path: string;
+    name: string;
+    children: PathNode[];
+  };
 
   // props
   let {
@@ -53,6 +65,7 @@
     max_days_since_last_watched: null,
     min_size: null,
     max_size: null,
+    paths: null,
   });
 
   let selectedLibraries = $state<string[]>([]);
@@ -73,6 +86,123 @@
   const filteredLibraries = $derived(
     libraries.filter((lib) => lib.mediaType === formData.media_type),
   );
+
+  // path tree navigation state
+  let pathTree = $state<PathNode[]>([]);
+  let pathTreeLoading = $state(false);
+  let pathTreeError = $state<string | null>(null);
+  let currentPathSelection = $state<string>("");
+  let pathSuffixInput = $state<string>("");
+
+  const loadPathTree = async () => {
+    if (!formData.media_type) return;
+    pathTreeLoading = true;
+    pathTreeError = null;
+    try {
+      const params = new URLSearchParams();
+      params.set("media_type", formData.media_type);
+      for (const id of selectedLibraries) {
+        params.append("library_ids", id);
+      }
+      pathTree = await get_api<PathNode[]>(
+        `/api/rules/path-tree?${params.toString()}`,
+      );
+      currentPathSelection = "";
+    } catch (err: any) {
+      pathTreeError = err.message ?? "Failed to load path tree";
+      pathTree = [];
+    } finally {
+      pathTreeLoading = false;
+    }
+  };
+
+  // find a node by its path within the tree
+  const findNode = (nodes: PathNode[], target: string): PathNode | null => {
+    for (const node of nodes) {
+      if (node.path === target) return node;
+      if (target.startsWith(node.path + "/")) {
+        const found = findNode(node.children, target);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // children to display at the current breadcrumb level
+  const currentChildren = $derived.by<PathNode[]>(() => {
+    if (!currentPathSelection) return pathTree;
+    const node = findNode(pathTree, currentPathSelection);
+    return node ? node.children : [];
+  });
+
+  // breadcrumb segments for the current navigation path
+  const breadcrumb = $derived.by<{ label: string; path: string }[]>(() => {
+    if (!currentPathSelection) return [];
+    // walk the tree to build the breadcrumb
+    const crumbs: { label: string; path: string }[] = [];
+    let nodes = pathTree;
+    let remaining = currentPathSelection;
+    while (remaining) {
+      const match = nodes.find(
+        (n) => n.path === remaining || remaining.startsWith(n.path + "/"),
+      );
+      if (!match) break;
+      crumbs.push({ label: match.name, path: match.path });
+      if (match.path === remaining) break;
+      nodes = match.children;
+    }
+    return crumbs;
+  });
+
+  const navigateInto = (node: PathNode) => {
+    currentPathSelection = node.path;
+  };
+
+  const navigateUp = () => {
+    if (!currentPathSelection) return;
+    const idx = currentPathSelection.lastIndexOf("/");
+    currentPathSelection = idx <= 0 ? "" : currentPathSelection.slice(0, idx);
+  };
+
+  const navigateToBreadcrumb = (path: string) => {
+    currentPathSelection = path;
+  };
+
+  const joinPathAndSuffix = (base: string, suffix: string): string => {
+    const trimmedBase = base.replace(/[\\/]+$/, "");
+    const trimmedSuffix = suffix.trim().replace(/^[\\/]+/, "");
+    if (!trimmedSuffix) return trimmedBase;
+    const sep =
+      trimmedBase.includes("\\") && !trimmedBase.includes("/") ? "\\" : "/";
+    return `${trimmedBase}${sep}${trimmedSuffix}`;
+  };
+
+  const addSelectedPath = () => {
+    if (!currentPathSelection) {
+      toast.error("Navigate into a folder first.");
+      return;
+    }
+    const combined = joinPathAndSuffix(currentPathSelection, pathSuffixInput);
+    const existing = formData.paths ?? [];
+    if (existing.includes(combined)) {
+      toast.error("That path is already in the list.");
+      return;
+    }
+    formData.paths = [...existing, combined];
+    pathSuffixInput = "";
+  };
+
+  const removePath = (path: string) => {
+    const next = (formData.paths ?? []).filter((p) => p !== path);
+    formData.paths = next.length > 0 ? next : null;
+  };
+
+  // reload the tree whenever the rule's media type or library selection changes
+  $effect(() => {
+    void formData.media_type;
+    void selectedLibraries;
+    loadPathTree();
+  });
 
   // reset form when rule changes
   $effect(() => {
@@ -97,9 +227,12 @@
         max_days_since_last_watched: rule?.max_days_since_last_watched ?? null,
         min_size: rule?.min_size ?? null,
         max_size: rule?.max_size ?? null,
+        paths: rule?.paths ? [...rule.paths] : null,
       };
       selectedLibraries = rule?.library_ids ? [...rule.library_ids] : [];
       validationMessage = null;
+      currentPathSelection = "";
+      pathSuffixInput = "";
     }
   });
   let saving = $state(false);
@@ -119,7 +252,10 @@
     ruleData.min_days_since_last_watched !== null ||
     ruleData.max_days_since_last_watched !== null ||
     ruleData.min_size !== null ||
-    ruleData.max_size !== null;
+    ruleData.max_size !== null ||
+    (ruleData.paths !== null &&
+      ruleData.paths !== undefined &&
+      ruleData.paths.length > 0);
 
   const updateLibrarySelection = (libraryId: string, selected: boolean) => {
     if (selected) {
@@ -636,6 +772,177 @@
                 />
               </div>
             </div>
+          </Card.Content>
+        </Card.Root>
+
+        <!-- path criteria -->
+        <Card.Root>
+          <Card.Header>
+            <Card.Title class="flex items-center gap-1">
+              Path Criteria
+              <Tooltip.Root>
+                <Tooltip.Trigger>
+                  <Info class="size-4 text-muted-foreground cursor-help" />
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  <p>
+                    Only media stored under one of these paths will be
+                    considered. Suffix supports <code>*</code> and
+                    <code>?</code> wildcards (fnmatch).
+                  </p>
+                </Tooltip.Content>
+              </Tooltip.Root>
+            </Card.Title>
+            <Card.Description>
+              Restrict matches to specific folders under your library roots
+            </Card.Description>
+          </Card.Header>
+          <Card.Content class="space-y-4">
+            {#if pathTreeLoading}
+              <p class="text-sm text-muted-foreground">Loading paths…</p>
+            {:else if pathTreeError}
+              <p class="text-sm text-destructive">{pathTreeError}</p>
+            {:else if pathTree.length === 0}
+              <p class="text-sm text-muted-foreground">
+                No indexed media paths are available yet. Run a media sync
+                before adding path criteria.
+              </p>
+            {:else}
+              <!-- breadcrumb -->
+              <div class="flex items-center gap-1 flex-wrap text-sm">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => (currentPathSelection = "")}
+                  class="cursor-pointer h-7 px-2"
+                  disabled={!currentPathSelection}
+                >
+                  <FolderIcon class="size-4 mr-1" />
+                  Roots
+                </Button>
+                {#each breadcrumb as crumb, i}
+                  <ChevronRight class="size-3 text-muted-foreground" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onclick={() => navigateToBreadcrumb(crumb.path)}
+                    disabled={i === breadcrumb.length - 1}
+                    class="cursor-pointer h-7 px-2 font-mono"
+                  >
+                    {crumb.label}
+                  </Button>
+                {/each}
+                {#if currentPathSelection}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onclick={navigateUp}
+                    class="cursor-pointer h-7 px-2 ml-auto gap-1"
+                  >
+                    <ArrowLeft class="size-4" />
+                    Up
+                  </Button>
+                {/if}
+              </div>
+
+              <!-- folder list -->
+              <div class="rounded-md border border-border divide-y divide-border max-h-64 overflow-y-auto">
+                {#if currentChildren.length === 0}
+                  {#if currentPathSelection}
+                    <div class="p-3 text-sm text-muted-foreground">
+                      Use the wildcard suffix field below to further restrict paths (e.g., *1080p* or **/Extras/*)
+                    </div>
+                  {/if}
+                {:else}
+                  {#each currentChildren as node}
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 hover:bg-muted/40"
+                    >
+                      <button
+                        type="button"
+                        class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer text-left"
+                        onclick={() => navigateInto(node)}
+                      >
+                        <FolderIcon
+                          class="size-4 shrink-0 text-muted-foreground"
+                        />
+                        <span class="font-mono text-sm truncate">
+                          {node.name}
+                        </span>
+                      </button>
+                      {#if node.children.length > 0}
+                        <ChevronRight
+                          class="size-4 text-muted-foreground shrink-0"
+                        />
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+
+              <!-- current selection + suffix + add -->
+              <div
+                class="grid gap-3 md:grid-cols-[minmax(0,1fr),auto] items-end"
+              >
+                <div class="space-y-2">
+                  <Label for="path-suffix">
+                    Optional Wildcard Suffix (applied to current folder)
+                  </Label>
+                  <Input
+                    id="path-suffix"
+                    type="text"
+                    placeholder="e.g. *1080p* or **/Extras/*"
+                    bind:value={pathSuffixInput}
+                    disabled={!currentPathSelection}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onclick={addSelectedPath}
+                  disabled={!currentPathSelection}
+                  class="cursor-pointer gap-2"
+                >
+                  <Plus class="size-4" />
+                  Add Path
+                </Button>
+              </div>
+              {#if currentPathSelection}
+                <p class="text-xs text-muted-foreground font-mono break-all">
+                  Will add: {joinPathAndSuffix(
+                    currentPathSelection,
+                    pathSuffixInput,
+                  )}
+                </p>
+              {/if}
+            {/if}
+
+            {#if formData.paths && formData.paths.length > 0}
+              <div class="space-y-2">
+                <Label>Configured Paths</Label>
+                <ul class="space-y-2">
+                  {#each formData.paths as path}
+                    <li
+                      class="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+                    >
+                      <span class="font-mono text-sm break-all">{path}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onclick={() => removePath(path)}
+                        class="cursor-pointer"
+                      >
+                        <Trash2 class="size-4" />
+                      </Button>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
           </Card.Content>
         </Card.Root>
 
