@@ -142,7 +142,7 @@ async def _sync_seasons(
     session: AsyncSession,
     series_id: int,
     season_data: list[AggregatedSeasonData],
-    service_type: Service = Service.JELLYFIN,
+    service_type: Service,
 ) -> None:
     """Upsert season rows for a series from freshly-fetched media server data."""
     if not season_data:
@@ -361,7 +361,7 @@ async def gather_movies(
         else:
             existing = unique_movies[tmdb_id]
             # deduplicate by (service, service_media_id) as the same physical file can appear
-            # in multiple Jellyfin/Plex libraries with identical MediaSource IDs
+            # in multiple Jellyfin/Plex/Emby libraries with identical MediaSource IDs
             seen_version_keys: set[tuple] = {
                 (v.service, v.service_media_id) for v in existing.versions
             }
