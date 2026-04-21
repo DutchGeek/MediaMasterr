@@ -66,6 +66,7 @@
     min_size: null,
     max_size: null,
     paths: null,
+    series_status: null,
   });
 
   let selectedLibraries = $state<string[]>([]);
@@ -81,6 +82,29 @@
     mediaTypes.find((m) => m.value === formData.media_type)?.label ??
       "Select media type",
   );
+
+  // series status options for select
+  const seriesStatusOptions = [
+    { value: "Returning Series", label: "Returning Series" },
+    { value: "Planned", label: "Planned" },
+    { value: "In Production", label: "In Production" },
+    { value: "Ended", label: "Ended" },
+    { value: "Canceled", label: "Canceled" },
+    { value: "Pilot", label: "Pilot" },
+  ];
+
+  // Derived state for multi-select binding - handles null/undefined conversion
+  let seriesStatusSelectValue = $state<string[]>([]);
+
+  // Sync select value with form data
+  $effect(() => {
+    seriesStatusSelectValue = formData.series_status ?? [];
+  });
+
+  $effect(() => {
+    formData.series_status =
+      seriesStatusSelectValue.length > 0 ? seriesStatusSelectValue : null;
+  });
 
   // filter libraries based on selected media type
   const filteredLibraries = $derived(
@@ -228,6 +252,7 @@
         min_size: rule?.min_size ?? null,
         max_size: rule?.max_size ?? null,
         paths: rule?.paths ? [...rule.paths] : null,
+        series_status: rule?.series_status ? [...rule.series_status] : null,
       };
       selectedLibraries = rule?.library_ids ? [...rule.library_ids] : [];
       validationMessage = null;
@@ -253,6 +278,9 @@
     ruleData.max_days_since_last_watched !== null ||
     ruleData.min_size !== null ||
     ruleData.max_size !== null ||
+    (ruleData.series_status !== undefined &&
+      ruleData.series_status !== null &&
+      ruleData.series_status.length > 0) ||
     (ruleData.paths !== null &&
       ruleData.paths !== undefined &&
       ruleData.paths.length > 0);
@@ -607,6 +635,31 @@
                 />
               </div>
             </div>
+
+            <!-- series status - only for series -->
+            {#if formData.media_type === MediaType.Series}
+              <div class="space-y-2">
+                <Label for="series-status">Series Status</Label>
+                <Select.Root
+                  type="multiple"
+                  name="series-status"
+                  bind:value={seriesStatusSelectValue}
+                >
+                  <Select.Trigger class="w-full">
+                    {seriesStatusSelectValue.length > 0
+                      ? `${seriesStatusSelectValue.length} selected`
+                      : "Any Status"}
+                  </Select.Trigger>
+                  <Select.Content>
+                    {#each seriesStatusOptions as option}
+                      <Select.Item value={option.value} label={option.label}>
+                        {option.label}
+                      </Select.Item>
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </div>
+            {/if}
           </Card.Content>
         </Card.Root>
 

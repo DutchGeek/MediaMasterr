@@ -522,6 +522,7 @@ def _evaluate_rule_for_season(
             rule.min_size is not None,
             rule.max_size is not None,
             rule.paths is not None and len(rule.paths) > 0,
+            rule.series_status is not None and len(rule.series_status) > 0,
         )
     )
     if not has_criteria:
@@ -546,6 +547,13 @@ def _evaluate_rule_for_season(
             return False
         matched_criteria["paths"] = rule.paths
         rule_reasons.append("path match")
+
+    # check series status from parent series
+    if rule.series_status:
+        if series.status is None or series.status not in rule.series_status:
+            return False
+        matched_criteria["series_status"] = series.status
+        rule_reasons.append(f"Status: {series.status}")
 
     # TMDB popularity from parent series
     if rule.min_popularity is not None and (
@@ -727,6 +735,7 @@ def _evaluate_rule(
             rule.min_size is not None,
             rule.max_size is not None,
             rule.paths is not None and len(rule.paths) > 0,
+            rule.series_status is not None and len(rule.series_status) > 0,
         )
     )
 
@@ -754,6 +763,13 @@ def _evaluate_rule(
             return False
         matched_criteria["paths"] = rule.paths
         rule_reasons.append("path match")
+
+    # check series status (only applies to Series)
+    if isinstance(item, Series) and rule.series_status:
+        if item.status is None or item.status not in rule.series_status:
+            return False
+        matched_criteria["series_status"] = item.status
+        rule_reasons.append(f"Status: {item.status}")
 
     # check popularity
     if rule.min_popularity is not None and (

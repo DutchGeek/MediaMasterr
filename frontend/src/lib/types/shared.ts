@@ -119,6 +119,7 @@ export interface ReclaimRule {
   min_size: number | null;
   max_size: number | null;
   paths: string[] | null;
+  series_status: string[] | null;
   created_at: string;
   updated_at: string;
 }

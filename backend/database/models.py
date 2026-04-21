@@ -518,6 +518,11 @@ class ReclaimRule(Base):
     # path restriction (the rule applies regardless of file location).
     paths: Mapped[list[str] | None] = mapped_column(JSON, default=None)
 
+    # series status criteria - only applies when media_type is Series
+    # None or empty list = any status
+    # List of TMDB status values to match (e.g., "Returning Series", "Ended", "Canceled", etc.)
+    series_status: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+
     # metadata
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), init=False

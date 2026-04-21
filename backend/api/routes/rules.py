@@ -215,6 +215,7 @@ async def create_rule(
         min_size=rule_data.min_size,
         max_size=rule_data.max_size,
         paths=cleaned_paths,
+        series_status=rule_data.series_status,
     )
 
     db.add(new_rule)

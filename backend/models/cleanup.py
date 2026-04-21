@@ -43,6 +43,11 @@ class CleanupRuleBase(BaseModel):
     # path criteria - list of glob patterns rooted at known library paths
     paths: list[str] | None = None
 
+    # series status criteria - only applies when media_type is Series
+    # None or empty list = any status
+    # List of TMDB status values to match (e.g., "Returning Series", "Ended", "Canceled", etc.)
+    series_status: list[str] | None = None
+
 
 class CleanupRuleCreate(CleanupRuleBase):
     """Model for creating a new cleanup rule."""
@@ -85,6 +90,9 @@ class CleanupRuleUpdate(BaseModel):
 
     # path criteria - list of glob patterns rooted at known library paths
     paths: list[str] | None = None
+
+    # series status criteria
+    series_status: list[str] | None = None
 
 
 class CleanupRuleResponse(CleanupRuleBase):

@@ -1,4 +1,4 @@
-"""add paths to reclaim_rules
+"""rules improvements: add path criteria and series status
 
 Revision ID: a7c3f9d1e210
 Revises: a3f1c8e92b47
@@ -21,8 +21,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     with op.batch_alter_table('reclaim_rules', schema=None) as batch_op:
         batch_op.add_column(sa.Column('paths', sa.JSON(), nullable=True))
+        batch_op.add_column(sa.Column('series_status', sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
     with op.batch_alter_table('reclaim_rules', schema=None) as batch_op:
+        batch_op.drop_column('series_status')
         batch_op.drop_column('paths')
