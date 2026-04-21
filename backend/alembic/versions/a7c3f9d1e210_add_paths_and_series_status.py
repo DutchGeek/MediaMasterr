@@ -1,4 +1,4 @@
-"""rules improvements: add path criteria and series status
+"""add path criteria and series status
 
 Revision ID: a7c3f9d1e210
 Revises: a3f1c8e92b47
