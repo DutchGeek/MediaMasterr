@@ -902,11 +902,14 @@
               </div>
 
               <!-- folder list -->
-              <div class="rounded-md border border-border divide-y divide-border max-h-64 overflow-y-auto">
+              <div
+                class="rounded-md border border-border divide-y divide-border max-h-64 overflow-y-auto"
+              >
                 {#if currentChildren.length === 0}
                   {#if currentPathSelection}
                     <div class="p-3 text-sm text-muted-foreground">
-                      Use the wildcard suffix field below to further restrict paths (e.g., *1080p* or **/Extras/*)
+                      Use the wildcard suffix field below to further restrict
+                      paths (e.g., *1080p* or **/Extras/*)
                     </div>
                   {/if}
                 {:else}

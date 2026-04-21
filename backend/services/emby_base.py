@@ -337,9 +337,7 @@ class EmbyServiceBase:
 
     async def get_series_sizes_for_library(
         self, library_id: str, user_id: str
-    ) -> tuple[
-        dict[str, int], dict[tuple[str, int], AggregatedSeasonData]
-    ]:
+    ) -> tuple[dict[str, int], dict[tuple[str, int], AggregatedSeasonData]]:
         """Get total sizes and season data for all series in a library.
 
         Args:
