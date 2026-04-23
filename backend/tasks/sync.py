@@ -509,6 +509,7 @@ async def sync_movies(
 
             # convert to dictionary keyed by tmdb_id for easier lookup
             existing_movies = {m.tmdb_id: m for m in existing_movies_list if m.tmdb_id}
+            existing_by_imdb = {m.imdb_id: m for m in existing_movies_list if m.imdb_id}
 
             parsed_tmdb_ids: set[int] = set()
 
@@ -571,50 +572,82 @@ async def sync_movies(
 
                 # if movie doesn't exist, create new entry
                 else:
-                    LOG.info(f"Adding new movie: {movie.name} ({tmdb_id})")
-                    radarr_obj = (
-                        radarr_movies.get(tmdb_id) if tmdb_id in radarr_movies else None
-                    )
-                    initial_size = sum(v.size for v in movie.versions)
-                    new_movie = Movie(
-                        title=movie.name,
-                        year=movie.year,
-                        tmdb_id=tmdb_id,
-                        size=initial_size,
-                        radarr_id=radarr_obj.id if radarr_obj else None,
-                        imdb_id=movie.external_ids.imdb,
-                        last_viewed_at=movie.last_viewed_at,
-                        view_count=movie.view_count,
-                    )
-
-                    if earliest_added:
-                        new_movie.added_at = earliest_added
-
-                    # fetch TMDB metadata
-                    await _update_movie_tmdb_metadata(new_movie, tmdb_id, tmdb_service)
-                    session.add(new_movie)
-                    # flush so new_movie.id is available for version FK
-                    await session.flush()
-                    seen_new_ver_keys: set[tuple] = set()
-                    for ver in movie.versions:
-                        key = (ver.service, ver.service_media_id)
-                        if key in seen_new_ver_keys:
-                            continue
-                        seen_new_ver_keys.add(key)
-                        session.add(
-                            MovieVersion(
-                                movie_id=new_movie.id,
-                                service=ver.service,
-                                service_item_id=ver.service_item_id,
-                                service_media_id=ver.service_media_id,
-                                library_id=ver.library_id,
-                                library_name=ver.library_name,
-                                path=ver.path,
-                                size=ver.size,
-                                added_at=ver.added_at,
-                                container=ver.container,
-                            )
+                    # before inserting, check if a movie with this imdb_id already exists
+                    # (can happen when TMDB returns 404 so tmdb_id lookup fails, but the
+                    # movie is already stored under a different tmdb_id or same imdb_id)
+                    imdb_id = movie.external_ids.imdb
+                    if imdb_id and imdb_id in existing_by_imdb:
+                        existing_movie = existing_by_imdb[imdb_id]
+                        LOG.info(
+                            f"Movie '{movie.name}' not found by tmdb_id ({tmdb_id}) but matched "
+                            f"existing record by imdb_id ({imdb_id}) — updating instead of inserting"
                         )
+                        existing_movie.radarr_id = (
+                            radarr_obj.id if radarr_obj else existing_movie.radarr_id
+                        )
+                        if earliest_added and not existing_movie.added_at:
+                            existing_movie.added_at = earliest_added
+                        existing_movie.last_viewed_at = movie.last_viewed_at
+                        existing_movie.view_count = movie.view_count
+                        if existing_movie.removed_at:
+                            existing_movie.removed_at = None
+                            LOG.info(
+                                f"Restored soft-deleted movie: {movie.name} ({tmdb_id})"
+                            )
+                        if _needs_metadata_refresh(existing_movie, MediaType.MOVIE):
+                            await _update_movie_tmdb_metadata(
+                                existing_movie, tmdb_id, tmdb_service
+                            )
+                        await _upsert_movie_versions(
+                            session, existing_movie, movie.versions
+                        )
+                    else:
+                        LOG.info(f"Adding new movie: {movie.name} ({tmdb_id})")
+                        radarr_obj = (
+                            radarr_movies.get(tmdb_id)
+                            if tmdb_id in radarr_movies
+                            else None
+                        )
+                        initial_size = sum(v.size for v in movie.versions)
+                        new_movie = Movie(
+                            title=movie.name,
+                            year=movie.year,
+                            tmdb_id=tmdb_id,
+                            size=initial_size,
+                            radarr_id=radarr_obj.id if radarr_obj else None,
+                            imdb_id=imdb_id,
+                            last_viewed_at=movie.last_viewed_at,
+                            view_count=movie.view_count,
+                        )
+
+                        if earliest_added:
+                            new_movie.added_at = earliest_added
+
+                        await _update_movie_tmdb_metadata(
+                            new_movie, tmdb_id, tmdb_service
+                        )
+                        session.add(new_movie)
+                        await session.flush()
+                        seen_new_ver_keys: set[tuple] = set()
+                        for ver in movie.versions:
+                            key = (ver.service, ver.service_media_id)
+                            if key in seen_new_ver_keys:
+                                continue
+                            seen_new_ver_keys.add(key)
+                            session.add(
+                                MovieVersion(
+                                    movie_id=new_movie.id,
+                                    service=ver.service,
+                                    service_item_id=ver.service_item_id,
+                                    service_media_id=ver.service_media_id,
+                                    library_id=ver.library_id,
+                                    library_name=ver.library_name,
+                                    path=ver.path,
+                                    size=ver.size,
+                                    added_at=ver.added_at,
+                                    container=ver.container,
+                                )
+                            )
 
                 # commit in batches
                 if idx % COMMIT_BATCH_SIZE == 0:
