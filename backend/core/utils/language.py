@@ -48,3 +48,15 @@ def normalize_languages(values: list[Any] | None) -> list[str] | None:
         seen.add(normalized)
         normalized_values.append(normalized)
     return normalized_values or None
+
+
+@lru_cache(maxsize=512)
+def language_name(value: Any) -> str | None:
+    """Return the English display name for a known language code."""
+    normalized = normalize_language(value)
+    if normalized is None:
+        return None
+    try:
+        return Language.match(normalized, strict_case=False).name
+    except LanguageNotFoundError:
+        return normalized

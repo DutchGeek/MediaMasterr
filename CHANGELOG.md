@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Dependency [python-iso639](https://github.com/jacksonllee/iso639)
+- Rules:
+  - media.year
+  - tmdb.original_language
+  - tmdb.origin_country
+  - tmdb.runtime_minutes
+  - media.container
+  - video.bitrate_kbps
+  - video.bit_depth
+  - audio.bitrate_kbps
+  - subtitle.track_count
+  - subtitle.has_forced
+  - movie.version_count
+  - series.tmdb_season_count
+  - series.library_season_count
 
 ### Changed
 

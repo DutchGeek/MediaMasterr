@@ -837,10 +837,12 @@ async def _refresh_arr_tags_for_rules(rules: list[ReclaimRule]) -> None:
 
 def _rules_use_monitoring_field(rules: list[ReclaimRule]) -> bool:
     """Return True if any rule condition references the arr.monitored field."""
-    for rule in rules:
-        for _ in collect_rule_conditions(rule.definition, field="arr.monitored"):
-            return True
-    return False
+    return _rules_use_field(rules, "arr.monitored")
+
+
+def _rules_use_field(rules: list[ReclaimRule], field: str) -> bool:
+    """Return True if any rule condition references the requested field."""
+    return any(collect_rule_conditions(rule.definition, field=field) for rule in rules)
 
 
 async def _refresh_arr_monitoring_for_rules(rules: list[ReclaimRule]) -> None:
@@ -1739,8 +1741,8 @@ async def _prune_leaving_soon_before_candidate_actions(
         ) = await _load_leaving_soon_collection_settings(db)
         if not enabled:
             return
-        movie_item_ids, series_item_ids = (
-            await _build_leaving_soon_prune_item_ids(db, normalized_candidate_ids)
+        movie_item_ids, series_item_ids = await _build_leaving_soon_prune_item_ids(
+            db, normalized_candidate_ids
         )
 
     service_clients: list[tuple[Service, Any]] = [
@@ -2029,11 +2031,10 @@ async def _collect_series_candidate_records(
     )
 
     # get all media items
-    query = (
-        select(Series)
-        .where(Series.removed_at.is_(None))
-        .options(selectinload(Series.service_refs))
-    )
+    query_options = [selectinload(Series.service_refs)]
+    if _rules_use_field(rules, "series.library_season_count"):
+        query_options.append(selectinload(Series.seasons))
+    query = select(Series).where(Series.removed_at.is_(None)).options(*query_options)
     result = await db.execute(query)
     media_items = result.scalars().all()
     if preview_metadata is not None:

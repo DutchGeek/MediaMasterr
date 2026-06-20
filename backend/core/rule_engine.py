@@ -18,7 +18,7 @@ from backend.database.models import (
     Season,
     Series,
 )
-from backend.enums import MediaType
+from backend.enums import MediaType, Service
 
 TARGET_MOVIE_VERSION = "movie_version"
 TARGET_SERIES = "series"
@@ -38,6 +38,8 @@ FIELD_LABELS: dict[str, str] = {
     "media.path": "Path",
     "media.file_name": "Filename",
     "media.size": "Size",
+    "media.year": "Year",
+    "media.container": "Container",
     "media.days_since_added": "Days since added",
     "watch.view_count": "Views",
     "watch.days_since_last_watched": "Days since watched",
@@ -46,6 +48,9 @@ FIELD_LABELS: dict[str, str] = {
     "tmdb.in_collection": "TMDB in collection",
     "tmdb.collection_name": "TMDB collection name",
     "tmdb.genres": "TMDB genres",
+    "tmdb.original_language": "TMDB original language",
+    "tmdb.origin_country": "TMDB origin country",
+    "tmdb.runtime_minutes": "TMDB runtime (minutes)",
     "tmdb.first_air_date": "TMDB first air date",
     "tmdb.last_air_date": "TMDB last air date",
     "season.air_date": "Season air date",
@@ -73,17 +78,25 @@ FIELD_LABELS: dict[str, str] = {
     "anilist.popularity": "AniList popularity",
     "anilist.favourites": "AniList favourites",
     "series.status": "Series status",
+    "series.tmdb_season_count": "TMDB season count",
+    "series.library_season_count": "Library season count",
+    "movie.version_count": "Movie version count",
     "video.codec_family": "Video codec",
     "audio.codec_family": "Audio codec",
     "video.hdr": "HDR",
     "video.dolby_vision": "Dolby Vision",
     "video.width": "Video width",
     "video.height": "Video height",
+    "video.bitrate_kbps": "Video bitrate (kbps)",
+    "video.bit_depth": "Video bit depth",
     "video.resolution": "Resolution",
     "audio.channels": "Audio channels",
     "audio.track_count": "Audio tracks",
+    "audio.bitrate_kbps": "Audio bitrate (kbps)",
     "audio.languages": "Audio languages",
     "subtitle.languages": "Subtitle languages",
+    "subtitle.track_count": "Subtitle tracks",
+    "subtitle.has_forced": "Has forced subtitles",
     "video.color_space": "Color space",
     "video.color_transfer": "Color transfer",
     "video.color_primaries": "Color primaries",
@@ -134,6 +147,7 @@ LIST_OPERATORS = {
 VALUELESS_OPERATORS = {"exists", "not_exists", "is_true", "is_false"}
 NUMERIC_FIELDS = {
     "media.size",
+    "media.year",
     "media.days_since_added",
     "watch.view_count",
     "watch.days_since_last_watched",
@@ -151,6 +165,7 @@ NUMERIC_FIELDS = {
     "tmdb.popularity",
     "tmdb.vote_average",
     "tmdb.vote_count",
+    "tmdb.runtime_minutes",
     "imdb.rating",
     "imdb.vote_count",
     "anilist.score",
@@ -160,6 +175,13 @@ NUMERIC_FIELDS = {
     "video.height",
     "audio.channels",
     "audio.track_count",
+    "audio.bitrate_kbps",
+    "subtitle.track_count",
+    "video.bitrate_kbps",
+    "video.bit_depth",
+    "movie.version_count",
+    "series.tmdb_season_count",
+    "series.library_season_count",
     "media.duration",
     "disk.free_bytes",
     "disk.free_percent",
@@ -167,7 +189,10 @@ NUMERIC_FIELDS = {
 TEXT_FIELDS = {
     "tmdb.collection_name",
     "tmdb.genres",
+    "tmdb.original_language",
+    "tmdb.origin_country",
     "media_server.collections",
+    "media.container",
     "series.status",
     "video.codec_family",
     "audio.codec_family",
@@ -187,13 +212,22 @@ MULTI_VALUE_TEXT_FIELDS = {
     "audio.codec_family",
     "audio.languages",
     "subtitle.languages",
+    "tmdb.original_language",
+    "tmdb.origin_country",
 }
-LANGUAGE_FIELDS = {"audio.languages", "subtitle.languages"}
+LANGUAGE_FIELDS = {
+    "audio.languages",
+    "subtitle.languages",
+    "tmdb.original_language",
+}
+COUNTRY_FIELDS = {"tmdb.origin_country"}
+FAIL_CLOSED_LIST_FIELDS = LANGUAGE_FIELDS | COUNTRY_FIELDS
 LIBRARY_FIELDS = {"library.id"}
 BOOLEAN_FIELDS = {
     "tmdb.in_collection",
     "video.hdr",
     "video.dolby_vision",
+    "subtitle.has_forced",
     "season.fully_watched",
     "season.is_latest_season",
     "watch.never_watched",
@@ -299,6 +333,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "arr.monitored",
         "arr.tags",
         "audio.channels",
+        "audio.bitrate_kbps",
         "audio.codec_family",
         "audio.languages",
         "audio.track_count",
@@ -308,24 +343,33 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "imdb.vote_count",
         "library.id",
         "media.days_since_added",
+        "media.container",
         "media.duration",
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
         "subtitle.languages",
+        "subtitle.has_forced",
+        "subtitle.track_count",
         "tmdb.days_since_release",
         "tmdb.in_collection",
         "tmdb.collection_name",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.release_date",
+        "tmdb.runtime_minutes",
         "tmdb.vote_average",
         "tmdb.vote_count",
         "video.codec_family",
+        "video.bitrate_kbps",
+        "video.bit_depth",
         "video.color_primaries",
         "video.color_space",
         "video.color_transfer",
@@ -338,6 +382,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "watch.last_viewed_at",
         "watch.never_watched",
         "watch.view_count",
+        "movie.version_count",
     },
     TARGET_SERIES: {
         "anilist.favourites",
@@ -356,17 +401,22 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
@@ -398,6 +448,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "season.air_date",
         "season.days_since_air_date",
@@ -411,12 +462,16 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
@@ -449,6 +504,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "season.air_date",
         "season.days_since_air_date",
@@ -462,11 +518,15 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
@@ -934,6 +994,8 @@ def _build_context(
             "media.path": [version.path] if version.path else [],
             "media.file_name": [_file_name] if _file_name else [],
             "media.size": size,
+            "media.year": movie.year,
+            "media.container": version.container,
             "media_server.collections": version.media_server_collection_names or [],
             "media.days_since_added": _days_between(
                 version.added_at or movie.added_at, now
@@ -950,6 +1012,9 @@ def _build_context(
             ),
             "tmdb.collection_name": movie.tmdb_collection_name,
             "tmdb.genres": normalize_genre_names(movie.genres) or [],
+            "tmdb.original_language": normalize_language(movie.original_language),
+            "tmdb.origin_country": _normalized_country_list(movie.origin_country),
+            "tmdb.runtime_minutes": movie.runtime,
             "tmdb.days_since_release": _days_between(movie.tmdb_release_date, now),
             "tmdb.popularity": movie.popularity,
             "tmdb.vote_average": movie.vote_average,
@@ -965,17 +1030,23 @@ def _build_context(
             "video.dolby_vision": version.video_dolby_vision,
             "video.width": version.video_width,
             "video.height": version.video_height,
+            "video.bitrate_kbps": _bitrate_kbps(version.video_bitrate, version.service),
+            "video.bit_depth": version.video_bit_depth,
             "video.resolution": version.video_resolution,
             "audio.channels": version.audio_channels,
             "audio.track_count": version.audio_count,
+            "audio.bitrate_kbps": _bitrate_kbps(version.audio_bitrate, version.service),
             "audio.languages": version.audio_languages,
             "subtitle.languages": version.subtitle_languages,
+            "subtitle.track_count": version.subtitle_count,
+            "subtitle.has_forced": version.subtitle_has_forced,
             "video.color_space": version.video_color_space,
             "video.color_transfer": version.video_color_transfer,
             "video.color_primaries": version.video_color_primaries,
             "media.duration": version.duration,
             "arr.tags": movie.arr_tags or [],
             "arr.monitored": movie.is_monitored,
+            "movie.version_count": len(movie.versions or []),
             "seerr.requested": (
                 _seerr_resolver.resolve(MediaType.MOVIE, movie.tmdb_id)
                 if _seerr_resolver
@@ -1015,6 +1086,7 @@ def _build_context(
             "media.path": [ref.path for ref in refs if ref.path],
             "media.file_name": _series_file_names,
             "media.size": series.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(series.added_at, now),
             "watch.view_count": series.view_count,
@@ -1033,12 +1105,16 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "video.codec_family": series.video_codec_families,
             "audio.codec_family": series.audio_codec_families,
             "video.hdr": series.has_hdr,
@@ -1094,6 +1170,7 @@ def _build_context(
             "media.path": [ref.path for ref in refs if ref.path],
             "media.file_name": [_season_file_name] if _season_file_name else [],
             "media.size": season.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(season.added_at, now),
             "watch.view_count": season.view_count,
@@ -1121,12 +1198,16 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "video.codec_family": season.video_codec_families,
             "audio.codec_family": season.audio_codec_families,
             "video.hdr": season.has_hdr,
@@ -1191,6 +1272,7 @@ def _build_context(
             "media.path": [episode.path] if episode.path else [],
             "media.file_name": [_episode_file_name] if _episode_file_name else [],
             "media.size": episode.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(season.added_at, now),
             "watch.view_count": episode.view_count,
@@ -1221,12 +1303,16 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
             "seerr.requested": (
@@ -1436,8 +1522,9 @@ def _matches_list_operator(
     if field in LANGUAGE_FIELDS:
         actual_values = _normalized_language_values(actual)
         expected_values = _normalized_language_values(expected)
-        if not actual_values or not expected_values:
-            return False
+    elif field in COUNTRY_FIELDS:
+        actual_values = _normalized_country_values(actual)
+        expected_values = _normalized_country_values(expected)
     else:
         actual_values = {
             _normalize(value) for value in _as_list(actual) if _exists(value)
@@ -1445,6 +1532,8 @@ def _matches_list_operator(
         expected_values = {
             _normalize(value) for value in _as_list(expected) if _exists(value)
         }
+    if field in FAIL_CLOSED_LIST_FIELDS and (not actual_values or not expected_values):
+        return False
     if not expected_values:
         return False
     has_any = bool(actual_values & expected_values)
@@ -1466,6 +1555,31 @@ def _normalized_language_values(value: Any) -> set[str]:
         for item in _as_list(value)
         if (normalized := normalize_language(item)) is not None
     }
+
+
+def _normalized_country_values(value: Any) -> set[str]:
+    return {
+        normalized
+        for item in _as_list(value)
+        if (normalized := str(item or "").strip().upper())
+    }
+
+
+def _normalized_country_list(value: Any) -> list[str]:
+    return sorted(_normalized_country_values(value))
+
+
+def _library_season_count(series: Series) -> int:
+    return sum(1 for season in (series.seasons or []) if season.season_number > 0)
+
+
+def _bitrate_kbps(value: Any, service: Service) -> float | int | None:
+    bitrate = _number(value)
+    if bitrate is None:
+        return None
+    if service in {Service.JELLYFIN, Service.EMBY}:
+        bitrate /= 1000
+    return int(bitrate) if bitrate.is_integer() else bitrate
 
 
 def _matches_path_prefix(actual: Any, expected: Any) -> bool:

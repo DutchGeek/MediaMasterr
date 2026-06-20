@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from backend.core.rule_engine import (
+    TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
+    TARGET_SERIES,
     derive_path_scope_library_ids,
     validate_rule_definition,
 )
@@ -25,6 +27,66 @@ def _definition(field: str, operator: str, value: object = 1) -> dict[str, objec
 
 
 class RuleDefinitionValidationTests(unittest.TestCase):
+    def test_accepts_extended_metadata_fields_for_supported_scopes(self) -> None:
+        cases = [
+            (TARGET_MOVIE_VERSION, "media.year", "equals", 2005),
+            (TARGET_MOVIE_VERSION, "media.container", "contains_any", ["mkv"]),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.original_language",
+                "contains_any",
+                ["eng"],
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.origin_country",
+                "contains_any",
+                ["US"],
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.runtime_minutes",
+                "greater_than",
+                90,
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "video.bitrate_kbps",
+                "greater_than",
+                8000,
+            ),
+            (TARGET_MOVIE_VERSION, "video.bit_depth", "equals", 10),
+            (
+                TARGET_MOVIE_VERSION,
+                "audio.bitrate_kbps",
+                "greater_than",
+                500,
+            ),
+            (TARGET_MOVIE_VERSION, "subtitle.track_count", "greater_than", 0),
+            (TARGET_MOVIE_VERSION, "subtitle.has_forced", "is_true", None),
+            (TARGET_MOVIE_VERSION, "movie.version_count", "greater_than", 1),
+            (TARGET_SERIES, "series.tmdb_season_count", "greater_than", 2),
+            (TARGET_SEASON, "series.library_season_count", "greater_than", 2),
+            (TARGET_EPISODE, "tmdb.original_language", "contains_any", ["jpn"]),
+        ]
+        for scope, field, operator, value in cases:
+            with self.subTest(scope=scope, field=field):
+                validate_rule_definition(
+                    _definition(field, operator, value),
+                    target_scope=scope,
+                )
+
+    def test_rejects_version_only_metadata_for_series_scope(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Rule field\\(s\\) not available for target_scope 'series': "
+            "'video.bitrate_kbps'",
+        ):
+            validate_rule_definition(
+                _definition("video.bitrate_kbps", "greater_than", 8000),
+                target_scope=TARGET_SERIES,
+            )
+
     def test_accepts_nested_and_or_groups(self) -> None:
         definition = {
             "version": 1,

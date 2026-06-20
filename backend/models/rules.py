@@ -77,6 +77,20 @@ class PaginatedGenresResponse(BaseModel):
     total_pages: int
 
 
+class MetadataValueLookupResponse(BaseModel):
+    value: str
+    name: str
+    media_count: int
+
+
+class PaginatedMetadataValuesResponse(BaseModel):
+    items: list[MetadataValueLookupResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
 class MediaServerCollectionLookupResponse(BaseModel):
     name: str
     media_count: int

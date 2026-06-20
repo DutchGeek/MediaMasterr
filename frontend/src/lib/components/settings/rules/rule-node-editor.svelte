@@ -7,6 +7,7 @@
   import MovieCollectionPicker from "$lib/components/settings/rules/movie-collection-picker.svelte";
   import GenrePicker from "$lib/components/settings/rules/genre-picker.svelte";
   import MediaServerCollectionPicker from "$lib/components/settings/rules/media-server-collection-picker.svelte";
+  import MetadataValuePicker from "$lib/components/settings/rules/metadata-value-picker.svelte";
   import FolderSearch from "@lucide/svelte/icons/folder-search";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -64,6 +65,8 @@
   let collectionPickerOpen = $state(false);
   let genrePickerOpen = $state(false);
   let mediaServerCollectionPickerOpen = $state(false);
+  let originalLanguagePickerOpen = $state(false);
+  let originCountryPickerOpen = $state(false);
 
   const operatorLabelMap: Record<RuleConditionOperator, string> = {
     equals: "is",
@@ -212,6 +215,20 @@
       defaultOperator: "greater_than",
     },
     {
+      value: "media.year",
+      label: "Year",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "equals",
+    },
+    {
+      value: "media.container",
+      label: "Container",
+      kind: "text",
+      operators: textOperators,
+      defaultOperator: "contains_any",
+    },
+    {
       value: "media.days_since_added",
       label: "Days since added",
       kind: "number",
@@ -266,6 +283,27 @@
       kind: "text",
       operators: multiValueTextOperators,
       defaultOperator: "contains_any",
+    },
+    {
+      value: "tmdb.original_language",
+      label: "TMDB original language",
+      kind: "text",
+      operators: textOperators,
+      defaultOperator: "contains_any",
+    },
+    {
+      value: "tmdb.origin_country",
+      label: "TMDB origin country",
+      kind: "text",
+      operators: multiValueTextOperators,
+      defaultOperator: "contains_any",
+    },
+    {
+      value: "tmdb.runtime_minutes",
+      label: "TMDB runtime (minutes)",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
     },
     {
       value: "tmdb.first_air_date",
@@ -457,6 +495,27 @@
       defaultOperator: "contains_any",
     },
     {
+      value: "series.tmdb_season_count",
+      label: "TMDB season count",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
+      value: "series.library_season_count",
+      label: "Library season count",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
+      value: "movie.version_count",
+      label: "Movie version count",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
       value: "video.codec_family",
       label: "Video codec family",
       kind: "text",
@@ -499,6 +558,20 @@
       defaultOperator: "greater_than_or_equal",
     },
     {
+      value: "video.bitrate_kbps",
+      label: "Video bitrate (kbps)",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
+      value: "video.bit_depth",
+      label: "Video bit depth",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
       value: "video.resolution",
       label: "Resolution",
       kind: "text",
@@ -520,6 +593,13 @@
       defaultOperator: "greater_than_or_equal",
     },
     {
+      value: "audio.bitrate_kbps",
+      label: "Audio bitrate (kbps)",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
       value: "audio.languages",
       label: "Audio languages",
       kind: "text",
@@ -532,6 +612,20 @@
       kind: "text",
       operators: textOperators,
       defaultOperator: "contains_any",
+    },
+    {
+      value: "subtitle.track_count",
+      label: "Subtitle track count",
+      kind: "number",
+      operators: numericOperators,
+      defaultOperator: "greater_than_or_equal",
+    },
+    {
+      value: "subtitle.has_forced",
+      label: "Has forced subtitles",
+      kind: "boolean",
+      operators: booleanOperators,
+      defaultOperator: "is_true",
     },
     {
       value: "video.color_space",
@@ -626,6 +720,7 @@
       "anilist.score",
       "arr.monitored",
       "arr.tags",
+      "audio.bitrate_kbps",
       "audio.channels",
       "audio.codec_family",
       "audio.languages",
@@ -636,24 +731,33 @@
       "imdb.vote_count",
       "library.id",
       "media.days_since_added",
+      "media.container",
       "media.duration",
       "media.file_name",
       "media.path",
       "media.size",
+      "media.year",
       "media_server.collections",
       "seerr.requested",
       "seerr.requested_by_user_ids",
       "seerr.requester_has_watched",
       "subtitle.languages",
+      "subtitle.has_forced",
+      "subtitle.track_count",
       "tmdb.days_since_release",
       "tmdb.in_collection",
       "tmdb.collection_name",
       "tmdb.genres",
+      "tmdb.original_language",
+      "tmdb.origin_country",
       "tmdb.popularity",
       "tmdb.release_date",
+      "tmdb.runtime_minutes",
       "tmdb.vote_average",
       "tmdb.vote_count",
       "video.codec_family",
+      "video.bitrate_kbps",
+      "video.bit_depth",
       "video.color_primaries",
       "video.color_space",
       "video.color_transfer",
@@ -666,6 +770,7 @@
       "watch.last_viewed_at",
       "watch.never_watched",
       "watch.view_count",
+      "movie.version_count",
     ]),
     series: new Set<string>([
       "anilist.favourites",
@@ -684,17 +789,22 @@
       "media.file_name",
       "media.path",
       "media.size",
+      "media.year",
       "media_server.collections",
       "seerr.requested",
       "seerr.requested_by_user_ids",
       "seerr.requester_has_watched",
       "series.status",
+      "series.library_season_count",
+      "series.tmdb_season_count",
       "subtitle.languages",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
       "tmdb.first_air_date",
       "tmdb.last_air_date",
       "tmdb.genres",
+      "tmdb.original_language",
+      "tmdb.origin_country",
       "tmdb.popularity",
       "tmdb.vote_average",
       "tmdb.vote_count",
@@ -726,6 +836,7 @@
       "media.file_name",
       "media.path",
       "media.size",
+      "media.year",
       "media_server.collections",
       "season.air_date",
       "season.days_since_air_date",
@@ -739,12 +850,16 @@
       "seerr.requested_by_user_ids",
       "seerr.requester_has_watched",
       "series.status",
+      "series.library_season_count",
+      "series.tmdb_season_count",
       "subtitle.languages",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
       "tmdb.first_air_date",
       "tmdb.last_air_date",
       "tmdb.genres",
+      "tmdb.original_language",
+      "tmdb.origin_country",
       "tmdb.popularity",
       "tmdb.vote_average",
       "tmdb.vote_count",
@@ -777,6 +892,7 @@
       "media.file_name",
       "media.path",
       "media.size",
+      "media.year",
       "media_server.collections",
       "season.air_date",
       "season.days_since_air_date",
@@ -790,11 +906,15 @@
       "seerr.requested_by_user_ids",
       "seerr.requester_has_watched",
       "series.status",
+      "series.library_season_count",
+      "series.tmdb_season_count",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
       "tmdb.first_air_date",
       "tmdb.last_air_date",
       "tmdb.genres",
+      "tmdb.original_language",
+      "tmdb.origin_country",
       "tmdb.popularity",
       "tmdb.vote_average",
       "tmdb.vote_count",
@@ -814,12 +934,14 @@
     "library.id",
     "media.path",
     "media.size",
+    "media.year",
     "watch.never_watched",
     "watch.view_count",
     "watch.days_since_last_watched",
     "watch.last_viewed_at",
     "series.status",
     "tmdb.in_collection",
+    "tmdb.original_language",
     "tmdb.vote_average",
     "imdb.rating",
     "anilist.score",
@@ -852,6 +974,8 @@
         return "Episode";
       case "series":
         return "Series";
+      case "movie":
+        return "Movie";
       case "video":
         return "Video";
       case "audio":
@@ -941,6 +1065,10 @@
     if (c.field === "tmdb.collection_name")
       return "Collection names (comma-separated)...";
     if (c.field === "tmdb.genres") return "Genres (comma-separated)...";
+    if (c.field === "tmdb.original_language")
+      return "Language codes or names (for example: eng, English)...";
+    if (c.field === "tmdb.origin_country")
+      return "Country codes (for example: US, GB)...";
     if (c.field === "media_server.collections")
       return "Media-server collections (comma-separated)...";
     if (listOperators.has(c.operator)) return "comma-separated…";
@@ -1106,6 +1234,14 @@
       ...new Set(names.map((name) => name.trim()).filter(Boolean)),
     ];
     c.value = cleaned;
+    onChange();
+  };
+
+  const applyMetadataValues = (c: RuleCondition, values: string[]) => {
+    const cleaned = [
+      ...new Set(values.map((value) => value.trim()).filter(Boolean)),
+    ];
+    c.value = listOperators.has(c.operator) ? cleaned : (cleaned[0] ?? "");
     onChange();
   };
 
@@ -1379,6 +1515,28 @@
                 <span class="md:hidden">Pick</span>
               </Button>
             {/if}
+            {#if node.field === "tmdb.original_language" && pathPickerMediaType}
+              <Button
+                size="sm"
+                variant="secondary"
+                class="h-8 text-xs cursor-pointer bg-secondary/75 hover:bg-secondary/90 text-foreground shrink-0"
+                onclick={() => (originalLanguagePickerOpen = true)}
+              >
+                <span class="hidden md:inline">Pick Languages</span>
+                <span class="md:hidden">Pick</span>
+              </Button>
+            {/if}
+            {#if node.field === "tmdb.origin_country" && pathPickerMediaType}
+              <Button
+                size="sm"
+                variant="secondary"
+                class="h-8 text-xs cursor-pointer bg-secondary/75 hover:bg-secondary/90 text-foreground shrink-0"
+                onclick={() => (originCountryPickerOpen = true)}
+              >
+                <span class="hidden md:inline">Pick Countries</span>
+                <span class="md:hidden">Pick</span>
+              </Button>
+            {/if}
             {#if node.field === "media_server.collections" && pathPickerMediaType}
               <Button
                 size="sm"
@@ -1425,6 +1583,12 @@
         </p>
       {/if}
     </div>
+    {#if node.field === "movie.version_count"}
+      <p class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+        Version count alone selects every version of a multi-version movie.
+        Combine it with quality, codec, size, bitrate, or resolution conditions.
+      </p>
+    {/if}
   </div>
 
   {#if node.field === "media.path" && node.operator === "matches_any_regex" && pathPickerMediaType}
@@ -1459,6 +1623,34 @@
       mediaType={pathPickerMediaType}
       initialSelectedNames={normalizeValueList(node.value)}
       onApply={(names) => applyGenres(node, names)}
+    />
+  {/if}
+
+  {#if node.field === "tmdb.original_language" && pathPickerMediaType}
+    <MetadataValuePicker
+      bind:open={originalLanguagePickerOpen}
+      mediaType={pathPickerMediaType}
+      endpoint="/api/rules/original-languages"
+      title="Select Original Languages"
+      description="Search original languages found in local TMDB metadata. You can still type a language manually."
+      searchPlaceholder="Search languages or codes..."
+      emptyLabel="No original languages found."
+      initialSelectedValues={normalizeValueList(node.value)}
+      onApply={(values) => applyMetadataValues(node, values)}
+    />
+  {/if}
+
+  {#if node.field === "tmdb.origin_country" && pathPickerMediaType}
+    <MetadataValuePicker
+      bind:open={originCountryPickerOpen}
+      mediaType={pathPickerMediaType}
+      endpoint="/api/rules/origin-countries"
+      title="Select Origin Countries"
+      description="Search origin-country codes found in local TMDB metadata. You can still type a code manually."
+      searchPlaceholder="Search country codes..."
+      emptyLabel="No origin countries found."
+      initialSelectedValues={normalizeValueList(node.value)}
+      onApply={(values) => applyMetadataValues(node, values)}
     />
   {/if}
 

@@ -386,6 +386,138 @@ class _RadarrTagRefreshClientFake:
 
 
 class CleanupMediaRuleTests(unittest.TestCase):
+    def test_movie_version_extended_metadata_fields_match(self) -> None:
+        movie = Movie(
+            title="Movie",
+            tmdb_id=1,
+            year=2005,
+            original_language="en",
+            origin_country=["US"],
+            runtime=116,
+        )
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            service=Service.JELLYFIN,
+            container="mkv",
+            video_bitrate=12_000_000,
+            video_bit_depth=10,
+            audio_bitrate=640_000,
+            subtitle_count=2,
+            subtitle_has_forced=True,
+            size=1,
+        )
+        other_version = _make_movie_version(
+            service_media_id="media-2",
+            service_item_id="item-2",
+        )
+        movie.versions = [version, other_version]
+        rule = _rule_with_root(
+            MediaType.MOVIE,
+            TARGET_MOVIE_VERSION,
+            _group(
+                "and",
+                _condition("media.year", "equals", 2005),
+                _condition("media.container", "contains_any", ["MKV"]),
+                _condition("tmdb.original_language", "contains_any", ["eng"]),
+                _condition("tmdb.origin_country", "contains_any", ["us"]),
+                _condition("tmdb.runtime_minutes", "equals", 116),
+                _condition("video.bitrate_kbps", "equals", 12000),
+                _condition("video.bit_depth", "equals", 10),
+                _condition("audio.bitrate_kbps", "equals", 640),
+                _condition("subtitle.track_count", "equals", 2),
+                _condition("subtitle.has_forced", "is_true"),
+                _condition("movie.version_count", "equals", 2),
+            ),
+        )
+
+        self.assertTrue(_evaluate_movie_version_rule(movie, version, rule, {}, []))
+
+    def test_plex_bitrate_values_are_already_kbps(self) -> None:
+        movie = Movie(title="Movie", tmdb_id=1)
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            service=Service.PLEX,
+            video_bitrate=8914,
+            audio_bitrate=655,
+            size=1,
+        )
+        movie.versions = [version]
+        rule = _rule_with_root(
+            MediaType.MOVIE,
+            TARGET_MOVIE_VERSION,
+            _group(
+                "and",
+                _condition("video.bitrate_kbps", "equals", 8914),
+                _condition("audio.bitrate_kbps", "equals", 655),
+            ),
+        )
+
+        self.assertTrue(_evaluate_movie_version_rule(movie, version, rule, {}, []))
+
+    def test_missing_language_and_country_fail_negative_list_matches(self) -> None:
+        movie = Movie(title="Movie", tmdb_id=1)
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            size=1,
+        )
+        movie.versions = [version]
+
+        for field, value in [
+            ("tmdb.original_language", ["eng"]),
+            ("tmdb.origin_country", ["US"]),
+        ]:
+            with self.subTest(field=field):
+                rule = _rule_with_root(
+                    MediaType.MOVIE,
+                    TARGET_MOVIE_VERSION,
+                    _group("and", _condition(field, "not_contains_any", value)),
+                )
+                self.assertFalse(
+                    _evaluate_movie_version_rule(movie, version, rule, {}, [])
+                )
+
+    def test_series_metadata_and_season_counts_are_inherited_by_all_scopes(
+        self,
+    ) -> None:
+        series = Series(
+            title="Series",
+            tmdb_id=2,
+            year=2024,
+            original_language="ja",
+            origin_country=["JP"],
+        )
+        series.season_count = 4
+        special = Season(series_id=1, season_number=0)
+        season_one = Season(series_id=1, season_number=1, size=1)
+        season_two = Season(series_id=1, season_number=2, size=1)
+        series.seasons = [special, season_one, season_two]
+        episode = Episode(season_id=1, episode_number=1)
+        conditions = _group(
+            "and",
+            _condition("media.year", "equals", 2024),
+            _condition("tmdb.original_language", "contains_any", ["jpn"]),
+            _condition("tmdb.origin_country", "contains_any", ["jp"]),
+            _condition("series.tmdb_season_count", "equals", 4),
+            _condition("series.library_season_count", "equals", 2),
+        )
+
+        series_rule = _rule_with_root(MediaType.SERIES, TARGET_SERIES, conditions)
+        season_rule = _rule_with_root(MediaType.SERIES, TARGET_SEASON, conditions)
+        episode_rule = _rule_with_root(MediaType.SERIES, TARGET_EPISODE, conditions)
+
+        self.assertTrue(_evaluate_movie_rule(series, series_rule, {}, []))
+        self.assertTrue(
+            _evaluate_rule_for_season(series, season_one, season_rule, {}, [])
+        )
+        self.assertTrue(
+            _evaluate_rule_for_episode(
+                series, season_one, episode, episode_rule, {}, []
+            )
+        )
+
     def test_nested_and_or_movie_version_only_records_matching_or_branch(self) -> None:
         movie = Movie(title="Movie", tmdb_id=1, size=10 * 1024**3)
         version = _make_movie_version(

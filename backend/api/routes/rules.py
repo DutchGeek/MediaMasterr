@@ -20,6 +20,7 @@ from backend.core.rule_engine import (
     validate_rule_definition,
 )
 from backend.core.utils.filesystem import normalize_fpath
+from backend.core.utils.language import language_name, normalize_language
 from backend.core.utils.misc import normalize_genre_names, normalize_name_list
 from backend.database import get_db
 from backend.database.models import (
@@ -43,9 +44,11 @@ from backend.models.media import PaginatedRulePreviewResponse, RulePreviewMetada
 from backend.models.rules import (
     GenreLookupResponse,
     MediaServerCollectionLookupResponse,
+    MetadataValueLookupResponse,
     MovieCollectionLookupResponse,
     PaginatedGenresResponse,
     PaginatedMediaServerCollectionsResponse,
+    PaginatedMetadataValuesResponse,
     PaginatedMovieCollectionsResponse,
     RulePreviewRequest,
     SeerrUserLookupResponse,
@@ -642,6 +645,115 @@ async def get_genres(
         items=[
             GenreLookupResponse(name=name, media_count=count)
             for name, count in page_items
+        ],
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
+
+
+@router.get(
+    "/rules/original-languages",
+    response_model=PaginatedMetadataValuesResponse,
+)
+async def get_original_languages(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = MediaType.MOVIE,
+    q: Annotated[str, Query(max_length=200)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> PaginatedMetadataValuesResponse:
+    """Return canonical original languages sourced from active local media."""
+    model = Movie if media_type is MediaType.MOVIE else Series
+    rows = await db.execute(
+        select(model.original_language).where(
+            model.removed_at.is_(None),
+            model.original_language.is_not(None),
+        )
+    )
+
+    needle = q.strip().lower()
+    counts: dict[str, tuple[str, int]] = {}
+    for (raw_language,) in rows.all():
+        value = normalize_language(raw_language)
+        if value is None:
+            continue
+        name = language_name(value) or value
+        if needle and needle not in value.lower() and needle not in name.lower():
+            continue
+        _, count = counts.get(value, (name, 0))
+        counts[value] = (name, count + 1)
+
+    sorted_items = sorted(counts.items(), key=lambda item: item[1][0].lower())
+    total = len(sorted_items)
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    offset = (page - 1) * per_page
+    page_items = sorted_items[offset : offset + per_page]
+    return PaginatedMetadataValuesResponse(
+        items=[
+            MetadataValueLookupResponse(
+                value=value,
+                name=name,
+                media_count=count,
+            )
+            for value, (name, count) in page_items
+        ],
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
+
+
+@router.get(
+    "/rules/origin-countries",
+    response_model=PaginatedMetadataValuesResponse,
+)
+async def get_origin_countries(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = MediaType.MOVIE,
+    q: Annotated[str, Query(max_length=200)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> PaginatedMetadataValuesResponse:
+    """Return origin-country codes sourced from active local media."""
+    model = Movie if media_type is MediaType.MOVIE else Series
+    rows = await db.execute(
+        select(model.origin_country).where(
+            model.removed_at.is_(None),
+            model.origin_country.is_not(None),
+        )
+    )
+
+    needle = q.strip().lower()
+    counts: dict[str, int] = {}
+    for (raw_countries,) in rows.all():
+        seen_for_media: set[str] = set()
+        for raw_country in raw_countries or []:
+            value = str(raw_country or "").strip().upper()
+            if not value or value in seen_for_media:
+                continue
+            seen_for_media.add(value)
+            if needle and needle not in value.lower():
+                continue
+            counts[value] = counts.get(value, 0) + 1
+
+    sorted_items = sorted(counts.items())
+    total = len(sorted_items)
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    offset = (page - 1) * per_page
+    page_items = sorted_items[offset : offset + per_page]
+    return PaginatedMetadataValuesResponse(
+        items=[
+            MetadataValueLookupResponse(
+                value=value,
+                name=value,
+                media_count=count,
+            )
+            for value, count in page_items
         ],
         total=total,
         page=page,
