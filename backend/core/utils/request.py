@@ -89,7 +89,7 @@ def format_http_failure(
     endpoint: str | None = None,
     max_body_chars: int = DEFAULT_ERROR_BODY_MAX_CHARS,
 ) -> str:
-    resp = response or getattr(exception, "response", None)
+    resp = response if response is not None else getattr(exception, "response", None)
     status_code = getattr(resp, "status_code", None)
     req = getattr(resp, "request", None)
     method_name = method or getattr(req, "method", None)
