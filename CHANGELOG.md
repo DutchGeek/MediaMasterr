@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - movie.version_count
   - series.tmdb_season_count
   - series.library_season_count
+  - Rule Documentation:
+    - Target scopes and condition groups
+    - Operator and missing-metadata behavior
+    - Field units and scope reference
+    - Language/country normalization
+    - Plex/Jellyfin/Emby bitrate handling
+    - Movie version-count warning
+    - TMDB versus library season counts
+    - Recommended preview workflow
+    - Complete rule API endpoint list
 
 ### Changed
 
