@@ -6,6 +6,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import Spinner from "$lib/components/ui/spinner/spinner.svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import Plus from "@lucide/svelte/icons/plus";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Copy from "@lucide/svelte/icons/copy";
@@ -15,6 +16,8 @@
   import Play from "@lucide/svelte/icons/play";
   import Clapperboard from "@lucide/svelte/icons/clapperboard";
   import Tv from "@lucide/svelte/icons/tv";
+  import ListChecks from "@lucide/svelte/icons/list-checks";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { toast } from "svelte-sonner";
   import {
     MediaType,
@@ -35,6 +38,16 @@
   let ruleFormMode = $state<"create" | "edit">("create");
   let showRuleForm = $state(false);
   let availableLibraries = $state<LibraryType[]>([]);
+  let outcomeFilter = $state<"all" | "candidate" | "protect">("all");
+
+  const filteredRules = $derived(
+    rules.filter((rule) => {
+      if (outcomeFilter === "all") return true;
+      const outcome =
+        rule.action?.outcome === "protect" ? "protect" : "candidate";
+      return outcome === outcomeFilter;
+    }),
+  );
 
   let showDeleteDialog = $state(false);
   let ruleToDelete = $state<ReclaimRule | null>(null);
@@ -213,8 +226,14 @@
         ? "movie versions"
         : rule.target_scope === "season"
           ? "seasons"
-          : "series";
-    return `${count} condition${count === 1 ? "" : "s"} targeting ${target}`;
+          : rule.target_scope === "episode"
+            ? "episodes"
+            : "series";
+    const outcome =
+      rule.action?.outcome === "protect"
+        ? "creating protections"
+        : "creating cleanup candidates";
+    return `${count} condition${count === 1 ? "" : "s"} targeting ${target}, ${outcome}`;
   };
 
   const openDeleteDialog = (rule: ReclaimRule) => {
@@ -426,7 +445,9 @@
   <div class="max-w-7xl mx-auto">
     <div>
       <h1 class="text-3xl font-bold text-foreground">Rules</h1>
-      <p class="text-muted-foreground">Manage cleanup rules</p>
+      <p class="text-muted-foreground">
+        Manage cleanup candidate and automated protection rules
+      </p>
     </div>
     {#if $auth.user?.role !== "admin"}
       <div
@@ -472,6 +493,29 @@
           </div>
 
           <div class="flex flex-wrap justify-end items-center gap-2">
+            <Select.Root type="single" bind:value={outcomeFilter}>
+              <Select.Trigger
+                class="w-40 bg-card text-card-foreground cursor-pointer"
+                aria-label="Filter rules by outcome"
+              >
+                {outcomeFilter === "protect"
+                  ? "Protection rules"
+                  : outcomeFilter === "candidate"
+                    ? "Candidate rules"
+                    : "All outcomes"}
+              </Select.Trigger>
+              <Select.Content class="bg-card">
+                <Select.Item value="all" label="All outcomes">
+                  All outcomes
+                </Select.Item>
+                <Select.Item value="candidate" label="Candidate rules">
+                  Candidate rules
+                </Select.Item>
+                <Select.Item value="protect" label="Protection rules">
+                  Protection rules
+                </Select.Item>
+              </Select.Content>
+            </Select.Root>
             <input
               type="file"
               accept=".json"
@@ -533,9 +577,18 @@
                 </p>
               </div>
             </div>
+          {:else if filteredRules.length === 0}
+            <div
+              class="bg-card rounded-lg border border-border p-10 text-center"
+            >
+              <p class="text-muted-foreground">
+                No {outcomeFilter === "protect" ? "protection" : "candidate"} rules
+                match this filter.
+              </p>
+            </div>
           {:else}
             <div class="space-y-4">
-              {#each rules as rule}
+              {#each filteredRules as rule}
                 <div
                   class="bg-card rounded-lg border border-border p-6 hover:shadow-md transition-shadow"
                 >
@@ -573,6 +626,22 @@
                           class="shrink-0"
                         >
                           {rule.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                        <Badge
+                          variant="secondary"
+                          class="shrink-0 {rule.action?.outcome === 'protect'
+                            ? 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                            : 'border-amber-500/50 text-amber-600 dark:text-amber-400'}"
+                        >
+                          <div class="inline-flex items-center gap-1.5">
+                            {#if rule.action?.outcome === "protect"}
+                              <ShieldCheck class="size-4" />
+                              <span>Protection</span>
+                            {:else}
+                              <ListChecks class="size-4" />
+                              <span>Candidate</span>
+                            {/if}
+                          </div>
                         </Badge>
                       </div>
                       <p class="text-sm text-muted-foreground line-clamp-2">

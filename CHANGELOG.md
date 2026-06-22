@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Dependency [python-iso639](https://github.com/jacksonllee/iso639)
+- Automated protection rule outcome:
+  - Rules can create managed protections instead of deletion candidates
+  - Managed protections reconcile during cleanup scans and take precedence over candidate rules
+  - Manual protections remain unchanged
 - Rules:
   - media.year
   - tmdb.original_language

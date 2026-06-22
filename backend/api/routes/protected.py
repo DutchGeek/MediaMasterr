@@ -16,6 +16,7 @@ from backend.database.models import (
     Movie,
     MovieVersion,
     ProtectedMedia,
+    ReclaimRule,
     Season,
     Series,
     User,
@@ -158,12 +159,14 @@ async def get_protected_entries(
             Episode.episode_number.label("episode_number"),
             Episode.name.label("episode_name"),
             User.username.label("actor_username"),
+            ReclaimRule.name.label("source_rule_name"),
         )
         .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
         .outerjoin(Series, Series.id == ProtectedMedia.series_id)
         .outerjoin(Season, Season.id == ProtectedMedia.season_id)
         .outerjoin(Episode, Episode.id == ProtectedMedia.episode_id)
         .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
+        .outerjoin(ReclaimRule, ReclaimRule.id == ProtectedMedia.source_rule_id)
     )
 
     if media_type:
@@ -177,6 +180,7 @@ async def get_protected_entries(
                 Series.title.ilike(search_term),
                 ProtectedMedia.reason.ilike(search_term),
                 User.username.ilike(search_term),
+                ReclaimRule.name.ilike(search_term),
             )
         )
 
@@ -185,6 +189,7 @@ async def get_protected_entries(
         .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
         .outerjoin(Series, Series.id == ProtectedMedia.series_id)
         .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
+        .outerjoin(ReclaimRule, ReclaimRule.id == ProtectedMedia.source_rule_id)
     )
 
     if media_type:
@@ -198,6 +203,7 @@ async def get_protected_entries(
                 Series.title.ilike(search_term),
                 ProtectedMedia.reason.ilike(search_term),
                 User.username.ilike(search_term),
+                ReclaimRule.name.ilike(search_term),
             )
         )
 
@@ -318,7 +324,11 @@ async def get_protected_entries(
                 anilist_favourites=anilist_favourites,
                 reason=entry.reason,
                 protected_by_user_id=entry.protected_by_user_id,
-                protected_by_username=row.actor_username or "Unknown",
+                protected_by_username=row.actor_username
+                or ("Automated rule" if entry.source == "rule" else "Unknown"),
+                source="rule" if entry.source == "rule" else "manual",
+                source_rule_id=entry.source_rule_id,
+                source_rule_name=row.source_rule_name,
                 permanent=entry.permanent,
                 expires_at=to_utc_isoformat(entry.expires_at),
                 created_at=to_utc_isoformat(entry.created_at) or "",
@@ -386,6 +396,7 @@ async def create_protection_entry(
         )
         media = media_result.scalar_one_or_none()
         existing_query = select(ProtectedMedia).where(
+            ProtectedMedia.source == "manual",
             ProtectedMedia.media_type == MediaType.MOVIE,
             ProtectedMedia.movie_id == request_data.media_id,
             ProtectedMedia.movie_version_id == request_data.movie_version_id,
@@ -410,6 +421,7 @@ async def create_protection_entry(
         )
         media = media_result.scalar_one_or_none()
         existing_query = select(ProtectedMedia).where(
+            ProtectedMedia.source == "manual",
             ProtectedMedia.media_type == MediaType.SERIES,
             ProtectedMedia.series_id == request_data.media_id,
             _series_scope_overlap_clause(
@@ -483,6 +495,9 @@ async def create_protection_entry(
         reason=new_entry.reason,
         protected_by_user_id=user.id,
         protected_by_username=user.username,
+        source="manual",
+        source_rule_id=None,
+        source_rule_name=None,
         permanent=new_entry.permanent,
         expires_at=to_utc_isoformat(new_entry.expires_at),
         created_at=to_utc_isoformat(new_entry.created_at) or "",
@@ -519,6 +534,11 @@ async def update_protection_duration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Protected entry not found",
+        )
+    if entry.source == "rule":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rule-managed protections can only be changed by editing the rule",
         )
 
     if request_data.duration_days is None:
@@ -587,6 +607,9 @@ async def update_protection_duration(
         reason=entry.reason,
         protected_by_user_id=entry.protected_by_user_id,
         protected_by_username=actor.username if actor else "Unknown",
+        source="manual",
+        source_rule_id=None,
+        source_rule_name=None,
         permanent=entry.permanent,
         expires_at=to_utc_isoformat(expires_at_value),
         created_at=to_utc_isoformat(entry.created_at) or "",
@@ -616,6 +639,11 @@ async def delete_protection_entry(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Protected entry not found",
+        )
+    if entry.source == "rule":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rule-managed protections can only be removed by editing the rule",
         )
 
     await db.delete(entry)

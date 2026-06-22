@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
@@ -1197,8 +1197,8 @@ class ProtectedMedia(Base):
     media_type: Mapped[MediaType] = mapped_column(Enum(MediaType))
 
     # protected details (required fields first for dataclass)
-    protected_by_user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE")
+    protected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), default=None
     )
 
     # foreign keys (movie_id or series_id will be set based on media_type)
@@ -1213,10 +1213,21 @@ class ProtectedMedia(Base):
     episode_id: Mapped[int | None] = mapped_column(
         ForeignKey("episodes.id", ondelete="CASCADE"), default=None, index=True
     )
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    source_rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reclaim_rules.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
 
     # optional details
     reason: Mapped[str | None] = mapped_column(Text, default=None)
-    protected_by: Mapped[User] = relationship(init=False, lazy="noload", repr=False)
+    protected_by: Mapped[User | None] = relationship(
+        init=False, lazy="noload", repr=False
+    )
+    source_rule: Mapped[ReclaimRule | None] = relationship(
+        init=False, lazy="noload", repr=False
+    )
     season: Mapped[Season | None] = relationship(init=False, lazy="noload", repr=False)
     episode: Mapped[Episode | None] = relationship(
         init=False,

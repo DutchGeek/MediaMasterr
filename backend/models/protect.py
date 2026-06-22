@@ -1,4 +1,6 @@
-﻿from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel
 
 from backend.enums import MediaType
 
@@ -27,8 +29,11 @@ class ProtectedEntryResponse(BaseModel):
     anilist_popularity: int | None = None
     anilist_favourites: int | None = None
     reason: str | None
-    protected_by_user_id: int
+    protected_by_user_id: int | None
     protected_by_username: str
+    source: Literal["manual", "rule"] = "manual"
+    source_rule_id: int | None = None
+    source_rule_name: str | None = None
     permanent: bool
     expires_at: str | None
     created_at: str

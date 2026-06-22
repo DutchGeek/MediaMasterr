@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
+    RULE_OUTCOME_CANDIDATE,
+    RULE_OUTCOME_PROTECT,
     TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
@@ -19,6 +21,7 @@ from backend.core.rule_engine import (
     SeerrRequestResolver,
     collect_rule_conditions,
     evaluate_advanced_rule,
+    normalize_rule_outcome,
     normalize_rule_target,
 )
 from backend.core.service_manager import service_manager
@@ -476,6 +479,64 @@ async def collect_rule_preview_matches(
     return result.matches
 
 
+async def _collect_rule_match_records(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
+) -> list[MatchedCandidateRecord]:
+    """Collect candidates that match the given rules."""
+    movie_rules = [r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION]
+    series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
+    season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
+    episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
+
+    matches: list[MatchedCandidateRecord] = []
+    if movie_rules:
+        matches.extend(
+            await _collect_movie_version_candidate_records(
+                db,
+                movie_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if series_rules:
+        matches.extend(
+            await _collect_series_candidate_records(
+                db,
+                series_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if season_rules:
+        matches.extend(
+            await _collect_season_candidate_records(
+                db,
+                season_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if episode_rules:
+        matches.extend(
+            await _collect_episode_candidate_records(
+                db,
+                episode_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    return matches
+
+
 async def collect_rule_preview_matches_with_metadata(
     db: AsyncSession,
     rules: list[ReclaimRule],
@@ -505,47 +566,165 @@ async def collect_rule_preview_matches_with_metadata(
         allow_stale_on_failure=True,
     )
 
-    movie_rules = [r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION]
-    series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
-    season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
-    episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
-
     metadata = RulePreviewMatchMetadata()
-    matches: list[MatchedCandidateRecord] = []
-    if movie_rules:
-        matches.extend(
-            await _collect_movie_version_candidate_records(
-                db,
-                movie_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if series_rules:
-        matches.extend(
-            await _collect_series_candidate_records(
-                db,
-                series_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if season_rules:
-        matches.extend(
-            await _collect_season_candidate_records(
-                db,
-                season_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if episode_rules:
-        matches.extend(
-            await _collect_episode_candidate_records(
-                db,
-                episode_rules,
-                preview_metadata=metadata,
-            )
-        )
+    is_protection_preview = bool(rules) and all(
+        normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT for rule in rules
+    )
+    matches = await _collect_rule_match_records(
+        db,
+        rules,
+        preview_metadata=metadata,
+        exclude_favorites=not is_protection_preview,
+        exclude_protected=not is_protection_preview,
+    )
     metadata.matched_count = len(matches)
     return RulePreviewMatchResult(matches=matches, metadata=metadata)
+
+
+ManagedProtectionKey: TypeAlias = tuple[
+    int,
+    MediaType,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+]
+
+
+def _managed_protection_key(
+    *,
+    rule_id: int,
+    media_type: MediaType,
+    movie_id: int | None,
+    movie_version_id: int | None,
+    series_id: int | None,
+    season_id: int | None,
+    episode_id: int | None,
+) -> ManagedProtectionKey:
+    return (
+        rule_id,
+        media_type,
+        movie_id,
+        movie_version_id,
+        series_id,
+        season_id,
+        episode_id,
+    )
+
+
+def _managed_protection_reason(
+    record: MatchedCandidateRecord,
+    rule_id: int,
+) -> str:
+    for reason in record.reason_data:
+        if reason.get("rule_id") == rule_id:
+            text = str(reason.get("text") or "").strip()
+            if text:
+                return text
+    return record.reason or "Matched automated protection rule"
+
+
+async def _reconcile_rule_managed_protections(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    preserve_rule_ids: set[int] | None = None,
+) -> tuple[int, int, int]:
+    preserve_rule_ids = preserve_rule_ids or set()
+    records = await _collect_rule_match_records(
+        db,
+        rules,
+        exclude_favorites=False,
+        exclude_protected=False,
+    )
+
+    desired: dict[ManagedProtectionKey, tuple[MatchedCandidateRecord, int]] = {}
+    active_rule_ids = {rule.id for rule in rules}
+    for record in records:
+        for rule_id in record.matched_rule_ids:
+            if rule_id not in active_rule_ids:
+                continue
+            key = _managed_protection_key(
+                rule_id=rule_id,
+                media_type=record.media_type,
+                movie_id=record.movie_id,
+                movie_version_id=record.movie_version_id,
+                series_id=record.series_id,
+                season_id=record.season_id,
+                episode_id=record.episode_id,
+            )
+            desired[key] = (record, rule_id)
+
+    existing_result = await db.execute(
+        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+    )
+    existing_rows = existing_result.scalars().all()
+    existing: dict[ManagedProtectionKey, ProtectedMedia] = {}
+    rows_to_delete: list[ProtectedMedia] = []
+    for row in existing_rows:
+        if row.source_rule_id is None:
+            rows_to_delete.append(row)
+            continue
+        key = _managed_protection_key(
+            rule_id=row.source_rule_id,
+            media_type=row.media_type,
+            movie_id=row.movie_id,
+            movie_version_id=row.movie_version_id,
+            series_id=row.series_id,
+            season_id=row.season_id,
+            episode_id=row.episode_id,
+        )
+        if key in existing:
+            rows_to_delete.append(row)
+        else:
+            existing[key] = row
+
+    created = 0
+    updated = 0
+    for key, (record, rule_id) in desired.items():
+        reason = _managed_protection_reason(record, rule_id)
+        existing_row = existing.pop(key) if key in existing else None
+        if existing_row is None:
+            db.add(
+                ProtectedMedia(
+                    media_type=record.media_type,
+                    protected_by_user_id=None,
+                    movie_id=record.movie_id,
+                    movie_version_id=record.movie_version_id,
+                    series_id=record.series_id,
+                    season_id=record.season_id,
+                    episode_id=record.episode_id,
+                    source="rule",
+                    source_rule_id=rule_id,
+                    reason=reason,
+                    permanent=True,
+                    expires_at=None,
+                )
+            )
+            created += 1
+            continue
+
+        if (
+            existing_row.reason != reason
+            or not existing_row.permanent
+            or existing_row.expires_at is not None
+            or existing_row.protected_by_user_id is not None
+        ):
+            existing_row.reason = reason
+            existing_row.permanent = True
+            existing_row.expires_at = None
+            existing_row.protected_by_user_id = None
+            updated += 1
+
+    for row in existing.values():
+        if row.source_rule_id not in preserve_rule_ids:
+            rows_to_delete.append(row)
+
+    for row in rows_to_delete:
+        await db.delete(row)
+    await db.flush()
+    return created, updated, len(rows_to_delete)
 
 
 async def scan_cleanup_candidates() -> None:
@@ -1813,7 +1992,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         rules = result.scalars().all()
 
         if not rules:
-            LOG.info("No enabled cleanup rules found, clearing all candidates")
+            LOG.info(
+                "No enabled cleanup rules found, clearing candidates and "
+                "rule-managed protections"
+            )
+            await _reconcile_rule_managed_protections(db, [])
             await db.execute(delete(ReclaimCandidate))
             await db.commit()
             try:
@@ -1847,6 +2030,7 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         await _refresh_arr_tags_for_rules(list(rules))
         await _refresh_arr_monitoring_for_rules(list(rules))
 
+        preserved_protection_rule_ids: set[int] = set()
         seerr_ready, seerr_error = await _activate_seerr_request_resolver_for_rules(
             db,
             list(rules),
@@ -1858,6 +2042,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         else:
             seerr_dependent_rules = [r for r in rules if _rule_uses_seerr_fields(r)]
             if seerr_dependent_rules:
+                preserved_protection_rule_ids = {
+                    rule.id
+                    for rule in seerr_dependent_rules
+                    if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
+                }
                 rules = [r for r in rules if not _rule_uses_seerr_fields(r)]
                 skipped = len(seerr_dependent_rules)
                 reason = seerr_error or "Failed to refresh Seerr request snapshot"
@@ -1886,14 +2075,47 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
             else:
                 await clear_seerr_rule_skip_notice(db)
 
-        # Separate rules by explicit advanced target. Rules without a valid
-        # advanced definition are skipped by the evaluator and will not match.
-        movie_rules = [
-            r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION
+        protection_rules = [
+            rule
+            for rule in rules
+            if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
         ]
-        series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
-        season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
-        episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
+        candidate_rules = [
+            rule
+            for rule in rules
+            if normalize_rule_outcome(rule) == RULE_OUTCOME_CANDIDATE
+        ]
+        (
+            protected_created,
+            protected_updated,
+            protected_removed,
+        ) = await _reconcile_rule_managed_protections(
+            db,
+            protection_rules,
+            preserve_rule_ids=preserved_protection_rule_ids,
+        )
+        LOG.info(
+            "Automated protection reconciliation completed: "
+            f"{protected_created} created, {protected_updated} updated, "
+            f"{protected_removed} removed"
+        )
+
+        # Separate candidate rules by explicit advanced target. Rules without a
+        # valid advanced definition are skipped by the evaluator and will not match.
+        movie_rules = [
+            r
+            for r in candidate_rules
+            if normalize_rule_target(r) == TARGET_MOVIE_VERSION
+        ]
+        series_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_SERIES
+        ]
+        season_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_SEASON
+        ]
+        episode_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_EPISODE
+        ]
 
         candidates_created = 0
         candidates_updated = 0
@@ -1902,7 +2124,7 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         # process movies
         if movie_rules:
             created, updated, removed = await _process_media(
-                db, movie_rules, MediaType.MOVIE
+                db, movie_rules, MediaType.MOVIE, commit=False
             )
             candidates_created += created
             candidates_updated += updated
@@ -1918,12 +2140,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         # process series
         if series_rules:
             created, updated, removed = await _process_media(
-                db, series_rules, MediaType.SERIES
+                db, series_rules, MediaType.SERIES, commit=False
             )
             candidates_created += created
             candidates_updated += updated
@@ -1939,10 +2160,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         if season_rules:
-            s_cr, s_up, s_rm = await _process_series_seasons(db, season_rules)
+            s_cr, s_up, s_rm = await _process_series_seasons(
+                db, season_rules, commit=False
+            )
             candidates_created += s_cr
             candidates_updated += s_up
             candidates_removed += s_rm
@@ -1957,10 +2179,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         if episode_rules:
-            e_cr, e_up, e_rm = await _process_series_episodes(db, episode_rules)
+            e_cr, e_up, e_rm = await _process_series_episodes(
+                db, episode_rules, commit=False
+            )
             candidates_created += e_cr
             candidates_updated += e_up
             candidates_removed += e_rm
@@ -1975,7 +2198,8 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
+
+        await db.commit()
 
         try:
             await _sync_leaving_soon_collections(db)
@@ -1989,11 +2213,16 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
 
         return candidates_created, candidates_updated, candidates_removed
     except Exception:
+        await db.rollback()
         raise
 
 
 async def _process_media(
-    db: AsyncSession, rules: list[ReclaimRule], media_type: MediaType
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    media_type: MediaType,
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """
     Process movies or series against cleanup rules.
@@ -2001,10 +2230,10 @@ async def _process_media(
     Returns (created_count, updated_count, removed_count)
     """
     if media_type is MediaType.MOVIE:
-        return await _process_movie_versions(db, rules)
+        return await _process_movie_versions(db, rules, commit=commit)
 
     records = await _collect_series_candidate_records(db, rules)
-    return await _sync_series_candidates(db, records)
+    return await _sync_series_candidates(db, records, commit=commit)
 
 
 async def _collect_series_candidate_records(
@@ -2012,6 +2241,8 @@ async def _collect_series_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate whole series rules without mutating persisted candidates."""
     (
@@ -2026,7 +2257,7 @@ async def _collect_series_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
@@ -2043,19 +2274,21 @@ async def _collect_series_candidate_records(
     LOG.info(f"Processing {len(media_items)} {MediaType.SERIES.value} items")
 
     # fetch all protected items for this media type to skip them
-    now = datetime.now(UTC)
-    protected_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_ids = {b.series_id for b in protected_result.scalars().all()}
+        protected_ids = {b.series_id for b in protected_result.scalars().all()}
 
     LOG.info(
         f"Found {len(protected_ids)} protected {MediaType.SERIES.value} items to skip"
@@ -2107,6 +2340,8 @@ async def _collect_series_candidate_records(
 async def _sync_series_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize series candidates with the database."""
     result = await db.execute(
@@ -2163,7 +2398,10 @@ async def _sync_series_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
@@ -2171,10 +2409,12 @@ async def _sync_series_candidates(
 async def _process_movie_versions(
     db: AsyncSession,
     rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate movie rules at movie-version granularity."""
     records = await _collect_movie_version_candidate_records(db, rules)
-    return await _sync_movie_version_candidates(db, records)
+    return await _sync_movie_version_candidates(db, records, commit=commit)
 
 
 async def _collect_movie_version_candidate_records(
@@ -2182,6 +2422,8 @@ async def _collect_movie_version_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate movie-version rules without mutating persisted candidates."""
     (
@@ -2196,7 +2438,7 @@ async def _collect_movie_version_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
     query = (
@@ -2210,19 +2452,21 @@ async def _collect_movie_version_candidate_records(
         preview_metadata.source_media_count += len(movies)
     LOG.info(f"Processing {len(movies)} movie items at version granularity")
 
-    now = datetime.now(UTC)
-    protected_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.MOVIE,
-            ProtectedMedia.movie_id.isnot(None),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_rows: list[ProtectedMedia] = []
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.MOVIE,
+                ProtectedMedia.movie_id.isnot(None),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_rows = protected_result.scalars().all()
+        protected_rows = list(protected_result.scalars().all())
     protected_movie_ids = {
         p.movie_id
         for p in protected_rows
@@ -2292,6 +2536,8 @@ async def _collect_movie_version_candidate_records(
 async def _sync_movie_version_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize movie version candidates with the database."""
     existing_result = await db.execute(
@@ -2357,31 +2603,40 @@ async def _sync_movie_version_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
 
 async def _process_series_seasons(
-    db: AsyncSession, rules: list[ReclaimRule]
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate each series' seasons against rules and create/update season-level candidates.
 
     Returns (created_count, updated_count, removed_count).
     """
     records = await _collect_season_candidate_records(db, rules)
-    return await _sync_season_candidates(db, records)
+    return await _sync_season_candidates(db, records, commit=commit)
 
 
 async def _process_series_episodes(
-    db: AsyncSession, rules: list[ReclaimRule]
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate each series' episodes against rules and create/update episode-level candidates.
 
     Returns (created_count, updated_count, removed_count).
     """
     records = await _collect_episode_candidate_records(db, rules)
-    return await _sync_episode_candidates(db, records)
+    return await _sync_episode_candidates(db, records, commit=commit)
 
 
 async def _collect_season_candidate_records(
@@ -2389,6 +2644,8 @@ async def _collect_season_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate season rules without mutating persisted candidates."""
     include_episodes = _rules_use_season_episode_watch_fields(rules)
@@ -2404,7 +2661,7 @@ async def _collect_season_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
@@ -2426,38 +2683,40 @@ async def _collect_season_candidate_records(
         return []
 
     # whole-series protection also covers every season of that series
-    now = datetime.now(UTC)
-    protected_series_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            _is_series_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_series_ids: set[int | None] = set()
+    protected_season_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_series_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                _is_series_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_series_ids = {
-        b.series_id for b in protected_series_result.scalars().all()
-    }
+        protected_series_ids = {
+            b.series_id for b in protected_series_result.scalars().all()
+        }
 
-    # season-level protection entries
-    protected_season_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_season_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_season_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_season_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_season_ids = {
-        b.season_id for b in protected_season_result.scalars().all()
-    }
+        protected_season_ids = {
+            b.season_id for b in protected_season_result.scalars().all()
+        }
 
     records: list[MatchedCandidateRecord] = []
 
@@ -2512,6 +2771,8 @@ async def _collect_season_candidate_records(
 async def _sync_season_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize season candidates with the database."""
     existing_result = await db.execute(
@@ -2570,7 +2831,10 @@ async def _sync_season_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
@@ -2580,6 +2844,8 @@ async def _collect_episode_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate episode rules without mutating persisted candidates."""
     (
@@ -2594,7 +2860,7 @@ async def _collect_episode_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
@@ -2614,52 +2880,56 @@ async def _collect_episode_candidate_records(
     if not all_series:
         return []
 
-    now = datetime.now(UTC)
-    protected_series_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            _is_series_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_series_ids: set[int | None] = set()
+    protected_season_ids: set[int | None] = set()
+    protected_episode_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_series_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                _is_series_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_series_ids = {
-        b.series_id for b in protected_series_result.scalars().all()
-    }
+        protected_series_ids = {
+            b.series_id for b in protected_series_result.scalars().all()
+        }
 
-    protected_season_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_season_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_season_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_season_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_season_ids = {
-        b.season_id for b in protected_season_result.scalars().all()
-    }
+        protected_season_ids = {
+            b.season_id for b in protected_season_result.scalars().all()
+        }
 
-    protected_episode_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_episode_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_episode_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_episode_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_episode_ids = {
-        b.episode_id for b in protected_episode_result.scalars().all()
-    }
+        protected_episode_ids = {
+            b.episode_id for b in protected_episode_result.scalars().all()
+        }
 
     records: list[MatchedCandidateRecord] = []
 
@@ -2721,6 +2991,8 @@ async def _collect_episode_candidate_records(
 async def _sync_episode_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize episode candidates with the database."""
     existing_result = await db.execute(
@@ -2780,7 +3052,10 @@ async def _sync_episode_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 

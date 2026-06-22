@@ -49,6 +49,7 @@ from backend.tasks.cleanup import (
     _evaluate_rule_for_season,
     _process_series_episodes,
     _process_series_seasons,
+    _reconcile_rule_managed_protections,
     _scan_with_db,
     collect_rule_preview_matches,
     collect_rule_preview_matches_with_metadata,
@@ -2129,11 +2130,261 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        self._async_db_patch = patch.object(
+            cleanup_tasks,
+            "async_db",
+            self._sessionmaker,
+        )
+        self._async_db_patch.start()
 
     async def asyncTearDown(self) -> None:
+        self._async_db_patch.stop()
         await self._engine.dispose()
         if self._db_path.exists():
             self._db_path.unlink()
+
+    async def test_automated_protection_wins_over_matching_candidate(self) -> None:
+        async with self._sessionmaker() as db:
+            protection_rule = _make_rule(MediaType.MOVIE, min_size=1)
+            protection_rule.name = "Protect large movies"
+            protection_rule.action = {"outcome": "protect"}
+            candidate_rule = _make_rule(MediaType.MOVIE, min_size=1)
+            candidate_rule.name = "Delete large movies"
+            movie = Movie(title="Protected Movie", tmdb_id=10001, size=1024)
+            db.add_all([protection_rule, candidate_rule, movie])
+            await db.flush()
+            version = _make_movie_version(
+                service_media_id="protected-version",
+                service_item_id="protected-item",
+            )
+            version.movie_id = movie.id
+            version.size = 1024
+            db.add(version)
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            result = await _scan_with_db(db)
+            self.assertEqual(result, (0, 0, 0))
+            candidates = (await db.execute(select(ReclaimCandidate))).scalars().all()
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(candidates, [])
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(protections[0].source_rule_id, protection_rule.id)
+
+    async def test_automated_protection_respects_library_scope(self) -> None:
+        async with self._sessionmaker() as db:
+            protection_rule = _make_rule(
+                MediaType.MOVIE,
+                library_ids=["protected-library"],
+                min_size=1,
+            )
+            protection_rule.action = {"outcome": "protect"}
+            protected_movie = Movie(
+                title="Protected Library Movie",
+                tmdb_id=10006,
+                size=1024,
+            )
+            other_movie = Movie(
+                title="Other Library Movie",
+                tmdb_id=10007,
+                size=1024,
+            )
+            db.add_all([protection_rule, protected_movie, other_movie])
+            await db.flush()
+
+            protected_version = _make_movie_version(
+                service_media_id="protected-library-version",
+                service_item_id="protected-library-item",
+                library_id="protected-library",
+            )
+            protected_version.movie_id = protected_movie.id
+            protected_version.size = 1024
+            other_version = _make_movie_version(
+                service_media_id="other-library-version",
+                service_item_id="other-library-item",
+                library_id="other-library",
+            )
+            other_version.movie_id = other_movie.id
+            other_version.size = 1024
+            db.add_all([protected_version, other_version])
+            await db.commit()
+            protected_version_id = protected_version.id
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(
+                protections[0].movie_version_id,
+                protected_version_id,
+            )
+
+    async def test_rule_reconciliation_preserves_manual_protection(self) -> None:
+        async with self._sessionmaker() as db:
+            user = User(username="admin", password_hash="x")
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Protected Series", tmdb_id=10002, size=1024)
+            db.add_all([user, rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=user.id,
+                    source="manual",
+                    reason="Keep manually",
+                )
+            )
+            await db.commit()
+            series_id = series.id
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(
+                            ProtectedMedia.series_id == series_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                {entry.source for entry in protections}, {"manual", "rule"}
+            )
+
+            series = await db.get(Series, series_id)
+            self.assertIsNotNone(series)
+            assert series is not None
+            series.size = 0
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(
+                            ProtectedMedia.series_id == series_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(protections[0].source, "manual")
+
+    async def test_multiple_protection_rules_create_separate_entries(self) -> None:
+        async with self._sessionmaker() as db:
+            first_rule = _make_rule(MediaType.SERIES, min_size=1)
+            first_rule.name = "Protect one"
+            first_rule.action = {"outcome": "protect"}
+            second_rule = _make_rule(MediaType.SERIES, min_size=1)
+            second_rule.name = "Protect two"
+            second_rule.action = {"outcome": "protect"}
+            series = Series(title="Twice Protected", tmdb_id=10003, size=1024)
+            db.add_all([first_rule, second_rule, series])
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 2)
+            self.assertEqual(
+                {entry.source_rule_id for entry in protections},
+                {first_rule.id, second_rule.id},
+            )
+
+    async def test_skipped_protection_rule_can_preserve_existing_entries(self) -> None:
+        async with self._sessionmaker() as db:
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Preserved Series", tmdb_id=10004, size=1024)
+            db.add_all([rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=None,
+                    source="rule",
+                    source_rule_id=rule.id,
+                    reason="Existing managed protection",
+                )
+            )
+            await db.commit()
+            rule_id = rule.id
+
+        async with self._sessionmaker() as db:
+            result = await _reconcile_rule_managed_protections(
+                db,
+                [],
+                preserve_rule_ids={rule_id},
+            )
+            self.assertEqual(result, (0, 0, 0))
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+
+    async def test_protection_preview_includes_already_protected_media(self) -> None:
+        async with self._sessionmaker() as db:
+            user = User(username="admin", password_hash="x")
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Preview Protected", tmdb_id=10005, size=1024)
+            db.add_all([user, rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=user.id,
+                    reason="Manual protection",
+                )
+            )
+            await db.commit()
+            series_id = series.id
+
+        async with self._sessionmaker() as db:
+            rule = (await db.execute(select(ReclaimRule))).scalar_one()
+            result = await collect_rule_preview_matches_with_metadata(db, [rule])
+            self.assertEqual([match.series_id for match in result.matches], [series_id])
+            self.assertEqual(result.metadata.skipped_protected_count, 0)
 
     async def test_scan_movie_candidate_create_update_remove(self) -> None:
         async with self._sessionmaker() as db:

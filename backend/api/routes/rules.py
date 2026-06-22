@@ -12,6 +12,8 @@ from backend.api.candidate_views import build_rule_preview_items
 from backend.core.auth import require_admin
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
+    RULE_OUTCOME_CANDIDATE,
+    RULE_OUTCOME_PROTECT,
     TARGET_MOVIE_VERSION,
     collect_rule_path_conditions,
     derive_path_scope_library_ids,
@@ -97,6 +99,7 @@ def _media_type_for_target(target_scope: str | None, fallback: MediaType) -> Med
 def _action_or_default(action: dict[str, Any] | None) -> dict[str, Any]:
     """Return the action dictionary with default values applied."""
     return {
+        "outcome": RULE_OUTCOME_CANDIDATE,
         "candidate": True,
         "tag_enabled": True,
         "arr_tag": None,
@@ -124,6 +127,13 @@ def _normalize_rule_action(
 ) -> dict[str, Any]:
     """Normalize the rule action dictionary."""
     normalized = _action_or_default(action)
+    outcome = (
+        RULE_OUTCOME_PROTECT
+        if normalized.get("outcome") == RULE_OUTCOME_PROTECT
+        else RULE_OUTCOME_CANDIDATE
+    )
+    normalized["outcome"] = outcome
+    normalized["candidate"] = outcome == RULE_OUTCOME_CANDIDATE
     normalized["tag_enabled"] = bool(normalized.get("tag_enabled", True))
     normalized["arr_tag"] = _slugify_rule_tag(
         str(normalized.get("arr_tag") or rule_name)
@@ -132,6 +142,13 @@ def _normalize_rule_action(
         normalized["sonarr_service_config_id"] = None
     else:
         normalized["radarr_service_config_id"] = None
+    if outcome == RULE_OUTCOME_PROTECT:
+        normalized["tag_enabled"] = False
+        normalized["arr_tag"] = None
+        normalized["arr_action"] = "delete"
+        normalized["media_server_action"] = None
+        normalized["radarr_service_config_id"] = None
+        normalized["sonarr_service_config_id"] = None
     return normalized
 
 
@@ -1003,7 +1020,11 @@ async def preview_rule_matches(
         enabled=True,
         target_scope=body.target_scope,
         definition=body.definition,
-        action=_action_or_default(None),
+        action=_normalize_rule_action(
+            {"outcome": body.outcome},
+            (body.name or "").strip() or "Preview Rule",
+            body.target_scope,
+        ),
     )
 
     preview_result = await collect_rule_preview_matches_with_metadata(

@@ -30,8 +30,20 @@ VALID_TARGET_SCOPES = {
     TARGET_SEASON,
     TARGET_EPISODE,
 }
+RULE_OUTCOME_CANDIDATE = "candidate"
+RULE_OUTCOME_PROTECT = "protect"
 
 RuleDefinition = dict[str, Any]
+
+
+def normalize_rule_outcome(rule: ReclaimRule) -> str:
+    action = rule.action if isinstance(rule.action, dict) else {}
+    return (
+        RULE_OUTCOME_PROTECT
+        if action.get("outcome") == RULE_OUTCOME_PROTECT
+        else RULE_OUTCOME_CANDIDATE
+    )
+
 
 FIELD_LABELS: dict[str, str] = {
     "library.id": "Library",

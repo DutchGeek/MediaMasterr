@@ -364,6 +364,7 @@ export interface RuleDefinition {
 }
 
 export interface RuleAction {
+  outcome: "candidate" | "protect";
   candidate: boolean;
   tag_enabled: boolean;
   arr_tag: string | null;
@@ -792,8 +793,11 @@ export interface ProtectedEntry {
   anilist_popularity: number | null;
   anilist_favourites: number | null;
   reason: string | null;
-  protected_by_user_id: number;
+  protected_by_user_id: number | null;
   protected_by_username: string;
+  source: "manual" | "rule";
+  source_rule_id: number | null;
+  source_rule_name: string | null;
   permanent: boolean;
   expires_at: string | null;
   created_at: string;
