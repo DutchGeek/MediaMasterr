@@ -1,5 +1,7 @@
+import asyncio
 import shutil
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, cast
@@ -11,14 +13,24 @@ from sqlalchemy.orm import selectinload
 
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
+    PLAYBACK_RULE_FIELDS,
+    RULE_OUTCOME_CANDIDATE,
+    RULE_OUTCOME_PROTECT,
+    RULE_VALUE_UNAVAILABLE,
+    SONARR_RULE_FIELDS,
     TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
     TARGET_SERIES,
     DiskStatsResolver,
+    PlaybackHistoryResolver,
     SeerrRequestResolver,
+    SonarrEpisodeStateResolver,
+    SonarrRuleValue,
     collect_rule_conditions,
     evaluate_advanced_rule,
+    evaluate_advanced_rule_state,
+    normalize_rule_outcome,
     normalize_rule_target,
 )
 from backend.core.service_manager import service_manager
@@ -70,14 +82,23 @@ from backend.models.cleanup import (
 )
 from backend.models.post_action_webhooks import PostActionWebhookEvent
 from backend.services.admin_notices import (
+    clear_playback_rule_data_notice,
     clear_seerr_rule_skip_notice,
+    clear_sonarr_rule_data_notice,
+    set_playback_rule_data_notice,
     set_seerr_rule_skip_notice,
+    set_sonarr_rule_data_notice,
 )
 from backend.services.media_favorites_cache import media_favorites_snapshot_cache
 from backend.services.notifications import (
     build_cleanup_notification_context,
     notify_admins,
     notify_all_users,
+)
+from backend.services.playback_history import (
+    PlaybackRuleSnapshot,
+    load_playback_rule_snapshot,
+    refresh_playback_history,
 )
 from backend.services.post_action_webhooks import (
     dispatch_configured_post_action_webhooks,
@@ -97,6 +118,55 @@ __all__ = [
 
 ArrDeleteFallback: TypeAlias = Literal["unmonitor", "remove_if_empty"]
 ArrDeleteAction: TypeAlias = Literal["delete", "unmonitor", "remove_if_empty"]
+SonarrProtectionPreserveKey: TypeAlias = tuple[int, int]
+
+SONARR_UNAIRED_FIELD = "sonarr.latest_season_has_unaired_episodes"
+SONARR_FINALE_FIELD = "sonarr.latest_season_has_finale"
+SONARR_EPISODE_FETCH_CONCURRENCY = 8
+
+
+@dataclass(slots=True)
+class _SonarrRuleDataResult:
+    unavailable_series_ids: set[int]
+    preserve_protection_keys: set[SonarrProtectionPreserveKey]
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class _PlaybackRuleDataResult:
+    snapshot: PlaybackRuleSnapshot | None
+    unavailable_count: int = 0
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class _SonarrRefEpisodeState:
+    config_id: int
+    arr_series_id: int
+    latest_season_number: int | None = None
+    has_unaired_episodes: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
+    has_finale: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
+
+
+class _SonarrSeriesSnapshot:
+    """Deduplicate bulk Sonarr series requests within one rule evaluation run."""
+
+    __slots__ = ("clients", "_series_tasks")
+
+    def __init__(self) -> None:
+        clients = service_manager.sonarr_clients()
+        if not clients and service_manager.sonarr:
+            clients = {0: service_manager.sonarr}
+        self.clients = clients
+        self._series_tasks: dict[int, asyncio.Task[list[Any]]] = {}
+
+    async def get_all_series(self, client: Any) -> list[Any]:
+        client_key = id(client)
+        task = self._series_tasks.get(client_key)
+        if task is None:
+            task = asyncio.create_task(client.get_all_series())
+            self._series_tasks[client_key] = task
+        return await task
 
 
 def _build_reclaim_history_attributes(
@@ -476,6 +546,64 @@ async def collect_rule_preview_matches(
     return result.matches
 
 
+async def _collect_rule_match_records(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
+) -> list[MatchedCandidateRecord]:
+    """Collect candidates that match the given rules."""
+    movie_rules = [r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION]
+    series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
+    season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
+    episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
+
+    matches: list[MatchedCandidateRecord] = []
+    if movie_rules:
+        matches.extend(
+            await _collect_movie_version_candidate_records(
+                db,
+                movie_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if series_rules:
+        matches.extend(
+            await _collect_series_candidate_records(
+                db,
+                series_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if season_rules:
+        matches.extend(
+            await _collect_season_candidate_records(
+                db,
+                season_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    if episode_rules:
+        matches.extend(
+            await _collect_episode_candidate_records(
+                db,
+                episode_rules,
+                preview_metadata=preview_metadata,
+                exclude_favorites=exclude_favorites,
+                exclude_protected=exclude_protected,
+            )
+        )
+    return matches
+
+
 async def collect_rule_preview_matches_with_metadata(
     db: AsyncSession,
     rules: list[ReclaimRule],
@@ -496,8 +624,15 @@ async def collect_rule_preview_matches_with_metadata(
         arr_entries=await _load_arr_disk_space(),
         path_mappings=await _load_path_mappings(),
     ).activate()
-    await _refresh_arr_tags_for_rules(list(rules))
-    await _refresh_arr_monitoring_for_rules(list(rules))
+    sonarr_series_snapshot = _SonarrSeriesSnapshot()
+    await _refresh_arr_tags_for_rules(
+        list(rules),
+        sonarr_series_snapshot=sonarr_series_snapshot,
+    )
+    await _refresh_arr_monitoring_for_rules(
+        list(rules),
+        sonarr_series_snapshot=sonarr_series_snapshot,
+    )
     await _activate_seerr_request_resolver_for_rules(
         db,
         list(rules),
@@ -505,47 +640,184 @@ async def collect_rule_preview_matches_with_metadata(
         allow_stale_on_failure=True,
     )
 
-    movie_rules = [r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION]
-    series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
-    season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
-    episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
-
     metadata = RulePreviewMatchMetadata()
-    matches: list[MatchedCandidateRecord] = []
-    if movie_rules:
-        matches.extend(
-            await _collect_movie_version_candidate_records(
-                db,
-                movie_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if series_rules:
-        matches.extend(
-            await _collect_series_candidate_records(
-                db,
-                series_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if season_rules:
-        matches.extend(
-            await _collect_season_candidate_records(
-                db,
-                season_rules,
-                preview_metadata=metadata,
-            )
-        )
-    if episode_rules:
-        matches.extend(
-            await _collect_episode_candidate_records(
-                db,
-                episode_rules,
-                preview_metadata=metadata,
-            )
-        )
+    sonarr_result = await _activate_sonarr_episode_state_for_rules(
+        db,
+        list(rules),
+        sonarr_series_snapshot=sonarr_series_snapshot,
+    )
+    metadata.sonarr_unavailable_count = len(sonarr_result.unavailable_series_ids)
+    metadata.sonarr_error = sonarr_result.error
+    playback_result = await _activate_playback_history_for_rules(db, list(rules))
+    metadata.playback_unavailable_count = playback_result.unavailable_count
+    metadata.playback_error = playback_result.error
+    is_protection_preview = bool(rules) and all(
+        normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT for rule in rules
+    )
+    matches = await _collect_rule_match_records(
+        db,
+        rules,
+        preview_metadata=metadata,
+        exclude_favorites=not is_protection_preview,
+        exclude_protected=not is_protection_preview,
+    )
     metadata.matched_count = len(matches)
     return RulePreviewMatchResult(matches=matches, metadata=metadata)
+
+
+ManagedProtectionKey: TypeAlias = tuple[
+    int,
+    MediaType,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+]
+
+
+def _managed_protection_key(
+    *,
+    rule_id: int,
+    media_type: MediaType,
+    movie_id: int | None,
+    movie_version_id: int | None,
+    series_id: int | None,
+    season_id: int | None,
+    episode_id: int | None,
+) -> ManagedProtectionKey:
+    return (
+        rule_id,
+        media_type,
+        movie_id,
+        movie_version_id,
+        series_id,
+        season_id,
+        episode_id,
+    )
+
+
+def _managed_protection_reason(
+    record: MatchedCandidateRecord,
+    rule_id: int,
+) -> str:
+    for reason in record.reason_data:
+        if reason.get("rule_id") == rule_id:
+            text = str(reason.get("text") or "").strip()
+            if text:
+                return text
+    return record.reason or "Matched automated protection rule"
+
+
+async def _reconcile_rule_managed_protections(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    preserve_rule_ids: set[int] | None = None,
+    preserve_rule_series_keys: set[SonarrProtectionPreserveKey] | None = None,
+) -> tuple[int, int, int]:
+    preserve_rule_ids = preserve_rule_ids or set()
+    preserve_rule_series_keys = preserve_rule_series_keys or set()
+    records = await _collect_rule_match_records(
+        db,
+        rules,
+        exclude_favorites=False,
+        exclude_protected=False,
+    )
+
+    desired: dict[ManagedProtectionKey, tuple[MatchedCandidateRecord, int]] = {}
+    active_rule_ids = {rule.id for rule in rules}
+    for record in records:
+        for rule_id in record.matched_rule_ids:
+            if rule_id not in active_rule_ids:
+                continue
+            key = _managed_protection_key(
+                rule_id=rule_id,
+                media_type=record.media_type,
+                movie_id=record.movie_id,
+                movie_version_id=record.movie_version_id,
+                series_id=record.series_id,
+                season_id=record.season_id,
+                episode_id=record.episode_id,
+            )
+            desired[key] = (record, rule_id)
+
+    existing_result = await db.execute(
+        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+    )
+    existing_rows = existing_result.scalars().all()
+    existing: dict[ManagedProtectionKey, ProtectedMedia] = {}
+    rows_to_delete: list[ProtectedMedia] = []
+    for row in existing_rows:
+        if row.source_rule_id is None:
+            rows_to_delete.append(row)
+            continue
+        key = _managed_protection_key(
+            rule_id=row.source_rule_id,
+            media_type=row.media_type,
+            movie_id=row.movie_id,
+            movie_version_id=row.movie_version_id,
+            series_id=row.series_id,
+            season_id=row.season_id,
+            episode_id=row.episode_id,
+        )
+        if key in existing:
+            rows_to_delete.append(row)
+        else:
+            existing[key] = row
+
+    created = 0
+    updated = 0
+    for key, (record, rule_id) in desired.items():
+        reason = _managed_protection_reason(record, rule_id)
+        existing_row = existing.pop(key) if key in existing else None
+        if existing_row is None:
+            db.add(
+                ProtectedMedia(
+                    media_type=record.media_type,
+                    protected_by_user_id=None,
+                    movie_id=record.movie_id,
+                    movie_version_id=record.movie_version_id,
+                    series_id=record.series_id,
+                    season_id=record.season_id,
+                    episode_id=record.episode_id,
+                    source="rule",
+                    source_rule_id=rule_id,
+                    reason=reason,
+                    permanent=True,
+                    expires_at=None,
+                )
+            )
+            created += 1
+            continue
+
+        if (
+            existing_row.reason != reason
+            or not existing_row.permanent
+            or existing_row.expires_at is not None
+            or existing_row.protected_by_user_id is not None
+        ):
+            existing_row.reason = reason
+            existing_row.permanent = True
+            existing_row.expires_at = None
+            existing_row.protected_by_user_id = None
+            updated += 1
+
+    for row in existing.values():
+        if row.source_rule_id in preserve_rule_ids:
+            continue
+        if (
+            row.source_rule_id is not None
+            and row.series_id is not None
+            and (row.source_rule_id, row.series_id) in preserve_rule_series_keys
+        ):
+            continue
+        rows_to_delete.append(row)
+
+    for row in rows_to_delete:
+        await db.delete(row)
+    await db.flush()
+    return created, updated, len(rows_to_delete)
 
 
 async def scan_cleanup_candidates() -> None:
@@ -635,7 +907,11 @@ def _collect_arr_item_ids_by_label(
     return label_to_arr_ids
 
 
-async def _refresh_arr_tags_for_rules(rules: list[ReclaimRule]) -> None:
+async def _refresh_arr_tags_for_rules(
+    rules: list[ReclaimRule],
+    *,
+    sonarr_series_snapshot: _SonarrSeriesSnapshot | None = None,
+) -> None:
     """Refresh arr_tags on Movie/Series rows for tag labels referenced by active rules.
 
     Steps:
@@ -752,9 +1028,8 @@ async def _refresh_arr_tags_for_rules(rules: list[ReclaimRule]) -> None:
 
     #### sonarr: refresh series arr_tags for rule relevant labels ####
     if series_tag_labels:
-        sonarr_clients = service_manager.sonarr_clients()
-        if not sonarr_clients and service_manager.sonarr:
-            sonarr_clients = {0: service_manager.sonarr}
+        sonarr_series_snapshot = sonarr_series_snapshot or _SonarrSeriesSnapshot()
+        sonarr_clients = sonarr_series_snapshot.clients
 
         if sonarr_clients:
             series_label_additions: dict[int, set[str]] = {}
@@ -779,7 +1054,9 @@ async def _refresh_arr_tags_for_rules(rules: list[ReclaimRule]) -> None:
 
             for config_id, sonarr_client in sonarr_clients.items():
                 try:
-                    all_series = await sonarr_client.get_all_series()
+                    all_series = await sonarr_series_snapshot.get_all_series(
+                        sonarr_client
+                    )
                     tag_list = await sonarr_client.get_tags()
                 except Exception as e:
                     sonarr_failed_config_ids.add(config_id)
@@ -837,13 +1114,352 @@ async def _refresh_arr_tags_for_rules(rules: list[ReclaimRule]) -> None:
 
 def _rules_use_monitoring_field(rules: list[ReclaimRule]) -> bool:
     """Return True if any rule condition references the arr.monitored field."""
-    for rule in rules:
-        for _ in collect_rule_conditions(rule.definition, field="arr.monitored"):
-            return True
-    return False
+    return _rules_use_field(rules, "arr.monitored")
 
 
-async def _refresh_arr_monitoring_for_rules(rules: list[ReclaimRule]) -> None:
+def _rules_use_field(rules: list[ReclaimRule], field: str) -> bool:
+    """Return True if any rule condition references the requested field."""
+    return any(collect_rule_conditions(rule.definition, field=field) for rule in rules)
+
+
+def _rule_uses_sonarr_episode_fields(rule: ReclaimRule) -> bool:
+    return any(
+        collect_rule_conditions(rule.definition, field=field)
+        for field in SONARR_RULE_FIELDS
+    )
+
+
+def _rule_uses_playback_fields(rule: ReclaimRule) -> bool:
+    return any(
+        collect_rule_conditions(rule.definition, field=field)
+        for field in PLAYBACK_RULE_FIELDS
+    )
+
+
+async def _activate_playback_history_for_rules(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    require_fresh: bool = False,
+) -> _PlaybackRuleDataResult:
+    playback_rules = [rule for rule in rules if _rule_uses_playback_fields(rule)]
+    if not playback_rules:
+        PlaybackHistoryResolver({}).activate()
+        return _PlaybackRuleDataResult(snapshot=None)
+
+    refresh_result = await refresh_playback_history(force=require_fresh)
+    snapshot = await load_playback_rule_snapshot(db, refresh_result)
+    PlaybackHistoryResolver(snapshot.values_by_target).activate()
+    scopes = {normalize_rule_target(rule) for rule in playback_rules}
+    unavailable_count = snapshot.unavailable_count(scopes)
+    if unavailable_count == 0:
+        return _PlaybackRuleDataResult(snapshot=snapshot)
+
+    if snapshot.errors:
+        error = "; ".join(snapshot.errors)
+    elif not snapshot.has_configured_provider:
+        error = "No Playback Reporting or Tautulli provider is configured"
+    else:
+        error = "No configured playback provider can observe these media targets"
+    return _PlaybackRuleDataResult(
+        snapshot=snapshot,
+        unavailable_count=unavailable_count,
+        error=error,
+    )
+
+
+def _parse_sonarr_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return ensure_utc(parsed)
+
+
+def _sonarr_episode_season_number(episode: Mapping[str, object]) -> int | None:
+    value = episode.get("seasonNumber")
+    if not isinstance(value, (int, str)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _aggregate_sonarr_ref_field(
+    states: Sequence[_SonarrRefEpisodeState],
+    field: str,
+) -> SonarrRuleValue:
+    values = [getattr(state, field) for state in states]
+    if any(value is True for value in values):
+        return True
+    if values and all(value is False for value in values):
+        return False
+    return RULE_VALUE_UNAVAILABLE
+
+
+def _sonarr_values_by_series(
+    series_ids: Iterable[int],
+    states_by_series_id: Mapping[int, Sequence[_SonarrRefEpisodeState]],
+) -> dict[int, dict[str, SonarrRuleValue]]:
+    return {
+        series_id: {
+            SONARR_UNAIRED_FIELD: _aggregate_sonarr_ref_field(
+                states_by_series_id.get(series_id, []),
+                "has_unaired_episodes",
+            ),
+            SONARR_FINALE_FIELD: _aggregate_sonarr_ref_field(
+                states_by_series_id.get(series_id, []),
+                "has_finale",
+            ),
+        }
+        for series_id in series_ids
+    }
+
+
+async def _activate_sonarr_episode_state_for_rules(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    sonarr_series_snapshot: _SonarrSeriesSnapshot | None = None,
+) -> _SonarrRuleDataResult:
+    """Load only the latest Sonarr season needed by active series rules."""
+    sonarr_rules = [
+        rule
+        for rule in rules
+        if normalize_rule_target(rule) == TARGET_SERIES
+        and _rule_uses_sonarr_episode_fields(rule)
+    ]
+    if not sonarr_rules:
+        SonarrEpisodeStateResolver({}).activate()
+        return _SonarrRuleDataResult(set(), set())
+
+    query_options = [selectinload(Series.service_refs)]
+    if _rules_use_field(sonarr_rules, "series.library_season_count"):
+        query_options.append(selectinload(Series.seasons))
+    series_rows = (
+        (
+            await db.execute(
+                select(Series)
+                .where(Series.removed_at.is_(None))
+                .options(*query_options)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    series_by_id = {series.id: series for series in series_rows}
+    series_ids = set(series_by_id)
+
+    ref_rows = (
+        await db.execute(
+            select(
+                SeriesArrRef.series_id,
+                SeriesArrRef.service_config_id,
+                SeriesArrRef.arr_series_id,
+            ).where(SeriesArrRef.series_id.in_(series_ids))
+        )
+    ).all()
+    refs_by_series_id: dict[int, list[tuple[int, int]]] = {}
+    config_ids: set[int] = set()
+    for series_id, config_id, arr_series_id in ref_rows:
+        refs_by_series_id.setdefault(series_id, []).append((config_id, arr_series_id))
+        config_ids.add(config_id)
+
+    sonarr_series_snapshot = sonarr_series_snapshot or _SonarrSeriesSnapshot()
+    clients = sonarr_series_snapshot.clients
+    if set(clients) == {0}:
+        clients = {config_id: clients[0] for config_id in config_ids}
+
+    errors: list[str] = []
+    sonarr_series_by_config: dict[int, dict[int, Any]] = {}
+
+    async def load_series(config_id: int, client: Any) -> None:
+        try:
+            items = await sonarr_series_snapshot.get_all_series(client)
+        except Exception as exc:
+            errors.append(
+                f"config {config_id} series list: {summarize_error_message(str(exc))}"
+            )
+            return
+        sonarr_series_by_config[config_id] = {
+            item.id: item for item in items if getattr(item, "id", None) is not None
+        }
+
+    await asyncio.gather(
+        *(load_series(config_id, client) for config_id, client in clients.items())
+    )
+
+    now = datetime.now(UTC)
+    states_by_series_id: dict[int, list[_SonarrRefEpisodeState]] = {}
+    for series_id, refs in refs_by_series_id.items():
+        states: list[_SonarrRefEpisodeState] = []
+        for config_id, arr_series_id in refs:
+            state = _SonarrRefEpisodeState(
+                config_id=config_id,
+                arr_series_id=arr_series_id,
+            )
+            states.append(state)
+            sonarr_series = sonarr_series_by_config.get(config_id, {}).get(
+                arr_series_id
+            )
+            if sonarr_series is None:
+                continue
+            regular_seasons = [
+                season
+                for season in getattr(sonarr_series, "seasons", [])
+                if getattr(season, "season_number", 0) > 0
+            ]
+            if not regular_seasons:
+                continue
+            latest_season = max(
+                regular_seasons,
+                key=lambda season: season.season_number,
+            )
+            state.latest_season_number = latest_season.season_number
+            statistics = getattr(latest_season, "statistics", None)
+            next_airing = (
+                _parse_sonarr_datetime(statistics.get("nextAiring"))
+                if isinstance(statistics, Mapping)
+                else None
+            )
+            if next_airing is not None and next_airing > now:
+                state.has_unaired_episodes = True
+        states_by_series_id[series_id] = states
+
+    partial_values = _sonarr_values_by_series(series_ids, states_by_series_id)
+    SonarrEpisodeStateResolver(partial_values).activate()
+
+    needed_series_ids: set[int] = set()
+    for series_id, series in series_by_id.items():
+        if any(
+            evaluate_advanced_rule_state(
+                rule,
+                target_scope=TARGET_SERIES,
+                series=series,
+            )
+            is None
+            for rule in sonarr_rules
+        ):
+            needed_series_ids.add(series_id)
+
+    semaphores: dict[int, asyncio.Semaphore] = {}
+
+    async def load_latest_season(
+        series_id: int,
+        state: _SonarrRefEpisodeState,
+    ) -> None:
+        if state.latest_season_number is None:
+            return
+        client = clients.get(state.config_id)
+        if client is None:
+            return
+        semaphore = semaphores.setdefault(
+            id(client), asyncio.Semaphore(SONARR_EPISODE_FETCH_CONCURRENCY)
+        )
+        try:
+            async with semaphore:
+                episodes = await client.get_episodes(
+                    state.arr_series_id,
+                    season_number=state.latest_season_number,
+                )
+        except Exception as exc:
+            errors.append(
+                "config "
+                f"{state.config_id} series {state.arr_series_id} season "
+                f"{state.latest_season_number}: {summarize_error_message(str(exc))}"
+            )
+            return
+
+        latest_episodes = [
+            episode
+            for episode in episodes
+            if _sonarr_episode_season_number(episode) == state.latest_season_number
+            and state.latest_season_number > 0
+        ]
+        if not latest_episodes:
+            return
+        state.has_unaired_episodes = any(
+            (air_date := _parse_sonarr_datetime(episode.get("airDateUtc"))) is not None
+            and air_date > now
+            for episode in latest_episodes
+        )
+        state.has_finale = any(
+            str(episode.get("finaleType") or "").strip().lower() in {"season", "series"}
+            for episode in latest_episodes
+        )
+
+    await asyncio.gather(
+        *(
+            load_latest_season(series_id, state)
+            for series_id in needed_series_ids
+            for state in states_by_series_id.get(series_id, [])
+        )
+    )
+
+    final_values = _sonarr_values_by_series(series_ids, states_by_series_id)
+    SonarrEpisodeStateResolver(final_values).activate()
+
+    unavailable_series_ids: set[int] = set()
+    preserve_protection_keys: set[SonarrProtectionPreserveKey] = set()
+    for series_id, series in series_by_id.items():
+        for rule in sonarr_rules:
+            if (
+                evaluate_advanced_rule_state(
+                    rule,
+                    target_scope=TARGET_SERIES,
+                    series=series,
+                )
+                is not None
+            ):
+                continue
+            unavailable_series_ids.add(series_id)
+            if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT and isinstance(
+                rule.id, int
+            ):
+                preserve_protection_keys.add((rule.id, series_id))
+
+    error: str | None = None
+    if unavailable_series_ids:
+        if errors:
+            details = "; ".join(errors[:3])
+            suffix = f"; and {len(errors) - 3} more" if len(errors) > 3 else ""
+            error = f"{details}{suffix}"
+        elif not clients:
+            error = "Sonarr is not configured"
+        else:
+            error = (
+                "Sonarr returned no usable latest-season episode data for "
+                f"{len(unavailable_series_ids)} series"
+            )
+        LOG.warning(
+            "Sonarr episode-state rules have unavailable data for "
+            f"{len(unavailable_series_ids)} series: {error}"
+        )
+    else:
+        LOG.debug(
+            "Activated Sonarr latest-season rule data for "
+            f"{len(series_ids)} series; fetched episodes for "
+            f"{len(needed_series_ids)} series"
+        )
+
+    return _SonarrRuleDataResult(
+        unavailable_series_ids=unavailable_series_ids,
+        preserve_protection_keys=preserve_protection_keys,
+        error=error,
+    )
+
+
+async def _refresh_arr_monitoring_for_rules(
+    rules: list[ReclaimRule],
+    *,
+    sonarr_series_snapshot: _SonarrSeriesSnapshot | None = None,
+) -> None:
     """Sync arr monitoring status (series + season for Sonarr, movie for Radarr) into the DB.
 
     Only runs if at least one active rule uses arr.monitored.
@@ -914,9 +1530,8 @@ async def _refresh_arr_monitoring_for_rules(rules: list[ReclaimRule]) -> None:
 
     #### sonarr: refresh series + season monitoring ####
     if series_rules:
-        sonarr_clients = service_manager.sonarr_clients()
-        if not sonarr_clients and service_manager.sonarr:
-            sonarr_clients = {0: service_manager.sonarr}
+        sonarr_series_snapshot = sonarr_series_snapshot or _SonarrSeriesSnapshot()
+        sonarr_clients = sonarr_series_snapshot.clients
 
         if sonarr_clients:
             async with async_db() as db:
@@ -943,7 +1558,9 @@ async def _refresh_arr_monitoring_for_rules(rules: list[ReclaimRule]) -> None:
 
             for config_id, sonarr_client in sonarr_clients.items():
                 try:
-                    all_sonarr_series = await sonarr_client.get_all_series()
+                    all_sonarr_series = await sonarr_series_snapshot.get_all_series(
+                        sonarr_client
+                    )
                 except Exception as e:
                     LOG.warning(
                         f"Failed to fetch Sonarr series for monitoring (config {config_id}): {e}"
@@ -1739,8 +2356,8 @@ async def _prune_leaving_soon_before_candidate_actions(
         ) = await _load_leaving_soon_collection_settings(db)
         if not enabled:
             return
-        movie_item_ids, series_item_ids = (
-            await _build_leaving_soon_prune_item_ids(db, normalized_candidate_ids)
+        movie_item_ids, series_item_ids = await _build_leaving_soon_prune_item_ids(
+            db, normalized_candidate_ids
         )
 
     service_clients: list[tuple[Service, Any]] = [
@@ -1811,8 +2428,14 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         rules = result.scalars().all()
 
         if not rules:
-            LOG.info("No enabled cleanup rules found, clearing all candidates")
+            LOG.info(
+                "No enabled cleanup rules found, clearing candidates and "
+                "rule-managed protections"
+            )
+            await _reconcile_rule_managed_protections(db, [])
             await db.execute(delete(ReclaimCandidate))
+            await clear_playback_rule_data_notice(db)
+            await clear_sonarr_rule_data_notice(db)
             await db.commit()
             try:
                 await _sync_leaving_soon_collections(db)
@@ -1842,9 +2465,17 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
             arr_entries=await _load_arr_disk_space(),
             path_mappings=await _load_path_mappings(),
         ).activate()
-        await _refresh_arr_tags_for_rules(list(rules))
-        await _refresh_arr_monitoring_for_rules(list(rules))
+        sonarr_series_snapshot = _SonarrSeriesSnapshot()
+        await _refresh_arr_tags_for_rules(
+            list(rules),
+            sonarr_series_snapshot=sonarr_series_snapshot,
+        )
+        await _refresh_arr_monitoring_for_rules(
+            list(rules),
+            sonarr_series_snapshot=sonarr_series_snapshot,
+        )
 
+        preserved_protection_rule_ids: set[int] = set()
         seerr_ready, seerr_error = await _activate_seerr_request_resolver_for_rules(
             db,
             list(rules),
@@ -1856,6 +2487,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         else:
             seerr_dependent_rules = [r for r in rules if _rule_uses_seerr_fields(r)]
             if seerr_dependent_rules:
+                preserved_protection_rule_ids = {
+                    rule.id
+                    for rule in seerr_dependent_rules
+                    if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
+                }
                 rules = [r for r in rules if not _rule_uses_seerr_fields(r)]
                 skipped = len(seerr_dependent_rules)
                 reason = seerr_error or "Failed to refresh Seerr request snapshot"
@@ -1884,14 +2520,82 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
             else:
                 await clear_seerr_rule_skip_notice(db)
 
-        # Separate rules by explicit advanced target. Rules without a valid
-        # advanced definition are skipped by the evaluator and will not match.
-        movie_rules = [
-            r for r in rules if normalize_rule_target(r) == TARGET_MOVIE_VERSION
+        sonarr_rule_result = await _activate_sonarr_episode_state_for_rules(
+            db,
+            list(rules),
+            sonarr_series_snapshot=sonarr_series_snapshot,
+        )
+        if sonarr_rule_result.unavailable_series_ids:
+            await set_sonarr_rule_data_notice(
+                db,
+                unavailable_series=len(sonarr_rule_result.unavailable_series_ids),
+                reason=sonarr_rule_result.error or "unknown Sonarr data error",
+            )
+        else:
+            await clear_sonarr_rule_data_notice(db)
+
+        playback_rule_result = await _activate_playback_history_for_rules(
+            db, list(rules), require_fresh=True
+        )
+        if playback_rule_result.unavailable_count:
+            playback_dependent_protection_rules = {
+                rule.id
+                for rule in rules
+                if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
+                and _rule_uses_playback_fields(rule)
+            }
+            preserved_protection_rule_ids.update(playback_dependent_protection_rules)
+            await set_playback_rule_data_notice(
+                db,
+                unavailable_targets=playback_rule_result.unavailable_count,
+                reason=playback_rule_result.error
+                or "unknown playback history provider error",
+            )
+        else:
+            await clear_playback_rule_data_notice(db)
+
+        protection_rules = [
+            rule
+            for rule in rules
+            if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
         ]
-        series_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SERIES]
-        season_rules = [r for r in rules if normalize_rule_target(r) == TARGET_SEASON]
-        episode_rules = [r for r in rules if normalize_rule_target(r) == TARGET_EPISODE]
+        candidate_rules = [
+            rule
+            for rule in rules
+            if normalize_rule_outcome(rule) == RULE_OUTCOME_CANDIDATE
+        ]
+        (
+            protected_created,
+            protected_updated,
+            protected_removed,
+        ) = await _reconcile_rule_managed_protections(
+            db,
+            protection_rules,
+            preserve_rule_ids=preserved_protection_rule_ids,
+            preserve_rule_series_keys=(sonarr_rule_result.preserve_protection_keys),
+        )
+        LOG.info(
+            "Automated protection reconciliation completed: "
+            f"{protected_created} created, {protected_updated} updated, "
+            f"{protected_removed} removed"
+        )
+
+        # Separate candidate rules by explicit advanced target. Rules without a
+        # valid advanced definition are skipped by the evaluator and will not match.
+        movie_rules = [
+            r
+            for r in candidate_rules
+            if normalize_rule_target(r) == TARGET_MOVIE_VERSION
+        ]
+        series_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_SERIES
+        ]
+        season_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_SEASON
+        ]
+        episode_rules = [
+            r for r in candidate_rules if normalize_rule_target(r) == TARGET_EPISODE
+        ]
 
         candidates_created = 0
         candidates_updated = 0
@@ -1900,7 +2604,7 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         # process movies
         if movie_rules:
             created, updated, removed = await _process_media(
-                db, movie_rules, MediaType.MOVIE
+                db, movie_rules, MediaType.MOVIE, commit=False
             )
             candidates_created += created
             candidates_updated += updated
@@ -1916,12 +2620,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         # process series
         if series_rules:
             created, updated, removed = await _process_media(
-                db, series_rules, MediaType.SERIES
+                db, series_rules, MediaType.SERIES, commit=False
             )
             candidates_created += created
             candidates_updated += updated
@@ -1937,10 +2640,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         if season_rules:
-            s_cr, s_up, s_rm = await _process_series_seasons(db, season_rules)
+            s_cr, s_up, s_rm = await _process_series_seasons(
+                db, season_rules, commit=False
+            )
             candidates_created += s_cr
             candidates_updated += s_up
             candidates_removed += s_rm
@@ -1955,10 +2659,11 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
 
         if episode_rules:
-            e_cr, e_up, e_rm = await _process_series_episodes(db, episode_rules)
+            e_cr, e_up, e_rm = await _process_series_episodes(
+                db, episode_rules, commit=False
+            )
             candidates_created += e_cr
             candidates_updated += e_up
             candidates_removed += e_rm
@@ -1973,7 +2678,8 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                 ),
             )
             candidates_removed += del_result.rowcount or 0
-            await db.commit()
+
+        await db.commit()
 
         try:
             await _sync_leaving_soon_collections(db)
@@ -1987,11 +2693,16 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
 
         return candidates_created, candidates_updated, candidates_removed
     except Exception:
+        await db.rollback()
         raise
 
 
 async def _process_media(
-    db: AsyncSession, rules: list[ReclaimRule], media_type: MediaType
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    media_type: MediaType,
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """
     Process movies or series against cleanup rules.
@@ -1999,10 +2710,10 @@ async def _process_media(
     Returns (created_count, updated_count, removed_count)
     """
     if media_type is MediaType.MOVIE:
-        return await _process_movie_versions(db, rules)
+        return await _process_movie_versions(db, rules, commit=commit)
 
     records = await _collect_series_candidate_records(db, rules)
-    return await _sync_series_candidates(db, records)
+    return await _sync_series_candidates(db, records, commit=commit)
 
 
 async def _collect_series_candidate_records(
@@ -2010,6 +2721,8 @@ async def _collect_series_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate whole series rules without mutating persisted candidates."""
     (
@@ -2024,16 +2737,15 @@ async def _collect_series_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
     # get all media items
-    query = (
-        select(Series)
-        .where(Series.removed_at.is_(None))
-        .options(selectinload(Series.service_refs))
-    )
+    query_options = [selectinload(Series.service_refs)]
+    if _rules_use_field(rules, "series.library_season_count"):
+        query_options.append(selectinload(Series.seasons))
+    query = select(Series).where(Series.removed_at.is_(None)).options(*query_options)
     result = await db.execute(query)
     media_items = result.scalars().all()
     if preview_metadata is not None:
@@ -2042,19 +2754,21 @@ async def _collect_series_candidate_records(
     LOG.info(f"Processing {len(media_items)} {MediaType.SERIES.value} items")
 
     # fetch all protected items for this media type to skip them
-    now = datetime.now(UTC)
-    protected_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_ids = {b.series_id for b in protected_result.scalars().all()}
+        protected_ids = {b.series_id for b in protected_result.scalars().all()}
 
     LOG.info(
         f"Found {len(protected_ids)} protected {MediaType.SERIES.value} items to skip"
@@ -2106,6 +2820,8 @@ async def _collect_series_candidate_records(
 async def _sync_series_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize series candidates with the database."""
     result = await db.execute(
@@ -2162,7 +2878,10 @@ async def _sync_series_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
@@ -2170,10 +2889,12 @@ async def _sync_series_candidates(
 async def _process_movie_versions(
     db: AsyncSession,
     rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate movie rules at movie-version granularity."""
     records = await _collect_movie_version_candidate_records(db, rules)
-    return await _sync_movie_version_candidates(db, records)
+    return await _sync_movie_version_candidates(db, records, commit=commit)
 
 
 async def _collect_movie_version_candidate_records(
@@ -2181,6 +2902,8 @@ async def _collect_movie_version_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate movie-version rules without mutating persisted candidates."""
     (
@@ -2195,7 +2918,7 @@ async def _collect_movie_version_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
     query = (
@@ -2209,19 +2932,21 @@ async def _collect_movie_version_candidate_records(
         preview_metadata.source_media_count += len(movies)
     LOG.info(f"Processing {len(movies)} movie items at version granularity")
 
-    now = datetime.now(UTC)
-    protected_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.MOVIE,
-            ProtectedMedia.movie_id.isnot(None),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_rows: list[ProtectedMedia] = []
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.MOVIE,
+                ProtectedMedia.movie_id.isnot(None),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_rows = protected_result.scalars().all()
+        protected_rows = list(protected_result.scalars().all())
     protected_movie_ids = {
         p.movie_id
         for p in protected_rows
@@ -2291,6 +3016,8 @@ async def _collect_movie_version_candidate_records(
 async def _sync_movie_version_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize movie version candidates with the database."""
     existing_result = await db.execute(
@@ -2356,31 +3083,40 @@ async def _sync_movie_version_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
 
 async def _process_series_seasons(
-    db: AsyncSession, rules: list[ReclaimRule]
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate each series' seasons against rules and create/update season-level candidates.
 
     Returns (created_count, updated_count, removed_count).
     """
     records = await _collect_season_candidate_records(db, rules)
-    return await _sync_season_candidates(db, records)
+    return await _sync_season_candidates(db, records, commit=commit)
 
 
 async def _process_series_episodes(
-    db: AsyncSession, rules: list[ReclaimRule]
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Evaluate each series' episodes against rules and create/update episode-level candidates.
 
     Returns (created_count, updated_count, removed_count).
     """
     records = await _collect_episode_candidate_records(db, rules)
-    return await _sync_episode_candidates(db, records)
+    return await _sync_episode_candidates(db, records, commit=commit)
 
 
 async def _collect_season_candidate_records(
@@ -2388,6 +3124,8 @@ async def _collect_season_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate season rules without mutating persisted candidates."""
     include_episodes = _rules_use_season_episode_watch_fields(rules)
@@ -2403,7 +3141,7 @@ async def _collect_season_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
@@ -2425,38 +3163,40 @@ async def _collect_season_candidate_records(
         return []
 
     # whole-series protection also covers every season of that series
-    now = datetime.now(UTC)
-    protected_series_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            _is_series_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_series_ids: set[int | None] = set()
+    protected_season_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_series_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                _is_series_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_series_ids = {
-        b.series_id for b in protected_series_result.scalars().all()
-    }
+        protected_series_ids = {
+            b.series_id for b in protected_series_result.scalars().all()
+        }
 
-    # season-level protection entries
-    protected_season_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_season_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_season_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_season_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_season_ids = {
-        b.season_id for b in protected_season_result.scalars().all()
-    }
+        protected_season_ids = {
+            b.season_id for b in protected_season_result.scalars().all()
+        }
 
     records: list[MatchedCandidateRecord] = []
 
@@ -2511,6 +3251,8 @@ async def _collect_season_candidate_records(
 async def _sync_season_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize season candidates with the database."""
     existing_result = await db.execute(
@@ -2569,7 +3311,10 @@ async def _sync_season_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 
@@ -2579,6 +3324,8 @@ async def _collect_episode_candidate_records(
     rules: list[ReclaimRule],
     *,
     preview_metadata: RulePreviewMatchMetadata | None = None,
+    exclude_favorites: bool = True,
+    exclude_protected: bool = True,
 ) -> list[MatchedCandidateRecord]:
     """Evaluate episode rules without mutating persisted candidates."""
     (
@@ -2593,7 +3340,7 @@ async def _collect_episode_candidate_records(
             protect_all_users=favorites_all_users,
             usernames=favorites_usernames,
         )
-        if favorites_enabled
+        if favorites_enabled and exclude_favorites
         else set()
     )
 
@@ -2613,52 +3360,56 @@ async def _collect_episode_candidate_records(
     if not all_series:
         return []
 
-    now = datetime.now(UTC)
-    protected_series_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            ProtectedMedia.series_id.isnot(None),
-            _is_series_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+    protected_series_ids: set[int | None] = set()
+    protected_season_ids: set[int | None] = set()
+    protected_episode_ids: set[int | None] = set()
+    if exclude_protected:
+        now = datetime.now(UTC)
+        protected_series_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                ProtectedMedia.series_id.isnot(None),
+                _is_series_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_series_ids = {
-        b.series_id for b in protected_series_result.scalars().all()
-    }
+        protected_series_ids = {
+            b.series_id for b in protected_series_result.scalars().all()
+        }
 
-    protected_season_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_season_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_season_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_season_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_season_ids = {
-        b.season_id for b in protected_season_result.scalars().all()
-    }
+        protected_season_ids = {
+            b.season_id for b in protected_season_result.scalars().all()
+        }
 
-    protected_episode_result = await db.execute(
-        select(ProtectedMedia).where(
-            ProtectedMedia.media_type == MediaType.SERIES,
-            _is_episode_scope(ProtectedMedia),
-            or_(
-                ProtectedMedia.permanent.is_(True),
-                ProtectedMedia.expires_at.is_(None),
-                ProtectedMedia.expires_at > now,
-            ),
+        protected_episode_result = await db.execute(
+            select(ProtectedMedia).where(
+                ProtectedMedia.media_type == MediaType.SERIES,
+                _is_episode_scope(ProtectedMedia),
+                or_(
+                    ProtectedMedia.permanent.is_(True),
+                    ProtectedMedia.expires_at.is_(None),
+                    ProtectedMedia.expires_at > now,
+                ),
+            )
         )
-    )
-    protected_episode_ids = {
-        b.episode_id for b in protected_episode_result.scalars().all()
-    }
+        protected_episode_ids = {
+            b.episode_id for b in protected_episode_result.scalars().all()
+        }
 
     records: list[MatchedCandidateRecord] = []
 
@@ -2720,6 +3471,8 @@ async def _collect_episode_candidate_records(
 async def _sync_episode_candidates(
     db: AsyncSession,
     records: list[MatchedCandidateRecord],
+    *,
+    commit: bool = True,
 ) -> tuple[int, int, int]:
     """Synchronize episode candidates with the database."""
     existing_result = await db.execute(
@@ -2779,7 +3532,10 @@ async def _sync_episode_candidates(
         await db.delete(candidate)
 
     if candidates_created > 0 or candidates_updated > 0 or candidates_removed > 0:
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
 
     return candidates_created, candidates_updated, candidates_removed
 

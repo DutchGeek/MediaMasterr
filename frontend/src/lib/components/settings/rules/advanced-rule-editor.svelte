@@ -94,6 +94,9 @@
     initial.targetScope,
   );
   let definition = $state<RuleDefinition>(initial.definition);
+  let outcome = $state<"candidate" | "protect">(
+    initial.action?.outcome === "protect" ? "protect" : "candidate",
+  );
   let tagEnabled = $state(initial.action?.tag_enabled ?? false);
   let arrTag = $state(initial.action?.arr_tag ?? "");
 
@@ -135,6 +138,7 @@
     media_type: MediaType;
     target_scope: "movie_version" | "series" | "season" | "episode";
     definition: RuleDefinition;
+    outcome: "candidate" | "protect";
     per_page: number;
   } | null>(null);
 
@@ -603,15 +607,20 @@
         target_scope: targetScope,
         definition,
         action: {
-          candidate: true,
-          tag_enabled: tagEnabled,
-          arr_tag: normalizedTag,
+          outcome,
+          candidate: outcome === "candidate",
+          tag_enabled: outcome === "candidate" ? tagEnabled : false,
+          arr_tag: outcome === "candidate" ? normalizedTag : null,
           arr_action: arrAction,
-          media_server_action: "delete",
+          media_server_action: outcome === "candidate" ? "delete" : null,
           radarr_service_config_id:
-            targetScope === "movie_version" ? radarrServiceConfigId : null,
+            outcome === "candidate" && targetScope === "movie_version"
+              ? radarrServiceConfigId
+              : null,
           sonarr_service_config_id:
-            targetScope === "movie_version" ? null : sonarrServiceConfigId,
+            outcome === "candidate" && targetScope !== "movie_version"
+              ? sonarrServiceConfigId
+              : null,
         },
       });
     } finally {
@@ -670,6 +679,7 @@
     media_type: selectedMediaType,
     target_scope: targetScope,
     definition: cloneDefinition(definition),
+    outcome,
     per_page: PREVIEW_PER_PAGE,
   });
 
@@ -748,7 +758,8 @@
           {initialRule ? "Edit Rule" : "New Rule"}
         </h2>
         <p class="text-sm text-muted-foreground">
-          Build nested AND/OR rules for cleanup candidates.
+          Build nested AND/OR rules for cleanup candidates or automated
+          protections.
         </p>
       </div>
     </div>
@@ -839,6 +850,46 @@
           </Select.Content>
         </Select.Root>
       </div>
+    </div>
+
+    <div class="space-y-2">
+      <Label class="text-sm font-medium text-foreground">Outcome</Label>
+      <Select.Root
+        type="single"
+        value={outcome}
+        onValueChange={(value) => {
+          if (value === "candidate" || value === "protect") outcome = value;
+        }}
+      >
+        <Select.Trigger
+          class="w-full bg-card text-card-foreground cursor-pointer"
+        >
+          {outcome === "protect"
+            ? "Create automated protection"
+            : "Create cleanup candidate"}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="candidate" label="Create cleanup candidate">
+            Create cleanup candidate
+          </Select.Item>
+          <Select.Item value="protect" label="Create automated protection">
+            Create automated protection
+          </Select.Item>
+        </Select.Content>
+      </Select.Root>
+      <p class="text-xs text-muted-foreground">
+        {outcome === "protect"
+          ? "Matching items are protected on each cleanup scan. Protection always takes precedence over candidate rules."
+          : "Matching items become cleanup candidates and can use the configured Arr action."}
+      </p>
+
+      {#if outcome === "protect"}
+        <Notice type="info" title="Rule-Managed Protection">
+          Matching items in the selected library scope are protected
+          automatically during cleanup scans. These protections are read-only on
+          the Protected page and are removed when the rule no longer matches.
+        </Notice>
+      {/if}
     </div>
   </div>
 
@@ -934,147 +985,151 @@
     </div>
   </div>
 
-  <div class="rounded-lg border border-border bg-card p-5 space-y-4">
-    <div>
-      <h3 class="font-semibold text-foreground flex items-center gap-2">
-        {#if selectedArrName === "Radarr"}
-          <RadarrSVG class="size-4 inline" /> Radarr Configuration
-        {:else if selectedArrName === "Sonarr"}
-          <SonarrSVG class="size-4 inline" /> Sonarr Configuration
-        {/if}
-      </h3>
-      <p class="mt-1 text-sm text-muted-foreground">
-        Select a {selectedArrName} instance to enable routing and actions for matched
-        items.
-      </p>
-    </div>
-
-    <!-- instance -->
-    <div class="space-y-2">
-      <Label class="text-sm font-medium text-foreground"
-        >{selectedArrName} Instance</Label
-      >
-      <Select.Root
-        type="single"
-        value={targetScope === "movie_version"
-          ? radarrServiceConfigId !== null
-            ? String(radarrServiceConfigId)
-            : NO_INSTANCE_VALUE
-          : sonarrServiceConfigId !== null
-            ? String(sonarrServiceConfigId)
-            : NO_INSTANCE_VALUE}
-        onValueChange={(value) => {
-          const nextValue =
-            value == null || value === NO_INSTANCE_VALUE || value === ""
-              ? null
-              : Number(value);
-          if (targetScope === "movie_version") {
-            radarrServiceConfigId = nextValue;
-          } else {
-            sonarrServiceConfigId = nextValue;
-          }
-        }}
-      >
-        <Select.Trigger
-          class="w-full bg-card text-card-foreground cursor-pointer"
-        >
-          {#if selectedArrInstanceName}
-            {selectedArrInstanceName}
-          {:else}
-            No instance selected
+  {#if outcome === "candidate"}
+    <div class="rounded-lg border border-border bg-card p-5 space-y-4">
+      <div>
+        <h3 class="font-semibold text-foreground flex items-center gap-2">
+          {#if selectedArrName === "Radarr"}
+            <RadarrSVG class="size-4 inline" /> Radarr Configuration
+          {:else if selectedArrName === "Sonarr"}
+            <SonarrSVG class="size-4 inline" /> Sonarr Configuration
           {/if}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value={NO_INSTANCE_VALUE} label="No instance selected">
-            No instance selected
-          </Select.Item>
-          {#each selectedArrInstances as instance}
-            <Select.Item
-              value={String(instance.id)}
-              label={`${instance.name}${instance.enabled ? "" : " (disabled)"}`}
-            >
-              {instance.name}{instance.enabled ? "" : " (disabled)"}
-            </Select.Item>
-          {/each}
-        </Select.Content>
-      </Select.Root>
-    </div>
-
-    {#if (targetScope === "movie_version" && radarrServiceConfigId !== null) || (targetScope !== "movie_version" && sonarrServiceConfigId !== null)}
-      <!-- action: keyed on active instance so UI re-initializes when instance changes -->
-      <div class="space-y-2">
-        <Label class="text-sm font-medium text-foreground">Action</Label>
-        {#key `${targetScope}-${targetScope === "movie_version" ? radarrServiceConfigId : sonarrServiceConfigId}`}
-          <Select.Root
-            type="single"
-            value={arrAction}
-            onValueChange={(value) => {
-              if (value === "delete" || value === "unmonitor") {
-                if (targetScope === "movie_version") {
-                  radarrArrAction = value;
-                } else {
-                  sonarrArrAction = value;
-                }
-              }
-            }}
-          >
-            <Select.Trigger
-              class="w-full bg-card text-card-foreground cursor-pointer"
-            >
-              {arrAction === "unmonitor" ? "Unmonitor + Delete File" : "Delete"}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="delete" label="Delete">Delete</Select.Item>
-              <Select.Item value="unmonitor" label="Unmonitor + Delete File">
-                Unmonitor + Delete File
-              </Select.Item>
-            </Select.Content>
-          </Select.Root>
-        {/key}
-        {#if arrAction === "unmonitor"}
-          <p class="text-xs text-muted-foreground">
-            Files are deleted from disk but the entry remains in {selectedArrName}
-            as unmonitored. Requires filesystem access on the Reclaimerr host.
-          </p>
-        {:else}
-          <p class="text-xs text-muted-foreground">
-            The {selectedArrName} entry and its files are fully removed.
-          </p>
-        {/if}
+        </h3>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Select a {selectedArrName} instance to enable routing and actions for matched
+          items.
+        </p>
       </div>
 
-      <!-- managed tag toggle -->
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-foreground">Managed Tag</p>
+      <!-- instance -->
+      <div class="space-y-2">
+        <Label class="text-sm font-medium text-foreground"
+          >{selectedArrName} Instance</Label
+        >
+        <Select.Root
+          type="single"
+          value={targetScope === "movie_version"
+            ? radarrServiceConfigId !== null
+              ? String(radarrServiceConfigId)
+              : NO_INSTANCE_VALUE
+            : sonarrServiceConfigId !== null
+              ? String(sonarrServiceConfigId)
+              : NO_INSTANCE_VALUE}
+          onValueChange={(value) => {
+            const nextValue =
+              value == null || value === NO_INSTANCE_VALUE || value === ""
+                ? null
+                : Number(value);
+            if (targetScope === "movie_version") {
+              radarrServiceConfigId = nextValue;
+            } else {
+              sonarrServiceConfigId = nextValue;
+            }
+          }}
+        >
+          <Select.Trigger
+            class="w-full bg-card text-card-foreground cursor-pointer"
+          >
+            {#if selectedArrInstanceName}
+              {selectedArrInstanceName}
+            {:else}
+              No instance selected
+            {/if}
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value={NO_INSTANCE_VALUE} label="No instance selected">
+              No instance selected
+            </Select.Item>
+            {#each selectedArrInstances as instance}
+              <Select.Item
+                value={String(instance.id)}
+                label={`${instance.name}${instance.enabled ? "" : " (disabled)"}`}
+              >
+                {instance.name}{instance.enabled ? "" : " (disabled)"}
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+
+      {#if (targetScope === "movie_version" && radarrServiceConfigId !== null) || (targetScope !== "movie_version" && sonarrServiceConfigId !== null)}
+        <!-- action: keyed on active instance so UI re-initializes when instance changes -->
+        <div class="space-y-2">
+          <Label class="text-sm font-medium text-foreground">Action</Label>
+          {#key `${targetScope}-${targetScope === "movie_version" ? radarrServiceConfigId : sonarrServiceConfigId}`}
+            <Select.Root
+              type="single"
+              value={arrAction}
+              onValueChange={(value) => {
+                if (value === "delete" || value === "unmonitor") {
+                  if (targetScope === "movie_version") {
+                    radarrArrAction = value;
+                  } else {
+                    sonarrArrAction = value;
+                  }
+                }
+              }}
+            >
+              <Select.Trigger
+                class="w-full bg-card text-card-foreground cursor-pointer"
+              >
+                {arrAction === "unmonitor"
+                  ? "Unmonitor + Delete File"
+                  : "Delete"}
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="delete" label="Delete">Delete</Select.Item>
+                <Select.Item value="unmonitor" label="Unmonitor + Delete File">
+                  Unmonitor + Delete File
+                </Select.Item>
+              </Select.Content>
+            </Select.Root>
+          {/key}
+          {#if arrAction === "unmonitor"}
             <p class="text-xs text-muted-foreground">
-              Apply a tag in {selectedArrName} to matched items.
+              Files are deleted from disk but the entry remains in {selectedArrName}
+              as unmonitored. Requires filesystem access on the Reclaimerr host.
             </p>
-          </div>
-          <Switch
-            checked={tagEnabled}
-            onCheckedChange={(value) => (tagEnabled = value)}
-          />
+          {:else}
+            <p class="text-xs text-muted-foreground">
+              The {selectedArrName} entry and its files are fully removed.
+            </p>
+          {/if}
         </div>
 
-        {#if tagEnabled}
-          <div class="space-y-1">
-            <Input
-              class="input-hover-el text-foreground"
-              bind:value={arrTag}
-              placeholder="rec-custom-tag"
-              max={25}
-              oninput={handleTagInput}
+        <!-- managed tag toggle -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-foreground">Managed Tag</p>
+              <p class="text-xs text-muted-foreground">
+                Apply a tag in {selectedArrName} to matched items.
+              </p>
+            </div>
+            <Switch
+              checked={tagEnabled}
+              onCheckedChange={(value) => (tagEnabled = value)}
             />
-            <p class="text-xs text-muted-foreground">
-              Will be saved as {normalizedTag}
-            </p>
           </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
+
+          {#if tagEnabled}
+            <div class="space-y-1">
+              <Input
+                class="input-hover-el text-foreground"
+                bind:value={arrTag}
+                placeholder="rec-custom-tag"
+                max={25}
+                oninput={handleTagInput}
+              />
+              <p class="text-xs text-muted-foreground">
+                Will be saved as {normalizedTag}
+              </p>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <!-- preview dialog -->
@@ -1088,8 +1143,9 @@
     <Dialog.Header>
       <Dialog.Title>Preview Matches</Dialog.Title>
       <Dialog.Description>
-        Dry run only. Previewing does not save the rule or create cleanup
-        candidates.
+        {outcome === "protect"
+          ? "Dry run only. Previewing does not save the rule or create protections."
+          : "Dry run only. Previewing does not save the rule or create cleanup candidates."}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -1151,6 +1207,28 @@
           />
         {/if}
       </div>
+      {#if previewData?.metadata && previewData.metadata.sonarr_unavailable_count > 0}
+        <Notice type="warning" title="Sonarr Data Unavailable">
+          Sonarr episode-state conditions could not be evaluated for
+          {previewData.metadata.sonarr_unavailable_count}
+          series. Those unknown values did not match.
+          {#if previewData.metadata.sonarr_error}
+            {previewData.metadata.sonarr_error}
+          {/if}
+        </Notice>
+      {/if}
+      {#if previewData?.metadata && previewData.metadata.playback_unavailable_count > 0}
+        <Notice type="warning" title="Playback History Unavailable">
+          Durable playback conditions could not be evaluated for
+          {previewData.metadata.playback_unavailable_count}
+          media target{previewData.metadata.playback_unavailable_count === 1
+            ? ""
+            : "s"}. Those unknown values did not match.
+          {#if previewData.metadata.playback_error}
+            {previewData.metadata.playback_error}
+          {/if}
+        </Notice>
+      {/if}
       <div class="h-[55vh] overflow-y-auto overflow-x-hidden pr-2">
         {#if previewError}
           <Notice type="error" title="Preview Failed">

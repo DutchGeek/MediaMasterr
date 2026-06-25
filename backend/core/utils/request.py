@@ -89,7 +89,7 @@ def format_http_failure(
     endpoint: str | None = None,
     max_body_chars: int = DEFAULT_ERROR_BODY_MAX_CHARS,
 ) -> str:
-    resp = response or getattr(exception, "response", None)
+    resp = response if response is not None else getattr(exception, "response", None)
     status_code = getattr(resp, "status_code", None)
     req = getattr(resp, "request", None)
     method_name = method or getattr(req, "method", None)
@@ -115,7 +115,11 @@ def format_http_failure(
     if details:
         message += f" ({', '.join(details)})"
 
-    exception_text = str(exception).strip() if exception else ""
+    exception_text = (
+        _truncate(_redact_sensitive(str(exception).strip()), max_chars=max_body_chars)
+        if exception
+        else ""
+    )
     if exception_text and exception_text not in message:
         message = f"{message}: {exception_text}"
     return message

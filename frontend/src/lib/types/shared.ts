@@ -10,6 +10,7 @@ export interface User {
   email: string | null;
   role: UserRole;
   permissions: Permission[];
+  allowed_pages: PageAccess[] | null;
   has_local_password: boolean;
   require_password_change: boolean;
 }
@@ -27,6 +28,17 @@ export enum Permission {
   AutoApprove = "auto_approve",
   ManageProtection = "manage_protection",
   ManageReclaim = "manage_reclaim",
+}
+
+export enum PageAccess {
+  Dashboard = "dashboard",
+  Movies = "movies",
+  Series = "series",
+  Requests = "requests",
+  Protected = "protected",
+  Candidates = "candidates",
+  History = "history",
+  Settings = "settings",
 }
 
 export interface UserProfile extends User {
@@ -92,6 +104,8 @@ export enum SettingsTab {
   Sonarr = "sonarr",
   Seerr = "seerr",
   Tautulli = "tautulli",
+  MDBList = "mdblist",
+  OMDb = "omdb",
   General = "general",
   Authentication = "authentication",
   UserSignals = "user_signals",
@@ -205,6 +219,12 @@ export interface GenreLookup {
   media_count: number;
 }
 
+export interface MetadataValueLookup {
+  value: string;
+  name: string;
+  media_count: number;
+}
+
 export interface MediaServerCollectionLookup {
   name: string;
   media_count: number;
@@ -220,6 +240,14 @@ export interface PaginatedMovieCollectionsResponse {
 
 export interface PaginatedGenresResponse {
   items: GenreLookup[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+export interface PaginatedMetadataValuesResponse {
+  items: MetadataValueLookup[];
   total: number;
   page: number;
   per_page: number;
@@ -251,8 +279,41 @@ export interface GeneralSettings {
   favorites_protect_all_users: boolean;
   favorites_usernames: string[];
   requester_watch_user_mappings: RequesterWatchUserMapping[];
+  default_allowed_pages: PageAccess[];
   leaving_soon_enabled: boolean;
   leaving_soon_collection_title: string;
+}
+
+export interface MetadataProviderCoverageBucket {
+  covered: number;
+  total: number;
+  percent: number;
+}
+
+export interface MetadataProviderCoverage {
+  movies: MetadataProviderCoverageBucket;
+  series: MetadataProviderCoverageBucket;
+  total: MetadataProviderCoverageBucket;
+}
+
+export interface MetadataProviderStatus {
+  service_type: string;
+  name: string;
+  configured: boolean;
+  enabled: boolean;
+  request_limit: number;
+  request_delay_seconds: number;
+  last_run_requests: number | null;
+  last_run_request_limit: number | null;
+  disabled_reason: string | null;
+  coverage: MetadataProviderCoverage;
+}
+
+export interface MetadataProviderStatusResponse {
+  providers: MetadataProviderStatus[];
+  last_checked_at: string | null;
+  last_successful_refresh_at: string | null;
+  last_error: string | null;
 }
 
 export interface OIDCSettings {
@@ -350,6 +411,7 @@ export interface RuleDefinition {
 }
 
 export interface RuleAction {
+  outcome: "candidate" | "protect";
   candidate: boolean;
   tag_enabled: boolean;
   arr_tag: string | null;
@@ -506,6 +568,20 @@ export interface MovieWithStatus {
   anilist_popularity: number | null;
   anilist_favourites: number | null;
   anilist_refreshed_at: string | null;
+  rottentomatoes_tomato_meter: number | null;
+  rottentomatoes_tomato_vote_count: number | null;
+  rottentomatoes_popcorn_meter: number | null;
+  rottentomatoes_popcorn_vote_count: number | null;
+  metacritic_metascore: number | null;
+  metacritic_vote_count: number | null;
+  metacritic_user_score: number | null;
+  metacritic_user_vote_count: number | null;
+  trakt_rating: number | null;
+  trakt_vote_count: number | null;
+  letterboxd_score: number | null;
+  letterboxd_vote_count: number | null;
+  external_ratings_source: string | null;
+  external_ratings_refreshed_at: string | null;
   tmdb_title: string | null;
   original_title: string | null;
   tmdb_release_date: string | null;
@@ -553,6 +629,20 @@ export interface SeriesWithStatus {
   anilist_popularity: number | null;
   anilist_favourites: number | null;
   anilist_refreshed_at: string | null;
+  rottentomatoes_tomato_meter: number | null;
+  rottentomatoes_tomato_vote_count: number | null;
+  rottentomatoes_popcorn_meter: number | null;
+  rottentomatoes_popcorn_vote_count: number | null;
+  metacritic_metascore: number | null;
+  metacritic_vote_count: number | null;
+  metacritic_user_score: number | null;
+  metacritic_user_vote_count: number | null;
+  trakt_rating: number | null;
+  trakt_vote_count: number | null;
+  letterboxd_score: number | null;
+  letterboxd_vote_count: number | null;
+  external_ratings_source: string | null;
+  external_ratings_refreshed_at: string | null;
   tvdb_id: string | null;
   tmdb_title: string | null;
   original_title: string | null;
@@ -777,9 +867,26 @@ export interface ProtectedEntry {
   anilist_score: number | null;
   anilist_popularity: number | null;
   anilist_favourites: number | null;
+  rottentomatoes_tomato_meter: number | null;
+  rottentomatoes_tomato_vote_count: number | null;
+  rottentomatoes_popcorn_meter: number | null;
+  rottentomatoes_popcorn_vote_count: number | null;
+  metacritic_metascore: number | null;
+  metacritic_vote_count: number | null;
+  metacritic_user_score: number | null;
+  metacritic_user_vote_count: number | null;
+  trakt_rating: number | null;
+  trakt_vote_count: number | null;
+  letterboxd_score: number | null;
+  letterboxd_vote_count: number | null;
+  external_ratings_source: string | null;
+  external_ratings_refreshed_at: string | null;
   reason: string | null;
-  protected_by_user_id: number;
+  protected_by_user_id: number | null;
   protected_by_username: string;
+  source: "manual" | "rule";
+  source_rule_id: number | null;
+  source_rule_name: string | null;
   permanent: boolean;
   expires_at: string | null;
   created_at: string;
@@ -805,6 +912,20 @@ export interface ReclaimCandidateEntry {
   anilist_score: number | null;
   anilist_popularity: number | null;
   anilist_favourites: number | null;
+  rottentomatoes_tomato_meter: number | null;
+  rottentomatoes_tomato_vote_count: number | null;
+  rottentomatoes_popcorn_meter: number | null;
+  rottentomatoes_popcorn_vote_count: number | null;
+  metacritic_metascore: number | null;
+  metacritic_vote_count: number | null;
+  metacritic_user_score: number | null;
+  metacritic_user_vote_count: number | null;
+  trakt_rating: number | null;
+  trakt_vote_count: number | null;
+  letterboxd_score: number | null;
+  letterboxd_vote_count: number | null;
+  external_ratings_source: string | null;
+  external_ratings_refreshed_at: string | null;
   genres: string[] | null;
   popularity: number | null;
   vote_average: number | null;
@@ -889,6 +1010,10 @@ export interface RulePreviewMetadata {
   source_media_count: number;
   skipped_favorites_count: number;
   skipped_protected_count: number;
+  sonarr_unavailable_count: number;
+  sonarr_error: string | null;
+  playback_unavailable_count: number;
+  playback_error: string | null;
   matched_count: number;
 }
 

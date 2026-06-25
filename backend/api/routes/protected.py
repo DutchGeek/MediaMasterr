@@ -8,7 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from backend.core.auth import get_current_user, has_permission
+from backend.core.auth import get_current_user, has_permission, require_page_access
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database import get_db
 from backend.database.models import (
@@ -16,11 +16,12 @@ from backend.database.models import (
     Movie,
     MovieVersion,
     ProtectedMedia,
+    ReclaimRule,
     Season,
     Series,
     User,
 )
-from backend.enums import MediaType, Permission, UserRole
+from backend.enums import MediaType, PageAccess, Permission, UserRole
 from backend.models.protect import (
     CreateProtectedEntryRequest,
     PaginatedProtectedResponse,
@@ -115,7 +116,7 @@ def can_manage_protection(user: User) -> bool:
 
 @router.get("", response_model=PaginatedProtectedResponse)
 async def get_protected_entries(
-    _user: Annotated[User, Depends(get_current_user)],
+    _user: Annotated[User, Depends(require_page_access(PageAccess.PROTECTED))],
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=200),
@@ -141,6 +142,30 @@ async def get_protected_entries(
             Movie.anilist_score.label("movie_anilist_score"),
             Movie.anilist_popularity.label("movie_anilist_popularity"),
             Movie.anilist_favourites.label("movie_anilist_favourites"),
+            Movie.rottentomatoes_tomato_meter.label(
+                "movie_rottentomatoes_tomato_meter"
+            ),
+            Movie.rottentomatoes_tomato_vote_count.label(
+                "movie_rottentomatoes_tomato_vote_count"
+            ),
+            Movie.rottentomatoes_popcorn_meter.label(
+                "movie_rottentomatoes_popcorn_meter"
+            ),
+            Movie.rottentomatoes_popcorn_vote_count.label(
+                "movie_rottentomatoes_popcorn_vote_count"
+            ),
+            Movie.metacritic_metascore.label("movie_metacritic_metascore"),
+            Movie.metacritic_vote_count.label("movie_metacritic_vote_count"),
+            Movie.metacritic_user_score.label("movie_metacritic_user_score"),
+            Movie.metacritic_user_vote_count.label("movie_metacritic_user_vote_count"),
+            Movie.trakt_rating.label("movie_trakt_rating"),
+            Movie.trakt_vote_count.label("movie_trakt_vote_count"),
+            Movie.letterboxd_score.label("movie_letterboxd_score"),
+            Movie.letterboxd_vote_count.label("movie_letterboxd_vote_count"),
+            Movie.external_ratings_source.label("movie_external_ratings_source"),
+            Movie.external_ratings_refreshed_at.label(
+                "movie_external_ratings_refreshed_at"
+            ),
             Series.title.label("series_title"),
             Series.year.label("series_year"),
             Series.poster_url.label("series_poster_url"),
@@ -154,16 +179,44 @@ async def get_protected_entries(
             Series.anilist_score.label("series_anilist_score"),
             Series.anilist_popularity.label("series_anilist_popularity"),
             Series.anilist_favourites.label("series_anilist_favourites"),
+            Series.rottentomatoes_tomato_meter.label(
+                "series_rottentomatoes_tomato_meter"
+            ),
+            Series.rottentomatoes_tomato_vote_count.label(
+                "series_rottentomatoes_tomato_vote_count"
+            ),
+            Series.rottentomatoes_popcorn_meter.label(
+                "series_rottentomatoes_popcorn_meter"
+            ),
+            Series.rottentomatoes_popcorn_vote_count.label(
+                "series_rottentomatoes_popcorn_vote_count"
+            ),
+            Series.metacritic_metascore.label("series_metacritic_metascore"),
+            Series.metacritic_vote_count.label("series_metacritic_vote_count"),
+            Series.metacritic_user_score.label("series_metacritic_user_score"),
+            Series.metacritic_user_vote_count.label(
+                "series_metacritic_user_vote_count"
+            ),
+            Series.trakt_rating.label("series_trakt_rating"),
+            Series.trakt_vote_count.label("series_trakt_vote_count"),
+            Series.letterboxd_score.label("series_letterboxd_score"),
+            Series.letterboxd_vote_count.label("series_letterboxd_vote_count"),
+            Series.external_ratings_source.label("series_external_ratings_source"),
+            Series.external_ratings_refreshed_at.label(
+                "series_external_ratings_refreshed_at"
+            ),
             Season.season_number.label("season_number"),
             Episode.episode_number.label("episode_number"),
             Episode.name.label("episode_name"),
             User.username.label("actor_username"),
+            ReclaimRule.name.label("source_rule_name"),
         )
         .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
         .outerjoin(Series, Series.id == ProtectedMedia.series_id)
         .outerjoin(Season, Season.id == ProtectedMedia.season_id)
         .outerjoin(Episode, Episode.id == ProtectedMedia.episode_id)
         .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
+        .outerjoin(ReclaimRule, ReclaimRule.id == ProtectedMedia.source_rule_id)
     )
 
     if media_type:
@@ -177,6 +230,7 @@ async def get_protected_entries(
                 Series.title.ilike(search_term),
                 ProtectedMedia.reason.ilike(search_term),
                 User.username.ilike(search_term),
+                ReclaimRule.name.ilike(search_term),
             )
         )
 
@@ -185,6 +239,7 @@ async def get_protected_entries(
         .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
         .outerjoin(Series, Series.id == ProtectedMedia.series_id)
         .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
+        .outerjoin(ReclaimRule, ReclaimRule.id == ProtectedMedia.source_rule_id)
     )
 
     if media_type:
@@ -198,6 +253,7 @@ async def get_protected_entries(
                 Series.title.ilike(search_term),
                 ProtectedMedia.reason.ilike(search_term),
                 User.username.ilike(search_term),
+                ReclaimRule.name.ilike(search_term),
             )
         )
 
@@ -285,6 +341,76 @@ async def get_protected_entries(
             if entry.media_type is MediaType.MOVIE
             else row.series_anilist_favourites
         )
+        rottentomatoes_tomato_meter = (
+            row.movie_rottentomatoes_tomato_meter
+            if entry.media_type is MediaType.MOVIE
+            else row.series_rottentomatoes_tomato_meter
+        )
+        rottentomatoes_tomato_vote_count = (
+            row.movie_rottentomatoes_tomato_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_rottentomatoes_tomato_vote_count
+        )
+        rottentomatoes_popcorn_meter = (
+            row.movie_rottentomatoes_popcorn_meter
+            if entry.media_type is MediaType.MOVIE
+            else row.series_rottentomatoes_popcorn_meter
+        )
+        rottentomatoes_popcorn_vote_count = (
+            row.movie_rottentomatoes_popcorn_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_rottentomatoes_popcorn_vote_count
+        )
+        metacritic_metascore = (
+            row.movie_metacritic_metascore
+            if entry.media_type is MediaType.MOVIE
+            else row.series_metacritic_metascore
+        )
+        metacritic_vote_count = (
+            row.movie_metacritic_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_metacritic_vote_count
+        )
+        metacritic_user_score = (
+            row.movie_metacritic_user_score
+            if entry.media_type is MediaType.MOVIE
+            else row.series_metacritic_user_score
+        )
+        metacritic_user_vote_count = (
+            row.movie_metacritic_user_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_metacritic_user_vote_count
+        )
+        trakt_rating = (
+            row.movie_trakt_rating
+            if entry.media_type is MediaType.MOVIE
+            else row.series_trakt_rating
+        )
+        trakt_vote_count = (
+            row.movie_trakt_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_trakt_vote_count
+        )
+        letterboxd_score = (
+            row.movie_letterboxd_score
+            if entry.media_type is MediaType.MOVIE
+            else row.series_letterboxd_score
+        )
+        letterboxd_vote_count = (
+            row.movie_letterboxd_vote_count
+            if entry.media_type is MediaType.MOVIE
+            else row.series_letterboxd_vote_count
+        )
+        external_ratings_source = (
+            row.movie_external_ratings_source
+            if entry.media_type is MediaType.MOVIE
+            else row.series_external_ratings_source
+        )
+        external_ratings_refreshed_at = (
+            row.movie_external_ratings_refreshed_at
+            if entry.media_type is MediaType.MOVIE
+            else row.series_external_ratings_refreshed_at
+        )
         media_id = (
             entry.movie_id if entry.media_type is MediaType.MOVIE else entry.series_id
         )
@@ -316,9 +442,29 @@ async def get_protected_entries(
                 anilist_score=anilist_score,
                 anilist_popularity=anilist_popularity,
                 anilist_favourites=anilist_favourites,
+                rottentomatoes_tomato_meter=rottentomatoes_tomato_meter,
+                rottentomatoes_tomato_vote_count=(rottentomatoes_tomato_vote_count),
+                rottentomatoes_popcorn_meter=rottentomatoes_popcorn_meter,
+                rottentomatoes_popcorn_vote_count=(rottentomatoes_popcorn_vote_count),
+                metacritic_metascore=metacritic_metascore,
+                metacritic_vote_count=metacritic_vote_count,
+                metacritic_user_score=metacritic_user_score,
+                metacritic_user_vote_count=metacritic_user_vote_count,
+                trakt_rating=trakt_rating,
+                trakt_vote_count=trakt_vote_count,
+                letterboxd_score=letterboxd_score,
+                letterboxd_vote_count=letterboxd_vote_count,
+                external_ratings_source=external_ratings_source,
+                external_ratings_refreshed_at=to_utc_isoformat(
+                    external_ratings_refreshed_at
+                ),
                 reason=entry.reason,
                 protected_by_user_id=entry.protected_by_user_id,
-                protected_by_username=row.actor_username or "Unknown",
+                protected_by_username=row.actor_username
+                or ("Automated rule" if entry.source == "rule" else "Unknown"),
+                source="rule" if entry.source == "rule" else "manual",
+                source_rule_id=entry.source_rule_id,
+                source_rule_name=row.source_rule_name,
                 permanent=entry.permanent,
                 expires_at=to_utc_isoformat(entry.expires_at),
                 created_at=to_utc_isoformat(entry.created_at) or "",
@@ -386,6 +532,7 @@ async def create_protection_entry(
         )
         media = media_result.scalar_one_or_none()
         existing_query = select(ProtectedMedia).where(
+            ProtectedMedia.source == "manual",
             ProtectedMedia.media_type == MediaType.MOVIE,
             ProtectedMedia.movie_id == request_data.media_id,
             ProtectedMedia.movie_version_id == request_data.movie_version_id,
@@ -410,6 +557,7 @@ async def create_protection_entry(
         )
         media = media_result.scalar_one_or_none()
         existing_query = select(ProtectedMedia).where(
+            ProtectedMedia.source == "manual",
             ProtectedMedia.media_type == MediaType.SERIES,
             ProtectedMedia.series_id == request_data.media_id,
             _series_scope_overlap_clause(
@@ -480,9 +628,28 @@ async def create_protection_entry(
         anilist_score=media.anilist_score,
         anilist_popularity=media.anilist_popularity,
         anilist_favourites=media.anilist_favourites,
+        rottentomatoes_tomato_meter=media.rottentomatoes_tomato_meter,
+        rottentomatoes_tomato_vote_count=media.rottentomatoes_tomato_vote_count,
+        rottentomatoes_popcorn_meter=media.rottentomatoes_popcorn_meter,
+        rottentomatoes_popcorn_vote_count=media.rottentomatoes_popcorn_vote_count,
+        metacritic_metascore=media.metacritic_metascore,
+        metacritic_vote_count=media.metacritic_vote_count,
+        metacritic_user_score=media.metacritic_user_score,
+        metacritic_user_vote_count=media.metacritic_user_vote_count,
+        trakt_rating=media.trakt_rating,
+        trakt_vote_count=media.trakt_vote_count,
+        letterboxd_score=media.letterboxd_score,
+        letterboxd_vote_count=media.letterboxd_vote_count,
+        external_ratings_source=media.external_ratings_source,
+        external_ratings_refreshed_at=to_utc_isoformat(
+            media.external_ratings_refreshed_at
+        ),
         reason=new_entry.reason,
         protected_by_user_id=user.id,
         protected_by_username=user.username,
+        source="manual",
+        source_rule_id=None,
+        source_rule_name=None,
         permanent=new_entry.permanent,
         expires_at=to_utc_isoformat(new_entry.expires_at),
         created_at=to_utc_isoformat(new_entry.created_at) or "",
@@ -519,6 +686,11 @@ async def update_protection_duration(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Protected entry not found",
+        )
+    if entry.source == "rule":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rule-managed protections can only be changed by editing the rule",
         )
 
     if request_data.duration_days is None:
@@ -584,9 +756,28 @@ async def update_protection_duration(
         anilist_score=media.anilist_score,
         anilist_popularity=media.anilist_popularity,
         anilist_favourites=media.anilist_favourites,
+        rottentomatoes_tomato_meter=media.rottentomatoes_tomato_meter,
+        rottentomatoes_tomato_vote_count=media.rottentomatoes_tomato_vote_count,
+        rottentomatoes_popcorn_meter=media.rottentomatoes_popcorn_meter,
+        rottentomatoes_popcorn_vote_count=media.rottentomatoes_popcorn_vote_count,
+        metacritic_metascore=media.metacritic_metascore,
+        metacritic_vote_count=media.metacritic_vote_count,
+        metacritic_user_score=media.metacritic_user_score,
+        metacritic_user_vote_count=media.metacritic_user_vote_count,
+        trakt_rating=media.trakt_rating,
+        trakt_vote_count=media.trakt_vote_count,
+        letterboxd_score=media.letterboxd_score,
+        letterboxd_vote_count=media.letterboxd_vote_count,
+        external_ratings_source=media.external_ratings_source,
+        external_ratings_refreshed_at=to_utc_isoformat(
+            media.external_ratings_refreshed_at
+        ),
         reason=entry.reason,
         protected_by_user_id=entry.protected_by_user_id,
         protected_by_username=actor.username if actor else "Unknown",
+        source="manual",
+        source_rule_id=None,
+        source_rule_name=None,
         permanent=entry.permanent,
         expires_at=to_utc_isoformat(expires_at_value),
         created_at=to_utc_isoformat(entry.created_at) or "",
@@ -616,6 +807,11 @@ async def delete_protection_entry(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Protected entry not found",
+        )
+    if entry.source == "rule":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rule-managed protections can only be removed by editing the rule",
         )
 
     await db.delete(entry)

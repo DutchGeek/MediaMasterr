@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.api.routes.rules import (
+    _normalize_rule_action,
     create_rule,
     import_rules,
     preview_rule_matches,
@@ -45,6 +46,33 @@ def _admin_user() -> User:
         role=UserRole.ADMIN,
         permissions=[],
     )
+
+
+def test_legacy_rule_action_defaults_to_candidate() -> None:
+    action = _normalize_rule_action(None, "Legacy Rule", "movie_version")
+    assert action["outcome"] == "candidate"
+    assert action["candidate"] is True
+
+
+def test_protection_rule_action_disables_destructive_settings() -> None:
+    action = _normalize_rule_action(
+        {
+            "outcome": "protect",
+            "tag_enabled": True,
+            "arr_tag": "rec-delete",
+            "arr_action": "unmonitor",
+            "media_server_action": "delete",
+            "radarr_service_config_id": 7,
+        },
+        "Protect Rule",
+        "movie_version",
+    )
+    assert action["outcome"] == "protect"
+    assert action["candidate"] is False
+    assert action["tag_enabled"] is False
+    assert action["arr_tag"] is None
+    assert action["media_server_action"] is None
+    assert action["radarr_service_config_id"] is None
 
 
 def test_create_rule_rejects_incompatible_field_for_target_scope() -> None:

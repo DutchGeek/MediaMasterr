@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
@@ -32,7 +32,11 @@ from backend.enums import (
     TaskStatus,
     UserRole,
 )
-from backend.user_types import AudioCodecFamily, VideoCodecFamily
+from backend.user_types import (
+    DEFAULT_NEW_USER_ALLOWED_PAGES,
+    AudioCodecFamily,
+    VideoCodecFamily,
+)
 
 
 class User(Base):
@@ -64,6 +68,7 @@ class User(Base):
     # permissions
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
     permissions: Mapped[list[str]] = mapped_column(JSON, default_factory=list)
+    allowed_pages: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     require_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
     token_version: Mapped[int] = mapped_column(Integer, default=0)
@@ -311,6 +316,9 @@ class GeneralSettings(Base):
     requester_watch_user_mappings: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, default_factory=list
     )
+    default_allowed_pages: Mapped[list[str]] = mapped_column(
+        JSON, default_factory=lambda: list(DEFAULT_NEW_USER_ALLOWED_PAGES)
+    )
 
     # leaving soon collection sync
     leaving_soon_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -458,6 +466,32 @@ class AniListRatingsIngestState(Base):
     )
 
 
+class ExternalRatingsIngestState(Base):
+    """Track metadata for external ratings provider refreshes."""
+
+    __tablename__ = "external_ratings_ingest_state"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    provider_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    movie_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    series_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    request_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    last_successful_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
 class AdminNotice(Base):
     """Persisted admin facing in app notices with global read state."""
 
@@ -527,6 +561,34 @@ class Movie(Base):
     anilist_popularity: Mapped[int | None] = mapped_column(Integer, default=None)
     anilist_favourites: Mapped[int | None] = mapped_column(Integer, default=None)
     anilist_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    rottentomatoes_tomato_meter: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_tomato_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_popcorn_meter: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_popcorn_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    metacritic_metascore: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_user_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_user_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    trakt_rating: Mapped[int | None] = mapped_column(Integer, default=None)
+    trakt_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    letterboxd_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    letterboxd_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    external_ratings_source: Mapped[str | None] = mapped_column(
+        String(64), default=None
+    )
+    external_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None
     )
 
@@ -831,6 +893,96 @@ class MediaWatchUser(Base):
     )
 
 
+class PlaybackHistoryEvent(Base):
+    """Compact provider playback event retained for durable rule evaluation."""
+
+    __tablename__ = "playback_history_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_service_config_id",
+            "source_event_key",
+            name="uq_playback_history_event_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    source_service: Mapped[Service] = mapped_column(Enum(Service), index=True)
+    source_service_config_id: Mapped[int] = mapped_column(
+        ForeignKey("service_configs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    source_event_key: Mapped[str] = mapped_column(String(255))
+    source_item_id: Mapped[str] = mapped_column(String(255), index=True)
+    provider_media_type: Mapped[str] = mapped_column(String(16))
+    played_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer)
+    source_user_id: Mapped[str | None] = mapped_column(
+        String(255), default=None, index=True
+    )
+    tmdb_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    season_number: Mapped[int | None] = mapped_column(SmallInteger, default=None)
+    episode_number: Mapped[int | None] = mapped_column(Integer, default=None)
+    movie_id: Mapped[int | None] = mapped_column(
+        ForeignKey("movies.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+    series_id: Mapped[int | None] = mapped_column(
+        ForeignKey("series.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+    season_id: Mapped[int | None] = mapped_column(
+        ForeignKey("seasons.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+    episode_id: Mapped[int | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class PlaybackHistoryAggregate(Base):
+    """Provider-neutral playback totals for one rule target."""
+
+    __tablename__ = "playback_history_aggregates"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_scope",
+            "target_id",
+            name="uq_playback_history_aggregate_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    target_scope: Mapped[str] = mapped_column(String(24), index=True)
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    media_type: Mapped[MediaType] = mapped_column(Enum(MediaType), index=True)
+    play_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_duration_seconds: Mapped[int] = mapped_column(BigInteger, default=0)
+    longest_duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    unique_user_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_activity_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
 class Series(Base):
     """Series availability and metadata."""
 
@@ -862,6 +1014,34 @@ class Series(Base):
     anilist_popularity: Mapped[int | None] = mapped_column(Integer, default=None)
     anilist_favourites: Mapped[int | None] = mapped_column(Integer, default=None)
     anilist_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    rottentomatoes_tomato_meter: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_tomato_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_popcorn_meter: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    rottentomatoes_popcorn_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    metacritic_metascore: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_user_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    metacritic_user_vote_count: Mapped[int | None] = mapped_column(
+        Integer, default=None
+    )
+    trakt_rating: Mapped[int | None] = mapped_column(Integer, default=None)
+    trakt_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    letterboxd_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    letterboxd_vote_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    external_ratings_source: Mapped[str | None] = mapped_column(
+        String(64), default=None
+    )
+    external_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None
     )
     tvdb_id: Mapped[str | None] = mapped_column(
@@ -1197,8 +1377,8 @@ class ProtectedMedia(Base):
     media_type: Mapped[MediaType] = mapped_column(Enum(MediaType))
 
     # protected details (required fields first for dataclass)
-    protected_by_user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE")
+    protected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), default=None
     )
 
     # foreign keys (movie_id or series_id will be set based on media_type)
@@ -1213,10 +1393,21 @@ class ProtectedMedia(Base):
     episode_id: Mapped[int | None] = mapped_column(
         ForeignKey("episodes.id", ondelete="CASCADE"), default=None, index=True
     )
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    source_rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reclaim_rules.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
 
     # optional details
     reason: Mapped[str | None] = mapped_column(Text, default=None)
-    protected_by: Mapped[User] = relationship(init=False, lazy="noload", repr=False)
+    protected_by: Mapped[User | None] = relationship(
+        init=False, lazy="noload", repr=False
+    )
+    source_rule: Mapped[ReclaimRule | None] = relationship(
+        init=False, lazy="noload", repr=False
+    )
     season: Mapped[Season | None] = relationship(init=False, lazy="noload", repr=False)
     episode: Mapped[Episode | None] = relationship(
         init=False,

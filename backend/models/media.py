@@ -284,6 +284,20 @@ class MovieWithStatus(BaseModel):
     anilist_popularity: int | None = None
     anilist_favourites: int | None = None
     anilist_refreshed_at: str | None = None
+    rottentomatoes_tomato_meter: int | None = None
+    rottentomatoes_tomato_vote_count: int | None = None
+    rottentomatoes_popcorn_meter: int | None = None
+    rottentomatoes_popcorn_vote_count: int | None = None
+    metacritic_metascore: int | None = None
+    metacritic_vote_count: int | None = None
+    metacritic_user_score: int | None = None
+    metacritic_user_vote_count: int | None = None
+    trakt_rating: int | None = None
+    trakt_vote_count: int | None = None
+    letterboxd_score: int | None = None
+    letterboxd_vote_count: int | None = None
+    external_ratings_source: str | None = None
+    external_ratings_refreshed_at: str | None = None
 
     # TMDB metadata
     tmdb_title: str | None
@@ -348,6 +362,20 @@ class SeriesWithStatus(BaseModel):
     anilist_popularity: int | None = None
     anilist_favourites: int | None = None
     anilist_refreshed_at: str | None = None
+    rottentomatoes_tomato_meter: int | None = None
+    rottentomatoes_tomato_vote_count: int | None = None
+    rottentomatoes_popcorn_meter: int | None = None
+    rottentomatoes_popcorn_vote_count: int | None = None
+    metacritic_metascore: int | None = None
+    metacritic_vote_count: int | None = None
+    metacritic_user_score: int | None = None
+    metacritic_user_vote_count: int | None = None
+    trakt_rating: int | None = None
+    trakt_vote_count: int | None = None
+    letterboxd_score: int | None = None
+    letterboxd_vote_count: int | None = None
+    external_ratings_source: str | None = None
+    external_ratings_refreshed_at: str | None = None
     tvdb_id: str | None
 
     # TMDB metadata
@@ -495,6 +523,20 @@ class CandidateEntryBase(BaseModel):
     anilist_score: int | None = None
     anilist_popularity: int | None = None
     anilist_favourites: int | None = None
+    rottentomatoes_tomato_meter: int | None = None
+    rottentomatoes_tomato_vote_count: int | None = None
+    rottentomatoes_popcorn_meter: int | None = None
+    rottentomatoes_popcorn_vote_count: int | None = None
+    metacritic_metascore: int | None = None
+    metacritic_vote_count: int | None = None
+    metacritic_user_score: int | None = None
+    metacritic_user_vote_count: int | None = None
+    trakt_rating: int | None = None
+    trakt_vote_count: int | None = None
+    letterboxd_score: int | None = None
+    letterboxd_vote_count: int | None = None
+    external_ratings_source: str | None = None
+    external_ratings_refreshed_at: str | None = None
     genres: list[str] | None = None
     popularity: float | None = None
     vote_average: float | None = None
@@ -560,6 +602,10 @@ class RulePreviewMetadata(BaseModel):
     source_media_count: int = 0
     skipped_favorites_count: int = 0
     skipped_protected_count: int = 0
+    sonarr_unavailable_count: int = 0
+    sonarr_error: str | None = None
+    playback_unavailable_count: int = 0
+    playback_error: str | None = None
     matched_count: int = 0
 
 

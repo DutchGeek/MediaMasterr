@@ -41,6 +41,7 @@ class RulePreviewRequest(BaseModel):
     media_type: MediaType
     target_scope: str
     definition: dict[str, Any]
+    outcome: Literal["candidate", "protect"] = "candidate"
     page: int = Field(default=1, ge=1)
     per_page: int = Field(default=25, ge=1, le=100)
 
@@ -71,6 +72,20 @@ class GenreLookupResponse(BaseModel):
 
 class PaginatedGenresResponse(BaseModel):
     items: list[GenreLookupResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
+class MetadataValueLookupResponse(BaseModel):
+    value: str
+    name: str
+    media_count: int
+
+
+class PaginatedMetadataValuesResponse(BaseModel):
+    items: list[MetadataValueLookupResponse]
     total: int
     page: int
     per_page: int

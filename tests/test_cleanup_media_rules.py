@@ -49,6 +49,7 @@ from backend.tasks.cleanup import (
     _evaluate_rule_for_season,
     _process_series_episodes,
     _process_series_seasons,
+    _reconcile_rule_managed_protections,
     _scan_with_db,
     collect_rule_preview_matches,
     collect_rule_preview_matches_with_metadata,
@@ -362,6 +363,59 @@ class _SonarrTagRefreshClientFake:
         return list(self._tags)
 
 
+class _SonarrEpisodeStateClientFake:
+    def __init__(
+        self,
+        *,
+        series: list[SimpleNamespace] | None = None,
+        episodes: dict[tuple[int, int], list[dict[str, object]]] | None = None,
+        fail_series: bool = False,
+        fail_episodes: bool = False,
+    ) -> None:
+        self._series = list(series or [])
+        self._episodes = dict(episodes or {})
+        self._fail_series = fail_series
+        self._fail_episodes = fail_episodes
+        self.series_calls = 0
+        self.episode_calls: list[tuple[int, int | None]] = []
+
+    async def get_all_series(self) -> list[SimpleNamespace]:
+        self.series_calls += 1
+        if self._fail_series:
+            raise RuntimeError("sonarr series unavailable")
+        return list(self._series)
+
+    async def get_episodes(
+        self,
+        series_id: int,
+        season_number: int | None = None,
+    ) -> list[dict[str, object]]:
+        self.episode_calls.append((series_id, season_number))
+        if self._fail_episodes:
+            raise RuntimeError("sonarr episodes unavailable")
+        if season_number is None:
+            return []
+        return list(self._episodes.get((series_id, season_number), []))
+
+    async def get_disk_space(self) -> list[dict[str, object]]:
+        return []
+
+
+class _SonarrSharedRuleDataClientFake(_SonarrEpisodeStateClientFake):
+    def __init__(
+        self,
+        *,
+        series: list[SimpleNamespace],
+        tags: list[SimpleNamespace],
+        episodes: dict[tuple[int, int], list[dict[str, object]]],
+    ) -> None:
+        super().__init__(series=series, episodes=episodes)
+        self._tags = list(tags)
+
+    async def get_tags(self) -> list[SimpleNamespace]:
+        return list(self._tags)
+
+
 class _RadarrTagRefreshClientFake:
     def __init__(
         self,
@@ -386,6 +440,207 @@ class _RadarrTagRefreshClientFake:
 
 
 class CleanupMediaRuleTests(unittest.TestCase):
+    def test_movie_version_extended_metadata_fields_match(self) -> None:
+        movie = Movie(
+            title="Movie",
+            tmdb_id=1,
+            year=2005,
+            original_language="en",
+            origin_country=["US"],
+            runtime=116,
+        )
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            service=Service.JELLYFIN,
+            container="mkv",
+            video_bitrate=12_000_000,
+            video_bit_depth=10,
+            audio_bitrate=640_000,
+            subtitle_count=2,
+            subtitle_has_forced=True,
+            size=1,
+        )
+        other_version = _make_movie_version(
+            service_media_id="media-2",
+            service_item_id="item-2",
+        )
+        movie.versions = [version, other_version]
+        rule = _rule_with_root(
+            MediaType.MOVIE,
+            TARGET_MOVIE_VERSION,
+            _group(
+                "and",
+                _condition("media.year", "equals", 2005),
+                _condition("media.container", "contains_any", ["MKV"]),
+                _condition("tmdb.original_language", "contains_any", ["eng"]),
+                _condition("tmdb.origin_country", "contains_any", ["us"]),
+                _condition("tmdb.runtime_minutes", "equals", 116),
+                _condition("video.bitrate_kbps", "equals", 12000),
+                _condition("video.bit_depth", "equals", 10),
+                _condition("audio.bitrate_kbps", "equals", 640),
+                _condition("subtitle.track_count", "equals", 2),
+                _condition("subtitle.has_forced", "is_true"),
+                _condition("movie.version_count", "equals", 2),
+            ),
+        )
+
+        self.assertTrue(_evaluate_movie_version_rule(movie, version, rule, {}, []))
+
+    def test_external_rating_fields_match_movie_version_scope(self) -> None:
+        movie = Movie(
+            title="Movie",
+            tmdb_id=1,
+            rottentomatoes_tomato_meter=91,
+            rottentomatoes_tomato_vote_count=147,
+            rottentomatoes_popcorn_meter=84,
+            rottentomatoes_popcorn_vote_count=53440,
+            metacritic_metascore=73,
+            metacritic_vote_count=22,
+            metacritic_user_score=88,
+            metacritic_user_vote_count=2188,
+            trakt_rating=90,
+            trakt_vote_count=36405,
+            letterboxd_score=92,
+            letterboxd_vote_count=2859264,
+        )
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            size=1,
+        )
+        movie.versions = [version]
+        rule = _rule_with_root(
+            MediaType.MOVIE,
+            TARGET_MOVIE_VERSION,
+            _group(
+                "and",
+                _condition("rottentomatoes.tomato_meter", "greater_than", 90),
+                _condition("rottentomatoes.tomato_vote_count", "greater_than", 100),
+                _condition("rottentomatoes.popcorn_meter", "greater_than", 80),
+                _condition("rottentomatoes.popcorn_vote_count", "greater_than", 50000),
+                _condition("metacritic.metascore", "greater_than", 70),
+                _condition("metacritic.vote_count", "greater_than", 20),
+                _condition("metacritic.user_score", "greater_than", 80),
+                _condition("metacritic.user_vote_count", "greater_than", 2000),
+                _condition("trakt.rating", "greater_than", 85),
+                _condition("trakt.vote_count", "greater_than", 30000),
+                _condition("letterboxd.score", "greater_than", 90),
+                _condition("letterboxd.vote_count", "greater_than", 2_000_000),
+            ),
+        )
+
+        self.assertTrue(_evaluate_movie_version_rule(movie, version, rule, {}, []))
+
+    def test_plex_bitrate_values_are_already_kbps(self) -> None:
+        movie = Movie(title="Movie", tmdb_id=1)
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            service=Service.PLEX,
+            video_bitrate=8914,
+            audio_bitrate=655,
+            size=1,
+        )
+        movie.versions = [version]
+        rule = _rule_with_root(
+            MediaType.MOVIE,
+            TARGET_MOVIE_VERSION,
+            _group(
+                "and",
+                _condition("video.bitrate_kbps", "equals", 8914),
+                _condition("audio.bitrate_kbps", "equals", 655),
+            ),
+        )
+
+        self.assertTrue(_evaluate_movie_version_rule(movie, version, rule, {}, []))
+
+    def test_missing_language_and_country_fail_negative_list_matches(self) -> None:
+        movie = Movie(title="Movie", tmdb_id=1)
+        version = _make_movie_version(
+            service_media_id="media-1",
+            service_item_id="item-1",
+            size=1,
+        )
+        movie.versions = [version]
+
+        for field, value in [
+            ("tmdb.original_language", ["eng"]),
+            ("tmdb.origin_country", ["US"]),
+        ]:
+            with self.subTest(field=field):
+                rule = _rule_with_root(
+                    MediaType.MOVIE,
+                    TARGET_MOVIE_VERSION,
+                    _group("and", _condition(field, "not_contains_any", value)),
+                )
+                self.assertFalse(
+                    _evaluate_movie_version_rule(movie, version, rule, {}, [])
+                )
+
+    def test_series_metadata_and_season_counts_are_inherited_by_all_scopes(
+        self,
+    ) -> None:
+        series = Series(
+            title="Series",
+            tmdb_id=2,
+            year=2024,
+            original_language="ja",
+            origin_country=["JP"],
+            rottentomatoes_tomato_meter=88,
+            rottentomatoes_tomato_vote_count=42,
+            rottentomatoes_popcorn_meter=92,
+            rottentomatoes_popcorn_vote_count=500,
+            metacritic_metascore=79,
+            metacritic_vote_count=24,
+            metacritic_user_score=87,
+            metacritic_user_vote_count=101,
+            trakt_rating=86,
+            trakt_vote_count=202,
+            letterboxd_score=90,
+            letterboxd_vote_count=303,
+        )
+        series.season_count = 4
+        special = Season(series_id=1, season_number=0)
+        season_one = Season(series_id=1, season_number=1, size=1)
+        season_two = Season(series_id=1, season_number=2, size=1)
+        series.seasons = [special, season_one, season_two]
+        episode = Episode(season_id=1, episode_number=1)
+        conditions = _group(
+            "and",
+            _condition("media.year", "equals", 2024),
+            _condition("tmdb.original_language", "contains_any", ["jpn"]),
+            _condition("tmdb.origin_country", "contains_any", ["jp"]),
+            _condition("series.tmdb_season_count", "equals", 4),
+            _condition("series.library_season_count", "equals", 2),
+            _condition("rottentomatoes.tomato_meter", "greater_than", 80),
+            _condition("rottentomatoes.tomato_vote_count", "greater_than", 40),
+            _condition("rottentomatoes.popcorn_meter", "greater_than", 90),
+            _condition("rottentomatoes.popcorn_vote_count", "greater_than", 400),
+            _condition("metacritic.metascore", "greater_than", 75),
+            _condition("metacritic.vote_count", "greater_than", 20),
+            _condition("metacritic.user_score", "greater_than", 80),
+            _condition("metacritic.user_vote_count", "greater_than", 100),
+            _condition("trakt.rating", "greater_than", 80),
+            _condition("trakt.vote_count", "greater_than", 200),
+            _condition("letterboxd.score", "greater_than", 85),
+            _condition("letterboxd.vote_count", "greater_than", 300),
+        )
+
+        series_rule = _rule_with_root(MediaType.SERIES, TARGET_SERIES, conditions)
+        season_rule = _rule_with_root(MediaType.SERIES, TARGET_SEASON, conditions)
+        episode_rule = _rule_with_root(MediaType.SERIES, TARGET_EPISODE, conditions)
+
+        self.assertTrue(_evaluate_movie_rule(series, series_rule, {}, []))
+        self.assertTrue(
+            _evaluate_rule_for_season(series, season_one, season_rule, {}, [])
+        )
+        self.assertTrue(
+            _evaluate_rule_for_episode(
+                series, season_one, episode, episode_rule, {}, []
+            )
+        )
+
     def test_nested_and_or_movie_version_only_records_matching_or_branch(self) -> None:
         movie = Movie(title="Movie", tmdb_id=1, size=10 * 1024**3)
         version = _make_movie_version(
@@ -1997,11 +2252,649 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        self._async_db_patch = patch.object(
+            cleanup_tasks,
+            "async_db",
+            self._sessionmaker,
+        )
+        self._async_db_patch.start()
 
     async def asyncTearDown(self) -> None:
+        self._async_db_patch.stop()
         await self._engine.dispose()
         if self._db_path.exists():
             self._db_path.unlink()
+
+    async def test_automated_protection_wins_over_matching_candidate(self) -> None:
+        async with self._sessionmaker() as db:
+            protection_rule = _make_rule(MediaType.MOVIE, min_size=1)
+            protection_rule.name = "Protect large movies"
+            protection_rule.action = {"outcome": "protect"}
+            candidate_rule = _make_rule(MediaType.MOVIE, min_size=1)
+            candidate_rule.name = "Delete large movies"
+            movie = Movie(title="Protected Movie", tmdb_id=10001, size=1024)
+            db.add_all([protection_rule, candidate_rule, movie])
+            await db.flush()
+            version = _make_movie_version(
+                service_media_id="protected-version",
+                service_item_id="protected-item",
+            )
+            version.movie_id = movie.id
+            version.size = 1024
+            db.add(version)
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            result = await _scan_with_db(db)
+            self.assertEqual(result, (0, 0, 0))
+            candidates = (await db.execute(select(ReclaimCandidate))).scalars().all()
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(candidates, [])
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(protections[0].source_rule_id, protection_rule.id)
+
+    async def test_automated_protection_respects_library_scope(self) -> None:
+        async with self._sessionmaker() as db:
+            protection_rule = _make_rule(
+                MediaType.MOVIE,
+                library_ids=["protected-library"],
+                min_size=1,
+            )
+            protection_rule.action = {"outcome": "protect"}
+            protected_movie = Movie(
+                title="Protected Library Movie",
+                tmdb_id=10006,
+                size=1024,
+            )
+            other_movie = Movie(
+                title="Other Library Movie",
+                tmdb_id=10007,
+                size=1024,
+            )
+            db.add_all([protection_rule, protected_movie, other_movie])
+            await db.flush()
+
+            protected_version = _make_movie_version(
+                service_media_id="protected-library-version",
+                service_item_id="protected-library-item",
+                library_id="protected-library",
+            )
+            protected_version.movie_id = protected_movie.id
+            protected_version.size = 1024
+            other_version = _make_movie_version(
+                service_media_id="other-library-version",
+                service_item_id="other-library-item",
+                library_id="other-library",
+            )
+            other_version.movie_id = other_movie.id
+            other_version.size = 1024
+            db.add_all([protected_version, other_version])
+            await db.commit()
+            protected_version_id = protected_version.id
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(
+                protections[0].movie_version_id,
+                protected_version_id,
+            )
+
+    async def test_rule_reconciliation_preserves_manual_protection(self) -> None:
+        async with self._sessionmaker() as db:
+            user = User(username="admin", password_hash="x")
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Protected Series", tmdb_id=10002, size=1024)
+            db.add_all([user, rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=user.id,
+                    source="manual",
+                    reason="Keep manually",
+                )
+            )
+            await db.commit()
+            series_id = series.id
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(
+                            ProtectedMedia.series_id == series_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(
+                {entry.source for entry in protections}, {"manual", "rule"}
+            )
+
+            series = await db.get(Series, series_id)
+            self.assertIsNotNone(series)
+            assert series is not None
+            series.size = 0
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(
+                            ProtectedMedia.series_id == series_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+            self.assertEqual(protections[0].source, "manual")
+
+    async def test_multiple_protection_rules_create_separate_entries(self) -> None:
+        async with self._sessionmaker() as db:
+            first_rule = _make_rule(MediaType.SERIES, min_size=1)
+            first_rule.name = "Protect one"
+            first_rule.action = {"outcome": "protect"}
+            second_rule = _make_rule(MediaType.SERIES, min_size=1)
+            second_rule.name = "Protect two"
+            second_rule.action = {"outcome": "protect"}
+            series = Series(title="Twice Protected", tmdb_id=10003, size=1024)
+            db.add_all([first_rule, second_rule, series])
+            await db.commit()
+
+        async with self._sessionmaker() as db:
+            await _scan_with_db(db)
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 2)
+            self.assertEqual(
+                {entry.source_rule_id for entry in protections},
+                {first_rule.id, second_rule.id},
+            )
+
+    async def test_skipped_protection_rule_can_preserve_existing_entries(self) -> None:
+        async with self._sessionmaker() as db:
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Preserved Series", tmdb_id=10004, size=1024)
+            db.add_all([rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=None,
+                    source="rule",
+                    source_rule_id=rule.id,
+                    reason="Existing managed protection",
+                )
+            )
+            await db.commit()
+            rule_id = rule.id
+
+        async with self._sessionmaker() as db:
+            result = await _reconcile_rule_managed_protections(
+                db,
+                [],
+                preserve_rule_ids={rule_id},
+            )
+            self.assertEqual(result, (0, 0, 0))
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(ProtectedMedia.source == "rule")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
+
+    async def test_protection_preview_includes_already_protected_media(self) -> None:
+        async with self._sessionmaker() as db:
+            user = User(username="admin", password_hash="x")
+            rule = _make_rule(MediaType.SERIES, min_size=1)
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Preview Protected", tmdb_id=10005, size=1024)
+            db.add_all([user, rule, series])
+            await db.flush()
+            db.add(
+                ProtectedMedia(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    protected_by_user_id=user.id,
+                    reason="Manual protection",
+                )
+            )
+            await db.commit()
+            series_id = series.id
+
+        async with self._sessionmaker() as db:
+            rule = (await db.execute(select(ReclaimRule))).scalar_one()
+            result = await collect_rule_preview_matches_with_metadata(db, [rule])
+            self.assertEqual([match.series_id for match in result.matches], [series_id])
+            self.assertEqual(result.metadata.skipped_protected_count, 0)
+
+    async def test_sonarr_rule_fetches_only_latest_regular_season(self) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-latest",
+                api_key="x",
+                name="sonarr-latest",
+                enabled=True,
+            )
+            rule = _make_multi_condition_rule(
+                name="latest-season-state",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                conditions=[
+                    {
+                        "type": "condition",
+                        "field": "sonarr.latest_season_has_unaired_episodes",
+                        "operator": "is_true",
+                    },
+                    {
+                        "type": "condition",
+                        "field": "sonarr.latest_season_has_finale",
+                        "operator": "is_true",
+                    },
+                ],
+            )
+            series = Series(title="Latest Season", tmdb_id=11001, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=501,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+            series_id = series.id
+
+        future = datetime.now(UTC) + timedelta(days=7)
+        fake_client = _SonarrEpisodeStateClientFake(
+            series=[
+                SimpleNamespace(
+                    id=501,
+                    seasons=[
+                        SimpleNamespace(season_number=0, statistics={}),
+                        SimpleNamespace(season_number=1, statistics={}),
+                        SimpleNamespace(season_number=2, statistics={}),
+                    ],
+                )
+            ],
+            episodes={
+                (501, 2): [
+                    {
+                        "seasonNumber": 2,
+                        "episodeNumber": 1,
+                        "airDateUtc": future.isoformat(),
+                        "finaleType": "season",
+                    }
+                ]
+            },
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {
+            config_id: fake_client  # pyright: ignore[reportAttributeAccessIssue]
+        }
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(fake_client.episode_calls, [(501, 2)])
+        self.assertEqual([match.series_id for match in result.matches], [series_id])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+
+    async def test_sonarr_next_airing_proves_unaired_without_episode_fetch(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-next-airing",
+                api_key="x",
+                name="sonarr-next-airing",
+                enabled=True,
+            )
+            rule = _make_single_condition_rule(
+                name="has-unaired",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.latest_season_has_unaired_episodes",
+                operator="is_true",
+            )
+            series = Series(title="Next Airing", tmdb_id=11002, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=502,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+
+        fake_client = _SonarrEpisodeStateClientFake(
+            series=[
+                SimpleNamespace(
+                    id=502,
+                    seasons=[
+                        SimpleNamespace(
+                            season_number=3,
+                            statistics={
+                                "nextAiring": (
+                                    datetime.now(UTC) + timedelta(days=2)
+                                ).isoformat()
+                            },
+                        )
+                    ],
+                )
+            ]
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {
+            config_id: fake_client  # pyright: ignore[reportAttributeAccessIssue]
+        }
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(len(result.matches), 1)
+        self.assertEqual(fake_client.episode_calls, [])
+
+    async def test_sonarr_rule_refreshes_share_one_bulk_series_snapshot(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-shared-snapshot",
+                api_key="x",
+                name="sonarr-shared-snapshot",
+                enabled=True,
+            )
+            rule = _make_multi_condition_rule(
+                name="shared-sonarr-snapshot",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                conditions=[
+                    {
+                        "type": "condition",
+                        "field": "arr.tags",
+                        "operator": "contains_any",
+                        "value": ["keep"],
+                    },
+                    {
+                        "type": "condition",
+                        "field": "arr.monitored",
+                        "operator": "is_true",
+                    },
+                    {
+                        "type": "condition",
+                        "field": "sonarr.latest_season_has_finale",
+                        "operator": "is_true",
+                    },
+                ],
+            )
+            series = Series(title="Shared Snapshot", tmdb_id=11005, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=505,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+            series_id = series.id
+
+        fake_client = _SonarrSharedRuleDataClientFake(
+            series=[
+                SimpleNamespace(
+                    id=505,
+                    monitored=True,
+                    tags=[1],
+                    seasons=[
+                        SimpleNamespace(
+                            season_number=1,
+                            monitored=True,
+                            statistics={},
+                        )
+                    ],
+                )
+            ],
+            tags=[SimpleNamespace(id=1, label="keep")],
+            episodes={
+                (505, 1): [
+                    {
+                        "seasonNumber": 1,
+                        "episodeNumber": 10,
+                        "airDateUtc": datetime.now(UTC).isoformat(),
+                        "finaleType": "season",
+                    }
+                ]
+            },
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {
+            config_id: fake_client  # pyright: ignore[reportAttributeAccessIssue]
+        }
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                with patch.object(cleanup_tasks, "async_db", self._sessionmaker):
+                    result = await collect_rule_preview_matches_with_metadata(
+                        db, [rule]
+                    )
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(fake_client.series_calls, 1)
+        self.assertEqual(fake_client.episode_calls, [(505, 1)])
+        self.assertEqual([match.series_id for match in result.matches], [series_id])
+
+    async def test_sonarr_rule_skips_fetch_when_local_or_branch_matches(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-local-branch",
+                api_key="x",
+                name="sonarr-local-branch",
+                enabled=True,
+            )
+            rule = _make_multi_condition_rule(
+                name="local-or-sonarr",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                conditions=[
+                    {
+                        "type": "condition",
+                        "field": "media.size",
+                        "operator": "greater_than",
+                        "value": 1,
+                    },
+                    {
+                        "type": "condition",
+                        "field": "sonarr.latest_season_has_finale",
+                        "operator": "is_true",
+                    },
+                ],
+            )
+            rule.definition["root"]["op"] = "or"  # pyright: ignore[reportOptionalSubscript]
+            series = Series(title="Local Match", tmdb_id=11003, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=503,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+
+        fake_client = _SonarrEpisodeStateClientFake(
+            series=[
+                SimpleNamespace(
+                    id=503,
+                    seasons=[SimpleNamespace(season_number=1, statistics={})],
+                )
+            ]
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {
+            config_id: fake_client  # pyright: ignore[reportAttributeAccessIssue]
+        }
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(len(result.matches), 1)
+        self.assertEqual(fake_client.episode_calls, [])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+
+    async def test_sonarr_failure_preserves_affected_managed_protection(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-failure",
+                api_key="x",
+                name="sonarr-failure",
+                enabled=True,
+            )
+            rule = _make_single_condition_rule(
+                name="protect-unfinished",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.latest_season_has_finale",
+                operator="is_false",
+            )
+            rule.action = {"outcome": "protect"}
+            series = Series(title="Preserve on Failure", tmdb_id=11004, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add_all(
+                [
+                    SeriesArrRef(
+                        series_id=series.id,
+                        service_config_id=config.id,
+                        arr_series_id=504,
+                        tmdb_id=series.tmdb_id,
+                    ),
+                    ProtectedMedia(
+                        media_type=MediaType.SERIES,
+                        series_id=series.id,
+                        protected_by_user_id=None,
+                        source="rule",
+                        source_rule_id=rule.id,
+                        reason="Existing Sonarr protection",
+                    ),
+                ]
+            )
+            await db.commit()
+            config_id = config.id
+            series_id = series.id
+
+        fake_client = _SonarrEpisodeStateClientFake(fail_series=True)
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {
+            config_id: fake_client  # pyright: ignore[reportAttributeAccessIssue]
+        }
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                await _scan_with_db(db)
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        async with self._sessionmaker() as db:
+            protections = (
+                (
+                    await db.execute(
+                        select(ProtectedMedia).where(
+                            ProtectedMedia.series_id == series_id,
+                            ProtectedMedia.source == "rule",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(protections), 1)
 
     async def test_scan_movie_candidate_create_update_remove(self) -> None:
         async with self._sessionmaker() as db:

@@ -10,6 +10,8 @@ from backend.api.routes.rules import (
     get_genres,
     get_media_server_collections,
     get_movie_collections,
+    get_origin_countries,
+    get_original_languages,
 )
 from backend.database import Base
 from backend.database.models import Movie, MovieVersion, Series, SeriesServiceRef, User
@@ -261,6 +263,144 @@ def test_get_genres_paginates_counts_and_filters_by_media_type() -> None:
             )
             assert series_response.total == 1
             assert series_response.items[0].name == "Drama"
+
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_get_original_languages_normalizes_aliases_and_supports_search() -> None:
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+
+        async with session_maker() as db:
+            admin = _admin_user()
+            db.add_all(
+                [
+                    admin,
+                    Movie(title="English One", tmdb_id=4101, original_language="en"),
+                    Movie(title="English Two", tmdb_id=4102, original_language="eng"),
+                    Movie(title="Japanese", tmdb_id=4103, original_language="ja"),
+                    Series(title="French Show", tmdb_id=4201, original_language="fr"),
+                ]
+            )
+            removed = Movie(
+                title="Removed English",
+                tmdb_id=4104,
+                original_language="en",
+            )
+            removed.removed_at = datetime(2026, 1, 1, tzinfo=UTC)
+            db.add(removed)
+            await db.commit()
+
+            movies = await get_original_languages(
+                admin,
+                db,
+                media_type=MediaType.MOVIE,
+                q="",
+                page=1,
+                per_page=50,
+            )
+            assert [
+                (item.value, item.name, item.media_count) for item in movies.items
+            ] == [
+                ("eng", "English", 2),
+                ("jpn", "Japanese", 1),
+            ]
+
+            search = await get_original_languages(
+                admin,
+                db,
+                media_type=MediaType.MOVIE,
+                q="english",
+                page=1,
+                per_page=50,
+            )
+            assert search.total == 1
+            assert search.items[0].value == "eng"
+
+            series = await get_original_languages(
+                admin,
+                db,
+                media_type=MediaType.SERIES,
+                q="",
+                page=1,
+                per_page=50,
+            )
+            assert [(item.value, item.name) for item in series.items] == [
+                ("fra", "French")
+            ]
+
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_get_origin_countries_counts_distinct_media_and_filters_type() -> None:
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+
+        async with session_maker() as db:
+            admin = _admin_user()
+            db.add_all(
+                [
+                    admin,
+                    Movie(
+                        title="One",
+                        tmdb_id=4301,
+                        origin_country=["US", "GB", "US"],
+                    ),
+                    Movie(title="Two", tmdb_id=4302, origin_country=["us"]),
+                    Series(title="Show", tmdb_id=4401, origin_country=["JP"]),
+                ]
+            )
+            await db.commit()
+
+            movies = await get_origin_countries(
+                admin,
+                db,
+                media_type=MediaType.MOVIE,
+                q="",
+                page=1,
+                per_page=50,
+            )
+            assert [(item.value, item.media_count) for item in movies.items] == [
+                ("GB", 1),
+                ("US", 2),
+            ]
+
+            search = await get_origin_countries(
+                admin,
+                db,
+                media_type=MediaType.MOVIE,
+                q="us",
+                page=1,
+                per_page=50,
+            )
+            assert search.total == 1
+            assert search.items[0].value == "US"
+
+            series = await get_origin_countries(
+                admin,
+                db,
+                media_type=MediaType.SERIES,
+                q="",
+                page=1,
+                per_page=50,
+            )
+            assert [(item.value, item.media_count) for item in series.items] == [
+                ("JP", 1)
+            ]
 
         await engine.dispose()
 

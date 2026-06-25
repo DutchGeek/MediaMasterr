@@ -66,6 +66,18 @@ DEFAULT_SCHEDULES: tuple[DefaultSchedule, ...] = (
         "enabled": True,
     },
     {
+        "task": Task.REFRESH_PLAYBACK_HISTORY,
+        "description": (
+            "Refreshes durable playback history from Playback Reporting and "
+            "Tautulli without running a full media sync"
+        ),
+        "schedule_type": ScheduleType.MANUAL,
+        "schedule_value": "",
+        "default_schedule_type": ScheduleType.MANUAL,
+        "default_schedule_value": "",
+        "enabled": True,
+    },
+    {
         "task": Task.RESYNC_MEDIA,
         "description": (
             "Resynchronizes media from connected media servers (deletes and "
@@ -141,6 +153,17 @@ DEFAULT_SCHEDULES: tuple[DefaultSchedule, ...] = (
         "schedule_value": "0 5 * * *",  # daily at 5 AM
         "default_schedule_type": ScheduleType.CRON,
         "default_schedule_value": "0 5 * * *",
+        "enabled": True,
+    },
+    {
+        "task": Task.REFRESH_EXTERNAL_RATINGS,
+        "description": (
+            "Refreshes external ratings from configured MDBList and OMDb providers"
+        ),
+        "schedule_type": ScheduleType.CRON,
+        "schedule_value": "0 6 * * *",  # daily at 6 AM
+        "default_schedule_type": ScheduleType.CRON,
+        "default_schedule_value": "0 6 * * *",
         "enabled": True,
     },
 )

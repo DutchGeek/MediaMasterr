@@ -61,14 +61,41 @@ Use those generated docs for the exact request and response models.
 - `POST /api/delete-requests`
 - `GET /api/protected`
 - `POST /api/protected`
+- `PUT /api/protected/{entry_id}/duration`
+- `DELETE /api/protected/{entry_id}`
 
 ### Rules
 
 - `GET /api/rules`
 - `POST /api/rules`
+- `POST /api/rules/{rule_id}`
+- `DELETE /api/rules/{rule_id}`
+- `POST /api/rules/import`
 - `POST /api/rules/preview`
 - `POST /api/rules/validate-regex`
+- `POST /api/rules/validate-paths`
+- `GET /api/rules/path-tree`
+- `GET /api/rules/seerr-users`
+- `GET /api/rules/movie-collections`
+- `GET /api/rules/genres`
+- `GET /api/rules/original-languages`
+- `GET /api/rules/origin-countries`
+- `GET /api/rules/media-server-collections`
 - `GET /api/rules/check-synced`
+
+The lookup endpoints are admin-only helpers used by the rule editor. Language
+results use canonical ISO 639-3 codes. Country results use the codes currently
+stored in local TMDB metadata. Both endpoints support media-type filtering,
+search, and pagination.
+
+Rule actions support `outcome: "candidate"` and `outcome: "protect"`. Existing
+rules without an outcome remain candidate rules for compatibility. Protection
+previews include items that are already protected because the preview reports
+what the rule itself matches.
+
+Protected-entry responses include `source`, `source_rule_id`, and
+`source_rule_name`. Entries with `source: "rule"` are managed by cleanup scans;
+duration updates and direct deletion return `409 Conflict`.
 
 ## Notes
 

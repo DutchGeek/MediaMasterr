@@ -16,6 +16,11 @@ class _FakeResponse:
         self.request = _FakeRequest(method=method, url=url)
 
 
+class _FalseyFakeResponse(_FakeResponse):
+    def __bool__(self) -> bool:
+        return False
+
+
 class _FakeHTTPError(Exception):
     def __init__(self, message: str, *, response: _FakeResponse) -> None:
         super().__init__(message)
@@ -29,7 +34,10 @@ def test_format_http_failure_redacts_body_and_keeps_context() -> None:
         method="DELETE",
         url="http://localhost/api/v1/media/42?token=super-secret",
     )
-    exc = _FakeHTTPError("401 Client Error", response=response)
+    exc = _FakeHTTPError(
+        "401 Client Error for url: http://localhost/api/v1/media/42?token=super-secret",
+        response=response,
+    )
 
     message = format_http_failure(action="Delete failed", exception=exc)
 
@@ -41,6 +49,25 @@ def test_format_http_failure_redacts_body_and_keeps_context() -> None:
     assert '"api_key":"<redacted>"' in message
     assert "super-secret" not in message
     assert "abc123" not in message
+
+
+def test_format_http_failure_keeps_explicit_falsey_response() -> None:
+    response = _FalseyFakeResponse(
+        status_code=413,
+        text='{"error":"too large"}',
+        method="POST",
+        url="http://localhost/Collections/1/Items",
+    )
+
+    message = format_http_failure(
+        action="Collection update failed",
+        exception=RuntimeError("None"),
+        response=response,
+    )
+
+    assert "status=413" in message
+    assert "method=POST" in message
+    assert "body=" in message
 
 
 def test_summarize_error_message_redacts_and_truncates() -> None:

@@ -402,7 +402,7 @@
         />
         <Input
           type="text"
-          placeholder="Search by media title, reason, or user"
+          placeholder="Search by media title, reason, user, or rule"
           value={searchQuery}
           oninput={handleSearch}
           class="pl-10 bg-card"
@@ -592,8 +592,22 @@
                         anilistScore={entry.anilist_score}
                         anilistPopularity={entry.anilist_popularity}
                         anilistFavourites={entry.anilist_favourites}
+                        rottenTomatoesTomatoMeter={entry.rottentomatoes_tomato_meter}
+                        rottenTomatoesTomatoVoteCount={entry.rottentomatoes_tomato_vote_count}
+                        rottenTomatoesPopcornMeter={entry.rottentomatoes_popcorn_meter}
+                        rottenTomatoesPopcornVoteCount={entry.rottentomatoes_popcorn_vote_count}
+                        metacriticMetascore={entry.metacritic_metascore}
+                        metacriticVoteCount={entry.metacritic_vote_count}
+                        metacriticUserScore={entry.metacritic_user_score}
+                        metacriticUserVoteCount={entry.metacritic_user_vote_count}
+                        traktRating={entry.trakt_rating}
+                        traktVoteCount={entry.trakt_vote_count}
+                        letterboxdScore={entry.letterboxd_score}
+                        letterboxdVoteCount={entry.letterboxd_vote_count}
+                        externalRatingsSource={entry.external_ratings_source}
+                        variant="summary"
                         compact={true}
-                        class="mt-2 w-40 md:w-64"
+                        class="mt-2 w-full max-w-lg"
                       />
                     </div>
                   </div>
@@ -602,9 +616,19 @@
                       {entry.reason}
                     </div>
                   {/if}
+                  {#if entry.source === "rule"}
+                    <div class="text-xs text-muted-foreground mt-1">
+                      Managed by rule:
+                      <span class="font-medium text-foreground">
+                        {entry.source_rule_name ?? "Deleted rule"}
+                      </span>
+                    </div>
+                  {/if}
                 </td>
                 <td class="px-6 py-4 text-sm text-foreground whitespace-nowrap">
-                  {#if entry.permanent}
+                  {#if entry.source === "rule"}
+                    Managed
+                  {:else if entry.permanent}
                     Permanent
                   {:else if entry.expires_at}
                     <div>{formatDate(entry.expires_at)}</div>
@@ -625,25 +649,26 @@
                 </td>
                 {#if canManageProtection}
                   <td class="px-6 py-4 text-right whitespace-nowrap">
-                    <div class="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        class="rounded-full cursor-pointer"
-                        onclick={() => openEditDuration(entry)}
-                      >
-                        <Pencil class="w-4 h-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        class="rounded-full cursor-pointer hover:bg-destructive-secondary 
-                        bg-destructive text-destructive-foreground"
-                        onclick={() => openRemoveDialog(entry)}
-                      >
-                        <Trash2 class="w-4 h-4" />
-                      </Button>
-                    </div>
+                    {#if entry.source === "manual"}
+                      <div class="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          class="rounded-full cursor-pointer"
+                          onclick={() => openEditDuration(entry)}
+                        >
+                          <Pencil class="w-4 h-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          class="rounded-full cursor-pointer hover:bg-destructive-secondary bg-destructive text-destructive-foreground"
+                          onclick={() => openRemoveDialog(entry)}
+                        >
+                          <Trash2 class="w-4 h-4" />
+                        </Button>
+                      </div>
+                    {/if}
                   </td>
                 {/if}
               </tr>

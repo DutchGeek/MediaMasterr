@@ -22,9 +22,11 @@ from backend.tasks.cleanup import (
     scan_cleanup_candidates,
     tag_cleanup_candidates,
 )
+from backend.tasks.external_ratings import refresh_external_ratings
 from backend.tasks.house_keeping import weekly_house_keeping
 from backend.tasks.imdb import refresh_imdb_ratings
 from backend.tasks.sync import (
+    refresh_playback_history_task,
     resync_media,
     sync_linked_data,
     sync_media,
@@ -39,6 +41,7 @@ MAIN_SERVER_REQUIRED_TASKS: frozenset[Task] = frozenset(
         Task.RESYNC_MEDIA,
         Task.SYNC_MEDIA_LIBRARIES,
         Task.SYNC_LINKED_DATA,
+        Task.REFRESH_PLAYBACK_HISTORY,
         Task.SCAN_CLEANUP_CANDIDATES,
         Task.TAG_CLEANUP_CANDIDATES,
         Task.DELETE_CLEANUP_CANDIDATES,
@@ -51,6 +54,7 @@ DISABLE_ABLE_TASKS: frozenset[Task] = frozenset(
         Task.CHECK_APP_UPDATES,
         Task.IMDB_RATINGS_REFRESH,
         Task.ANILIST_RATINGS_REFRESH,
+        Task.REFRESH_EXTERNAL_RATINGS,
         Task.DELETE_CLEANUP_CANDIDATES,
     }
 )
@@ -168,6 +172,8 @@ async def execute_task(task: Task) -> dict[str, Any] | None:
     if task is Task.SYNC_LINKED_DATA:
         await _run_linked_data_sync()
         return None
+    if task is Task.REFRESH_PLAYBACK_HISTORY:
+        return await refresh_playback_history_task()
     if task is Task.RESYNC_MEDIA:
         await resync_media()
         return None
@@ -190,6 +196,9 @@ async def execute_task(task: Task) -> dict[str, Any] | None:
         return None
     if task is Task.ANILIST_RATINGS_REFRESH:
         await refresh_anilist_ratings()
+        return None
+    if task is Task.REFRESH_EXTERNAL_RATINGS:
+        await refresh_external_ratings()
         return None
 
     raise ValueError(f"Unsupported task for background execution: {task}")

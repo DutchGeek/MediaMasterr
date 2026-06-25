@@ -5,6 +5,106 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-06-25
+
+### Added
+
+- Dependency [python-iso639](https://github.com/jacksonllee/iso639)
+- Dependency [svelte-dnd-action](https://github.com/isaacHagoel/svelte-dnd-action)
+- Rule conditions and nested groups can be reordered or moved between groups with accessible drag handles
+- Manual task to refresh durable playback history without running a full media sync
+- MDBList and OMDb service configurations for provider-backed external ratings
+- Scheduled task to refresh Rotten Tomatoes, Metacritic, Trakt, and Letterboxd ratings
+- Per-user page access controls with a configurable default for newly created non-admin users
+  - _Note: existing users will not be affected by this change - you will need to re-assign them to the new default if desired_
+- Automated protection rule outcome:
+  - Rules can create managed protections instead of deletion candidates
+  - Managed protections reconcile during cleanup scans and take precedence over candidate rules
+  - Manual protections remain unchanged
+- Rules:
+  - media.year
+  - tmdb.original_language
+  - tmdb.origin_country
+  - tmdb.runtime_minutes
+  - media.container
+  - video.bitrate_kbps
+  - video.bit_depth
+  - audio.bitrate_kbps
+  - subtitle.track_count
+  - subtitle.has_forced
+  - movie.version_count
+  - series.tmdb_season_count
+  - series.library_season_count
+  - sonarr.latest_season_has_unaired_episodes
+  - sonarr.latest_season_has_finale
+  - playback.has_activity
+  - playback.play_count
+  - playback.total_duration_minutes
+  - playback.longest_duration_minutes
+  - playback.unique_user_count
+  - playback.last_activity_at
+  - playback.days_since_last_activity
+  - rottentomatoes.tomato_meter
+  - rottentomatoes.tomato_vote_count
+  - rottentomatoes.popcorn_meter
+  - rottentomatoes.popcorn_vote_count
+  - metacritic.metascore
+  - metacritic.vote_count
+  - metacritic.user_score
+  - metacritic.user_vote_count
+  - trakt.rating
+  - trakt.vote_count
+  - letterboxd.score
+  - letterboxd.vote_count
+  - Rule Documentation:
+    - Target scopes and condition groups
+    - Operator and missing-metadata behavior
+    - Field units and scope reference
+    - Language/country normalization
+    - Plex/Jellyfin/Emby bitrate handling
+    - Movie version-count warning
+    - TMDB versus library season counts
+    - Sonarr latest-season episode-state rules
+    - Durable Playback Reporting and Tautulli history rules
+    - MDBList/OMDb external rating fields
+    - Recommended preview workflow
+    - Complete rule API endpoint list
+
+### Changed
+
+- Collection mutations are now executed in 100 item batches
+- Sonarr episode-state rules inspect only the latest regular season, reuse per-scan results, and limit episode requests to eight concurrent calls per Sonarr instance
+- Playback Reporting and Tautulli now feed one durable provider-neutral event ledger. Tautulli history is read in one paginated ungrouped pass, and unavailable provider data fails closed during cleanup scans.
+- Media, candidates, and protected entries now display cached Rotten Tomatoes, Metacritic, Trakt, and Letterboxd ratings when available.
+- MDBList parsing now uses the structured `ratings[]` provider sources and stores observed rate-limit headers in the refresh summary.
+- MDBList and OMDb settings now appear under Metadata Providers with fixed API endpoints instead of editable base URLs.
+- Metadata Provider settings now show per-refresh request usage and cached movie/series coverage for MDBList and OMDb.
+- MDBList external rating refreshes are paced between requests, with a standard 1 second delay and optional supporter-mode 0.2 second delay.
+- Membership queries paginate past 1000 items
+- Missing Jellyfin IDs are skipped and logged
+- HTTP failures now include status, method, endpoint, and response context
+- Falsey 404 responses correctly trigger compatibility fallback
+- Sonarr series metadata is fetched once per instance and reused across rule
+  evaluation within each cleanup scan or preview
+- Improved language handling:
+  - Tags like `en`, `eng`, and case variants now normalize to `eng`
+  - Regional tags like `en-US` and `fr-FR` now normalize to `fra`
+  - Rule missing operator identifies unknown languages
+  - Plex, Jellyfin, Emby, movie, season, audio, and subtitle ingestion now share normalization
+  - Plex requests detailed metadata when lightweight stream metadata lacks languages
+- Updated Granian to 2.7.7
+- Metadata for media is now small pills instead of the large card. There was just too many to many to fit in a card cleanly throughout the UI.
+
+### Fixed
+
+- Playback-history provider refreshes now decrypt stored service API keys, use
+  Tautulli's incremental history date filter, and redact API keys from provider
+  HTTP errors.
+- New Jellyfin/Emby media-login users now inherit admin role on first
+  provisioning when the media server reports them as administrators.
+- Dev
+  - Ruff not targeting desktop/scripts
+
 ## [0.1.5] - 2026-06-19
 
 ### Changed

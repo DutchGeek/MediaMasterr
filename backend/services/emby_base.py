@@ -22,6 +22,7 @@ from backend.core.codecs import (
 )
 from backend.core.logger import LOG
 from backend.core.utils.filesystem import normalize_fpath
+from backend.core.utils.language import normalize_language, normalize_languages
 from backend.core.utils.misc import as_float, as_int, normalize_name_list
 from backend.core.utils.request import format_http_failure, should_retry_on_status
 from backend.core.utils.resolution import guesstimate_resolution
@@ -46,6 +47,9 @@ RawSQL: TypeAlias = str
 JsonDict: TypeAlias = dict[str, Any]
 JsonList: TypeAlias = list[JsonDict]
 JsonPayload: TypeAlias = JsonDict | JsonList
+
+_COLLECTION_MUTATION_BATCH_SIZE = 100
+_COLLECTION_PAGE_SIZE = 1000
 
 
 @dataclass(slots=True)
@@ -261,12 +265,17 @@ class EmbyServiceBase:
             return
 
         if not existing_collection_ids:
+            normalized_expected_ids = await self._filter_existing_collection_item_ids(
+                collection_title=collection_title,
+                item_ids=normalized_expected_ids,
+                include_item_types=include_item_types,
+            )
+            if not normalized_expected_ids:
+                return
             await self._create_collection(
                 collection_title=collection_title,
                 item_ids=normalized_expected_ids,
             )
-            for stale_collection_id in existing_collection_ids[1:]:
-                await self._delete_collection(stale_collection_id)
             return
         collection_id = existing_collection_ids[0]
 
@@ -277,6 +286,12 @@ class EmbyServiceBase:
         items_to_add = normalized_expected_ids - current_item_ids
         items_to_remove = current_item_ids - normalized_expected_ids
 
+        if items_to_add:
+            items_to_add = await self._filter_existing_collection_item_ids(
+                collection_title=collection_title,
+                item_ids=items_to_add,
+                include_item_types=include_item_types,
+            )
         if items_to_add:
             await self._add_items_to_collection(
                 collection_id=collection_id,
@@ -291,27 +306,62 @@ class EmbyServiceBase:
         for stale_collection_id in existing_collection_ids[1:]:
             await self._delete_collection(stale_collection_id)
 
+    async def _get_paginated_items(
+        self,
+        *,
+        params: JsonDict,
+        timeout: int = 300,
+    ) -> list[JsonDict]:
+        items: list[JsonDict] = []
+        start_index = 0
+
+        while True:
+            page_params = {
+                **params,
+                "StartIndex": start_index,
+                "Limit": _COLLECTION_PAGE_SIZE,
+                "EnableTotalRecordCount": "true",
+            }
+            data = await self._make_request(
+                "Items",
+                params=page_params,
+                timeout=timeout,
+            )
+            if not isinstance(data, dict):
+                break
+
+            page_items = data.get("Items", [])
+            if not isinstance(page_items, list) or not page_items:
+                break
+
+            items.extend(item for item in page_items if isinstance(item, dict))
+            start_index += len(page_items)
+
+            total_raw = data.get("TotalRecordCount")
+            try:
+                total = int(total_raw) if total_raw is not None else 0
+            except (TypeError, ValueError):
+                total = 0
+
+            if total > 0 and start_index >= total:
+                break
+            if total <= 0 and len(page_items) < _COLLECTION_PAGE_SIZE:
+                break
+
+        return items
+
     async def _find_collection_ids_by_title(self, collection_title: str) -> list[str]:
-        data = await self._make_request(
-            "Items",
+        items = await self._get_paginated_items(
             params={
                 "IncludeItemTypes": "BoxSet",
                 "Recursive": "true",
-                "Limit": 1000,
                 "Fields": "CollectionType",
             },
             timeout=300,
         )
-        if not isinstance(data, dict):
-            return []
-        items = data.get("Items", [])
-        if not isinstance(items, list):
-            return []
         normalized_title = collection_title.strip().lower()
         collection_ids: list[str] = []
         for item in items:
-            if not isinstance(item, dict):
-                continue
             if str(item.get("Name", "")).strip().lower() != normalized_title:
                 continue
             collection_id = str(item.get("Id", "")).strip()
@@ -322,53 +372,87 @@ class EmbyServiceBase:
     async def _get_collection_item_ids(
         self, *, collection_id: str, include_item_types: str
     ) -> set[str]:
-        data = await self._make_request(
-            "Items",
+        items = await self._get_paginated_items(
             params={
                 "ParentId": collection_id,
                 "IncludeItemTypes": include_item_types,
                 "Recursive": "true",
-                "Limit": 1000,
             },
             timeout=300,
         )
-        if not isinstance(data, dict):
-            return set()
-        items = data.get("Items", [])
-        if not isinstance(items, list):
-            return set()
         item_ids: set[str] = set()
         for item in items:
-            if not isinstance(item, dict):
-                continue
             item_id = str(item.get("Id", "")).strip()
             if item_id:
                 item_ids.add(item_id)
         return item_ids
 
+    async def _filter_existing_collection_item_ids(
+        self,
+        *,
+        collection_title: str,
+        item_ids: set[str],
+        include_item_types: str,
+    ) -> set[str]:
+        existing_item_ids: set[str] = set()
+        normalized_item_ids = sorted(
+            str(item_id).strip() for item_id in item_ids if str(item_id).strip()
+        )
+
+        for start in range(
+            0, len(normalized_item_ids), _COLLECTION_MUTATION_BATCH_SIZE
+        ):
+            chunk = normalized_item_ids[start : start + _COLLECTION_MUTATION_BATCH_SIZE]
+            data = await self._make_request(
+                "Items",
+                params={
+                    "Ids": ",".join(chunk),
+                    "IncludeItemTypes": include_item_types,
+                    "Recursive": "true",
+                    "EnableTotalRecordCount": "false",
+                },
+                timeout=300,
+            )
+            if not isinstance(data, dict):
+                raise RuntimeError(
+                    f"{self.service_type.value} returned an invalid response while "
+                    f"validating items for collection {collection_title!r}"
+                )
+            returned_items = data.get("Items", [])
+            if not isinstance(returned_items, list):
+                raise RuntimeError(
+                    f"{self.service_type.value} returned invalid item data while "
+                    f"validating collection {collection_title!r}"
+                )
+            for item in returned_items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("Id", "")).strip()
+                if item_id in chunk:
+                    existing_item_ids.add(item_id)
+
+        missing_count = len(normalized_item_ids) - len(existing_item_ids)
+        if missing_count:
+            LOG.warning(
+                f"Skipping {missing_count} missing {self.service_type.value} item(s) "
+                f"while syncing Leaving Soon collection {collection_title!r}"
+            )
+        return existing_item_ids
+
     async def _get_collection_names_by_item_id(
         self, *, include_item_types: str
     ) -> dict[str, list[str]]:
-        data = await self._make_request(
-            "Items",
+        items = await self._get_paginated_items(
             params={
                 "IncludeItemTypes": "BoxSet",
                 "Recursive": "true",
-                "Limit": 1000,
                 "Fields": "CollectionType",
             },
             timeout=300,
         )
-        if not isinstance(data, dict):
-            return {}
-        items = data.get("Items", [])
-        if not isinstance(items, list):
-            return {}
 
         names_by_item_id: dict[str, list[str]] = {}
         for collection in items:
-            if not isinstance(collection, dict):
-                continue
             collection_id = str(collection.get("Id", "")).strip()
             collection_name = str(collection.get("Name", "")).strip()
             if not collection_id or not collection_name:
@@ -389,72 +473,179 @@ class EmbyServiceBase:
     async def _create_collection(
         self, *, collection_title: str, item_ids: set[str]
     ) -> None:
-        response = await self.session.post(
-            f"{self.service_url}/Collections",
-            params={
-                "Name": collection_title,
-                "Ids": ",".join(sorted(item_ids)),
-                "IsLocked": "false",
-            },
-            timeout=60,
+        sorted_item_ids = sorted(item_ids)
+        chunks = [
+            sorted_item_ids[start : start + _COLLECTION_MUTATION_BATCH_SIZE]
+            for start in range(
+                0,
+                len(sorted_item_ids),
+                _COLLECTION_MUTATION_BATCH_SIZE,
+            )
+        ]
+        if not chunks:
+            return
+
+        endpoint = f"{self.service_url}/Collections"
+        response: Any | None = None
+        try:
+            response = await self.session.post(
+                endpoint,
+                params={
+                    "Name": collection_title,
+                    "Ids": ",".join(chunks[0]),
+                    "IsLocked": "false",
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+        except Exception as e:
+            raise ValueError(
+                format_http_failure(
+                    action=(
+                        f"Failed to create {self.service_type.value} collection "
+                        f"{collection_title!r}"
+                    ),
+                    exception=e,
+                    response=response,
+                    method="POST",
+                    endpoint=endpoint,
+                )
+            ) from e
+
+        if len(chunks) == 1:
+            return
+
+        collection_id: str | None = None
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                collection_id = str(payload.get("Id", "")).strip() or None
+        except Exception:
+            collection_id = None
+
+        if collection_id is None:
+            collection_ids = await self._find_collection_ids_by_title(collection_title)
+            collection_id = collection_ids[0] if collection_ids else None
+        if collection_id is None:
+            raise RuntimeError(
+                f"Created {self.service_type.value} collection {collection_title!r} "
+                "but could not resolve its collection ID"
+            )
+
+        await self._add_items_to_collection(
+            collection_id=collection_id,
+            item_ids={item_id for chunk in chunks[1:] for item_id in chunk},
         )
-        response.raise_for_status()
 
     async def _add_items_to_collection(
         self, *, collection_id: str, item_ids: set[str]
     ) -> None:
-        response = await self.session.post(
-            f"{self.service_url}/Collections/{collection_id}/Items",
-            params={"Ids": ",".join(sorted(item_ids))},
-            timeout=60,
-        )
-        response.raise_for_status()
+        endpoint = f"{self.service_url}/Collections/{collection_id}/Items"
+        sorted_item_ids = sorted(item_ids)
+        for start in range(
+            0,
+            len(sorted_item_ids),
+            _COLLECTION_MUTATION_BATCH_SIZE,
+        ):
+            chunk = sorted_item_ids[start : start + _COLLECTION_MUTATION_BATCH_SIZE]
+            response: Any | None = None
+            try:
+                response = await self.session.post(
+                    endpoint,
+                    params={"Ids": ",".join(chunk)},
+                    timeout=60,
+                )
+                response.raise_for_status()
+            except Exception as e:
+                raise ValueError(
+                    format_http_failure(
+                        action=(
+                            f"Failed to add items to {self.service_type.value} "
+                            f"collection {collection_id}"
+                        ),
+                        exception=e,
+                        response=response,
+                        method="POST",
+                        endpoint=endpoint,
+                    )
+                ) from e
 
     async def _remove_items_from_collection(
         self, *, collection_id: str, item_ids: set[str]
     ) -> None:
-        # Preferred endpoint for Jellyfin/Emby:
-        # DELETE /Collections/{Id}/Items?Ids=id1,id2
-        response = await self.session.delete(
-            f"{self.service_url}/Collections/{collection_id}/Items",
-            params={"Ids": ",".join(sorted(item_ids))},
-            timeout=60,
+        endpoint = f"{self.service_url}/Collections/{collection_id}/Items"
+        fallback_endpoint = (
+            f"{self.service_url}/Collections/{collection_id}/Items/Delete"
         )
-        try:
-            response.raise_for_status()
-            return
-        except HTTPError as e:
-            status_code = e.response.status_code if e.response else None
-            if status_code != 404:
+        sorted_item_ids = sorted(item_ids)
+
+        for start in range(
+            0,
+            len(sorted_item_ids),
+            _COLLECTION_MUTATION_BATCH_SIZE,
+        ):
+            chunk = sorted_item_ids[start : start + _COLLECTION_MUTATION_BATCH_SIZE]
+            response: Any | None = None
+            try:
+                response = await self.session.delete(
+                    endpoint,
+                    params={"Ids": ",".join(chunk)},
+                    timeout=60,
+                )
+                response.raise_for_status()
+                continue
+            except HTTPError as e:
+                status_code = e.response.status_code if e.response is not None else None
+                if status_code == 404:
+                    pass
+                else:
+                    raise ValueError(
+                        format_http_failure(
+                            action=(
+                                f"Failed to remove items from "
+                                f"{self.service_type.value} collection {collection_id}"
+                            ),
+                            exception=e,
+                            response=response,
+                            method="DELETE",
+                            endpoint=endpoint,
+                        )
+                    ) from e
+            except Exception as e:
                 raise ValueError(
                     format_http_failure(
                         action=(
-                            f"Failed to remove items from {self.service_type} "
-                            f"collection {collection_id}"
+                            f"Failed to remove items from "
+                            f"{self.service_type.value} collection {collection_id}"
                         ),
                         exception=e,
+                        response=response,
+                        method="DELETE",
+                        endpoint=endpoint,
                     )
                 ) from e
 
-        # compatibility fallback used by some older server builds (likely will never hit it)
-        fallback_response = await self.session.post(
-            f"{self.service_url}/Collections/{collection_id}/Items/Delete",
-            params={"Ids": ",".join(sorted(item_ids))},
-            timeout=60,
-        )
-        try:
-            fallback_response.raise_for_status()
-        except HTTPError as e:
-            raise ValueError(
-                format_http_failure(
-                    action=(
-                        f"Failed to remove items from {self.service_type} "
-                        f"collection {collection_id}"
-                    ),
-                    exception=e,
-                    response=fallback_response,
+            fallback_response: Any | None = None
+            try:
+                fallback_response = await self.session.post(
+                    fallback_endpoint,
+                    params={"Ids": ",".join(chunk)},
+                    timeout=60,
                 )
-            ) from e
+                fallback_response.raise_for_status()
+            except Exception as e:
+                raise ValueError(
+                    format_http_failure(
+                        action=(
+                            f"Failed to remove items from "
+                            f"{self.service_type.value} collection {collection_id}"
+                        ),
+                        exception=e,
+                        response=fallback_response,
+                        method="POST",
+                        endpoint=fallback_endpoint,
+                    )
+                ) from e
 
     async def _delete_collection(self, collection_id: str) -> None:
         response = await self.session.delete(
@@ -760,11 +951,7 @@ class EmbyServiceBase:
                             audio_codec_raw
                         ),
                         audio_title=first_audio.get("DisplayTitle"),
-                        audio_language=(
-                            str(first_audio.get("Language")).lower()
-                            if first_audio.get("Language")
-                            else None
-                        ),
+                        audio_language=normalize_language(first_audio.get("Language")),
                         audio_channels=as_int(first_audio.get("Channels")),
                         audio_channel_layout=first_audio.get("ChannelLayout"),
                         audio_bitrate=as_int(first_audio.get("BitRate")),
@@ -1155,9 +1342,10 @@ class EmbyServiceBase:
                                 if af:
                                     season_audio_families.setdefault(sk, set()).add(af)
                             alang = stream.get("Language")
-                            if alang:
+                            normalized_alang = normalize_language(alang)
+                            if normalized_alang:
                                 season_audio_languages.setdefault(sk, set()).add(
-                                    str(alang).lower()
+                                    normalized_alang
                                 )
                             channels = as_int(stream.get("Channels"))
                             if channels is not None:
@@ -1166,9 +1354,10 @@ class EmbyServiceBase:
                                 )
                         elif stream_type == "subtitle":
                             lang = stream.get("Language")
-                            if lang:
+                            normalized_lang = normalize_language(lang)
+                            if normalized_lang:
                                 season_subtitle_languages.setdefault(sk, set()).add(
-                                    str(lang).lower()
+                                    normalized_lang
                                 )
 
             total_record_count = int(get_data.get("TotalRecordCount", 0) or 0)
@@ -1626,27 +1815,65 @@ class EmbyServiceBase:
     async def has_playback_reporting_plugin(self) -> bool:
         """Return True if the Jellyfin Playback Reporting plugin is installed and active."""
         try:
-            plugins = await self._make_request("Plugins")
-            STATUSES_TO_EXCLUDE = {
-                "Disabled",
-                "Deleted",
-                "NotSupported",
-                "Malfunctioned",
-            }
-            PLUGINS_TO_INCLUDE = {
-                "playback_reporting.xml",
-                "Jellyfin.Plugin.PlaybackReporting.xml",
-            }
+            return await self.get_playback_reporting_plugin_status()
         except Exception:
             return False
+
+    async def get_playback_reporting_plugin_status(self) -> bool:
+        """Return plugin availability while preserving connection/API failures."""
+        plugins = await self._make_request("Plugins")
+        statuses_to_exclude = {
+            "Disabled",
+            "Deleted",
+            "NotSupported",
+            "Malfunctioned",
+        }
+        plugins_to_include = {
+            "playback_reporting.xml",
+            "Jellyfin.Plugin.PlaybackReporting.xml",
+        }
         if not isinstance(plugins, list):
             return False
         for plugin in plugins:
+            if not isinstance(plugin, Mapping):
+                continue
             cfg = plugin.get("ConfigurationFileName", "")
             status = plugin.get("Status", "")
-            if cfg in PLUGINS_TO_INCLUDE and status not in STATUSES_TO_EXCLUDE:
+            if cfg in plugins_to_include and status not in statuses_to_exclude:
                 return True
         return False
+
+    async def get_playback_reporting_events(
+        self,
+        *,
+        since: datetime | None = None,
+        page_size: int = 5000,
+    ) -> list[dict[str, object]]:
+        """Fetch compact movie and episode playback events from the plugin."""
+        rows: list[dict[str, object]] = []
+        offset = 0
+        where_parts = [
+            "ItemType IN ('Movie', 'Episode')",
+            "PlayDuration > 0",
+        ]
+        if since is not None:
+            cutoff = since.replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+            where_parts.append(f"DateCreated >= '{cutoff}'")
+
+        while True:
+            query = (
+                "SELECT DateCreated, UserId, ItemId, ItemType, PlayDuration "
+                "FROM PlaybackActivity "
+                f"WHERE {' AND '.join(where_parts)} "
+                "ORDER BY DateCreated, UserId, ItemId "
+                f"LIMIT {max(1, page_size)} OFFSET {offset}"
+            )
+            page = await self._submit_playback_custom_query_rows(query)
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        return rows
 
     async def get_playback_reporting_stats(
         self, min_play_duration: int, media_type: Literal["Movie", "Episode"]
@@ -1683,17 +1910,42 @@ class EmbyServiceBase:
             Mapping of ItemId to total_plays derived from the query result set.
         """
         try:
-            response = await self.session.post(
-                f"{self.service_url}/user_usage_stats/submit_custom_query",
-                json={"CustomQueryString": query, "ReplaceUserId": False},
-            )
-            response.raise_for_status()
-            data: dict[str, object] = response.json()
+            rows = await self._submit_playback_custom_query_rows(query)
         except Exception as e:
             LOG.error(f"Playback Reporting plugin query failed: {e}")
             return {}
 
-        # "colums" is an intentional typo in the plugin source
+        if rows and ("ItemId" not in rows[0] or "total_plays" not in rows[0]):
+            LOG.error(
+                "Unexpected column schema from Playback Reporting plugin: "
+                f"{list(rows[0])}"
+            )
+            return {}
+
+        parsed: dict[str, int] = {}
+        for row in rows:
+            item_id = row.get("ItemId")
+            if not item_id:
+                continue
+            try:
+                parsed[str(item_id)] = int(str(row.get("total_plays")))
+            except (TypeError, ValueError):
+                continue
+        return parsed
+
+    async def _submit_playback_custom_query_rows(
+        self, query: RawSQL
+    ) -> list[dict[str, object]]:
+        """Submit a plugin query and return column-keyed rows."""
+        response = await self.session.post(
+            f"{self.service_url}/user_usage_stats/submit_custom_query",
+            json={"CustomQueryString": query, "ReplaceUserId": False},
+        )
+        response.raise_for_status()
+        data: dict[str, object] = response.json()
+
+        # cSpell: disable
+        # "colums" is an intentional typo in the plugin source.
         raw_columns = data.get("colums")
         # in case some plugin builds use the correctly spelled key, we handle that too
         if raw_columns is None:
@@ -1718,28 +1970,19 @@ class EmbyServiceBase:
                 LOG.debug(
                     f"Playback Reporting plugin query returned no rows: {message}"
                 )
-            return {}
+            return []
+        if not columns:
+            raise ValueError("Playback Reporting returned rows without columns")
 
-        try:
-            item_id_idx = columns.index("ItemId")
-            play_count_idx = columns.index("total_plays")
-        except ValueError:
-            LOG.error(
-                f"Unexpected column schema from Playback Reporting plugin: {columns}"
-            )
-            return {}
-
-        parsed: dict[str, int] = {}
+        parsed: list[dict[str, object]] = []
         for row in results:
-            if len(row) <= max(item_id_idx, play_count_idx):
-                continue
-            item_id = row[item_id_idx]
-            if not item_id:
-                continue
-            try:
-                parsed[str(item_id)] = int(str(row[play_count_idx]))
-            except (TypeError, ValueError):
-                continue
+            parsed.append(
+                {
+                    column: row[index]
+                    for index, column in enumerate(columns)
+                    if index < len(row)
+                }
+            )
         return parsed
 
     async def get_series_ids_for_episode_ids(
@@ -1863,18 +2106,7 @@ class EmbyServiceBase:
 
     @staticmethod
     def _unique_languages(streams: JsonList) -> list[str] | None:
-        langs: list[str] = []
-        seen: set[str] = set()
-        for stream in streams:
-            raw = stream.get("Language")
-            if not raw:
-                continue
-            value = str(raw).strip().lower()
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            langs.append(value)
-        return langs or None
+        return normalize_languages([stream.get("Language") for stream in streams])
 
     @staticmethod
     def _is_hdr(stream: JsonDict) -> bool:

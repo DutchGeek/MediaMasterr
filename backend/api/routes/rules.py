@@ -12,6 +12,8 @@ from backend.api.candidate_views import build_rule_preview_items
 from backend.core.auth import require_admin
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
+    RULE_OUTCOME_CANDIDATE,
+    RULE_OUTCOME_PROTECT,
     TARGET_MOVIE_VERSION,
     collect_rule_path_conditions,
     derive_path_scope_library_ids,
@@ -20,6 +22,7 @@ from backend.core.rule_engine import (
     validate_rule_definition,
 )
 from backend.core.utils.filesystem import normalize_fpath
+from backend.core.utils.language import language_name, normalize_language
 from backend.core.utils.misc import normalize_genre_names, normalize_name_list
 from backend.database import get_db
 from backend.database.models import (
@@ -43,9 +46,11 @@ from backend.models.media import PaginatedRulePreviewResponse, RulePreviewMetada
 from backend.models.rules import (
     GenreLookupResponse,
     MediaServerCollectionLookupResponse,
+    MetadataValueLookupResponse,
     MovieCollectionLookupResponse,
     PaginatedGenresResponse,
     PaginatedMediaServerCollectionsResponse,
+    PaginatedMetadataValuesResponse,
     PaginatedMovieCollectionsResponse,
     RulePreviewRequest,
     SeerrUserLookupResponse,
@@ -94,6 +99,7 @@ def _media_type_for_target(target_scope: str | None, fallback: MediaType) -> Med
 def _action_or_default(action: dict[str, Any] | None) -> dict[str, Any]:
     """Return the action dictionary with default values applied."""
     return {
+        "outcome": RULE_OUTCOME_CANDIDATE,
         "candidate": True,
         "tag_enabled": True,
         "arr_tag": None,
@@ -121,6 +127,13 @@ def _normalize_rule_action(
 ) -> dict[str, Any]:
     """Normalize the rule action dictionary."""
     normalized = _action_or_default(action)
+    outcome = (
+        RULE_OUTCOME_PROTECT
+        if normalized.get("outcome") == RULE_OUTCOME_PROTECT
+        else RULE_OUTCOME_CANDIDATE
+    )
+    normalized["outcome"] = outcome
+    normalized["candidate"] = outcome == RULE_OUTCOME_CANDIDATE
     normalized["tag_enabled"] = bool(normalized.get("tag_enabled", True))
     normalized["arr_tag"] = _slugify_rule_tag(
         str(normalized.get("arr_tag") or rule_name)
@@ -129,6 +142,13 @@ def _normalize_rule_action(
         normalized["sonarr_service_config_id"] = None
     else:
         normalized["radarr_service_config_id"] = None
+    if outcome == RULE_OUTCOME_PROTECT:
+        normalized["tag_enabled"] = False
+        normalized["arr_tag"] = None
+        normalized["arr_action"] = "delete"
+        normalized["media_server_action"] = None
+        normalized["radarr_service_config_id"] = None
+        normalized["sonarr_service_config_id"] = None
     return normalized
 
 
@@ -651,6 +671,115 @@ async def get_genres(
 
 
 @router.get(
+    "/rules/original-languages",
+    response_model=PaginatedMetadataValuesResponse,
+)
+async def get_original_languages(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = MediaType.MOVIE,
+    q: Annotated[str, Query(max_length=200)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> PaginatedMetadataValuesResponse:
+    """Return canonical original languages sourced from active local media."""
+    model = Movie if media_type is MediaType.MOVIE else Series
+    rows = await db.execute(
+        select(model.original_language).where(
+            model.removed_at.is_(None),
+            model.original_language.is_not(None),
+        )
+    )
+
+    needle = q.strip().lower()
+    counts: dict[str, tuple[str, int]] = {}
+    for (raw_language,) in rows.all():
+        value = normalize_language(raw_language)
+        if value is None:
+            continue
+        name = language_name(value) or value
+        if needle and needle not in value.lower() and needle not in name.lower():
+            continue
+        _, count = counts.get(value, (name, 0))
+        counts[value] = (name, count + 1)
+
+    sorted_items = sorted(counts.items(), key=lambda item: item[1][0].lower())
+    total = len(sorted_items)
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    offset = (page - 1) * per_page
+    page_items = sorted_items[offset : offset + per_page]
+    return PaginatedMetadataValuesResponse(
+        items=[
+            MetadataValueLookupResponse(
+                value=value,
+                name=name,
+                media_count=count,
+            )
+            for value, (name, count) in page_items
+        ],
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
+
+
+@router.get(
+    "/rules/origin-countries",
+    response_model=PaginatedMetadataValuesResponse,
+)
+async def get_origin_countries(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = MediaType.MOVIE,
+    q: Annotated[str, Query(max_length=200)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> PaginatedMetadataValuesResponse:
+    """Return origin-country codes sourced from active local media."""
+    model = Movie if media_type is MediaType.MOVIE else Series
+    rows = await db.execute(
+        select(model.origin_country).where(
+            model.removed_at.is_(None),
+            model.origin_country.is_not(None),
+        )
+    )
+
+    needle = q.strip().lower()
+    counts: dict[str, int] = {}
+    for (raw_countries,) in rows.all():
+        seen_for_media: set[str] = set()
+        for raw_country in raw_countries or []:
+            value = str(raw_country or "").strip().upper()
+            if not value or value in seen_for_media:
+                continue
+            seen_for_media.add(value)
+            if needle and needle not in value.lower():
+                continue
+            counts[value] = counts.get(value, 0) + 1
+
+    sorted_items = sorted(counts.items())
+    total = len(sorted_items)
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    offset = (page - 1) * per_page
+    page_items = sorted_items[offset : offset + per_page]
+    return PaginatedMetadataValuesResponse(
+        items=[
+            MetadataValueLookupResponse(
+                value=value,
+                name=value,
+                media_count=count,
+            )
+            for value, count in page_items
+        ],
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
+
+
+@router.get(
     "/rules/media-server-collections",
     response_model=PaginatedMediaServerCollectionsResponse,
 )
@@ -891,7 +1020,11 @@ async def preview_rule_matches(
         enabled=True,
         target_scope=body.target_scope,
         definition=body.definition,
-        action=_action_or_default(None),
+        action=_normalize_rule_action(
+            {"outcome": body.outcome},
+            (body.name or "").strip() or "Preview Rule",
+            body.target_scope,
+        ),
     )
 
     preview_result = await collect_rule_preview_matches_with_metadata(
@@ -913,6 +1046,12 @@ async def preview_rule_matches(
             source_media_count=preview_result.metadata.source_media_count,
             skipped_favorites_count=preview_result.metadata.skipped_favorites_count,
             skipped_protected_count=preview_result.metadata.skipped_protected_count,
+            sonarr_unavailable_count=preview_result.metadata.sonarr_unavailable_count,
+            sonarr_error=preview_result.metadata.sonarr_error,
+            playback_unavailable_count=(
+                preview_result.metadata.playback_unavailable_count
+            ),
+            playback_error=preview_result.metadata.playback_error,
             matched_count=preview_result.metadata.matched_count,
         ),
     )

@@ -5,9 +5,10 @@ import shutil
 from collections.abc import Iterable, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Final, TypeAlias
 
 from backend.core.utils.filesystem import normalize_fpath
+from backend.core.utils.language import normalize_language
 from backend.core.utils.misc import normalize_genre_names, normalize_name_list
 from backend.database.models import (
     Episode,
@@ -17,7 +18,7 @@ from backend.database.models import (
     Season,
     Series,
 )
-from backend.enums import MediaType
+from backend.enums import MediaType, Service
 
 TARGET_MOVIE_VERSION = "movie_version"
 TARGET_SERIES = "series"
@@ -29,14 +30,52 @@ VALID_TARGET_SCOPES = {
     TARGET_SEASON,
     TARGET_EPISODE,
 }
+RULE_OUTCOME_CANDIDATE = "candidate"
+RULE_OUTCOME_PROTECT = "protect"
+SONARR_RULE_FIELDS = {
+    "sonarr.latest_season_has_unaired_episodes",
+    "sonarr.latest_season_has_finale",
+}
+PLAYBACK_RULE_FIELDS = {
+    "playback.has_activity",
+    "playback.play_count",
+    "playback.total_duration_minutes",
+    "playback.longest_duration_minutes",
+    "playback.unique_user_count",
+    "playback.last_activity_at",
+    "playback.days_since_last_activity",
+}
 
 RuleDefinition = dict[str, Any]
+
+
+class UnavailableRuleValue:
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "RULE_VALUE_UNAVAILABLE"
+
+
+RULE_VALUE_UNAVAILABLE: Final[UnavailableRuleValue] = UnavailableRuleValue()
+SonarrRuleValue: TypeAlias = bool | UnavailableRuleValue
+
+
+def normalize_rule_outcome(rule: ReclaimRule) -> str:
+    action = rule.action if isinstance(rule.action, dict) else {}
+    return (
+        RULE_OUTCOME_PROTECT
+        if action.get("outcome") == RULE_OUTCOME_PROTECT
+        else RULE_OUTCOME_CANDIDATE
+    )
+
 
 FIELD_LABELS: dict[str, str] = {
     "library.id": "Library",
     "media.path": "Path",
     "media.file_name": "Filename",
     "media.size": "Size",
+    "media.year": "Year",
+    "media.container": "Container",
     "media.days_since_added": "Days since added",
     "watch.view_count": "Views",
     "watch.days_since_last_watched": "Days since watched",
@@ -45,6 +84,9 @@ FIELD_LABELS: dict[str, str] = {
     "tmdb.in_collection": "TMDB in collection",
     "tmdb.collection_name": "TMDB collection name",
     "tmdb.genres": "TMDB genres",
+    "tmdb.original_language": "TMDB original language",
+    "tmdb.origin_country": "TMDB origin country",
+    "tmdb.runtime_minutes": "TMDB runtime (minutes)",
     "tmdb.first_air_date": "TMDB first air date",
     "tmdb.last_air_date": "TMDB last air date",
     "season.air_date": "Season air date",
@@ -63,6 +105,13 @@ FIELD_LABELS: dict[str, str] = {
     "episode.air_date": "Episode air date",
     "episode.days_since_air_date": "Days since episode aired",
     "watch.never_watched": "Never watched",
+    "playback.has_activity": "Playback activity exists",
+    "playback.play_count": "Playback plays",
+    "playback.total_duration_minutes": "Playback duration (minutes)",
+    "playback.longest_duration_minutes": "Longest playback (minutes)",
+    "playback.unique_user_count": "Playback users",
+    "playback.last_activity_at": "Last playback activity",
+    "playback.days_since_last_activity": "Days since playback activity",
     "tmdb.popularity": "Popularity",
     "tmdb.vote_average": "Rating",
     "tmdb.vote_count": "Vote count",
@@ -71,18 +120,38 @@ FIELD_LABELS: dict[str, str] = {
     "anilist.score": "AniList score",
     "anilist.popularity": "AniList popularity",
     "anilist.favourites": "AniList favourites",
+    "rottentomatoes.tomato_meter": "Rotten Tomatoes Tomatometer",
+    "rottentomatoes.tomato_vote_count": "Rotten Tomatoes Tomatometer votes",
+    "rottentomatoes.popcorn_meter": "Rotten Tomatoes Popcornmeter",
+    "rottentomatoes.popcorn_vote_count": "Rotten Tomatoes Popcornmeter votes",
+    "metacritic.metascore": "Metacritic metascore",
+    "metacritic.vote_count": "Metacritic critic count",
+    "metacritic.user_score": "Metacritic user score",
+    "metacritic.user_vote_count": "Metacritic user votes",
+    "trakt.rating": "Trakt rating",
+    "trakt.vote_count": "Trakt votes",
+    "letterboxd.score": "Letterboxd score",
+    "letterboxd.vote_count": "Letterboxd votes",
     "series.status": "Series status",
+    "series.tmdb_season_count": "TMDB season count",
+    "series.library_season_count": "Library season count",
+    "movie.version_count": "Movie version count",
     "video.codec_family": "Video codec",
     "audio.codec_family": "Audio codec",
     "video.hdr": "HDR",
     "video.dolby_vision": "Dolby Vision",
     "video.width": "Video width",
     "video.height": "Video height",
+    "video.bitrate_kbps": "Video bitrate (kbps)",
+    "video.bit_depth": "Video bit depth",
     "video.resolution": "Resolution",
     "audio.channels": "Audio channels",
     "audio.track_count": "Audio tracks",
+    "audio.bitrate_kbps": "Audio bitrate (kbps)",
     "audio.languages": "Audio languages",
     "subtitle.languages": "Subtitle languages",
+    "subtitle.track_count": "Subtitle tracks",
+    "subtitle.has_forced": "Has forced subtitles",
     "video.color_space": "Color space",
     "video.color_transfer": "Color transfer",
     "video.color_primaries": "Color primaries",
@@ -90,6 +159,10 @@ FIELD_LABELS: dict[str, str] = {
     "media_server.collections": "Media server collections",
     "arr.tags": "Arr tags",
     "arr.monitored": "Arr monitored",
+    "sonarr.latest_season_has_unaired_episodes": (
+        "Sonarr latest season has unaired episodes"
+    ),
+    "sonarr.latest_season_has_finale": "Sonarr latest season has finale",
     "seerr.requested": "Seerr requested",
     "seerr.requested_by_user_ids": "Seerr requested by user IDs",
     "seerr.requester_has_watched": "Seerr requester has watched",
@@ -133,9 +206,15 @@ LIST_OPERATORS = {
 VALUELESS_OPERATORS = {"exists", "not_exists", "is_true", "is_false"}
 NUMERIC_FIELDS = {
     "media.size",
+    "media.year",
     "media.days_since_added",
     "watch.view_count",
     "watch.days_since_last_watched",
+    "playback.play_count",
+    "playback.total_duration_minutes",
+    "playback.longest_duration_minutes",
+    "playback.unique_user_count",
+    "playback.days_since_last_activity",
     "tmdb.days_since_release",
     "tmdb.days_since_first_air_date",
     "tmdb.days_since_last_air_date",
@@ -150,15 +229,35 @@ NUMERIC_FIELDS = {
     "tmdb.popularity",
     "tmdb.vote_average",
     "tmdb.vote_count",
+    "tmdb.runtime_minutes",
     "imdb.rating",
     "imdb.vote_count",
     "anilist.score",
     "anilist.popularity",
     "anilist.favourites",
+    "rottentomatoes.tomato_meter",
+    "rottentomatoes.tomato_vote_count",
+    "rottentomatoes.popcorn_meter",
+    "rottentomatoes.popcorn_vote_count",
+    "metacritic.metascore",
+    "metacritic.vote_count",
+    "metacritic.user_score",
+    "metacritic.user_vote_count",
+    "trakt.rating",
+    "trakt.vote_count",
+    "letterboxd.score",
+    "letterboxd.vote_count",
     "video.width",
     "video.height",
     "audio.channels",
     "audio.track_count",
+    "audio.bitrate_kbps",
+    "subtitle.track_count",
+    "video.bitrate_kbps",
+    "video.bit_depth",
+    "movie.version_count",
+    "series.tmdb_season_count",
+    "series.library_season_count",
     "media.duration",
     "disk.free_bytes",
     "disk.free_percent",
@@ -166,7 +265,10 @@ NUMERIC_FIELDS = {
 TEXT_FIELDS = {
     "tmdb.collection_name",
     "tmdb.genres",
+    "tmdb.original_language",
+    "tmdb.origin_country",
     "media_server.collections",
+    "media.container",
     "series.status",
     "video.codec_family",
     "audio.codec_family",
@@ -186,21 +288,35 @@ MULTI_VALUE_TEXT_FIELDS = {
     "audio.codec_family",
     "audio.languages",
     "subtitle.languages",
+    "tmdb.original_language",
+    "tmdb.origin_country",
 }
+LANGUAGE_FIELDS = {
+    "audio.languages",
+    "subtitle.languages",
+    "tmdb.original_language",
+}
+COUNTRY_FIELDS = {"tmdb.origin_country"}
+FAIL_CLOSED_LIST_FIELDS = LANGUAGE_FIELDS | COUNTRY_FIELDS
 LIBRARY_FIELDS = {"library.id"}
 BOOLEAN_FIELDS = {
     "tmdb.in_collection",
     "video.hdr",
     "video.dolby_vision",
+    "subtitle.has_forced",
     "season.fully_watched",
     "season.is_latest_season",
     "watch.never_watched",
+    "playback.has_activity",
     "arr.monitored",
+    "sonarr.latest_season_has_unaired_episodes",
+    "sonarr.latest_season_has_finale",
     "seerr.requested",
     "seerr.requester_has_watched",
 }
 TEMPORAL_FIELDS = {
     "watch.last_viewed_at",
+    "playback.last_activity_at",
     "tmdb.release_date",
     "tmdb.first_air_date",
     "tmdb.last_air_date",
@@ -297,6 +413,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "arr.monitored",
         "arr.tags",
         "audio.channels",
+        "audio.bitrate_kbps",
         "audio.codec_family",
         "audio.languages",
         "audio.track_count",
@@ -304,26 +421,47 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "disk.free_percent",
         "imdb.rating",
         "imdb.vote_count",
+        "letterboxd.score",
+        "letterboxd.vote_count",
+        "metacritic.metascore",
+        "metacritic.user_score",
+        "metacritic.user_vote_count",
+        "metacritic.vote_count",
         "library.id",
         "media.days_since_added",
+        "media.container",
         "media.duration",
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
+        "rottentomatoes.popcorn_meter",
+        "rottentomatoes.popcorn_vote_count",
+        "rottentomatoes.tomato_meter",
+        "rottentomatoes.tomato_vote_count",
         "subtitle.languages",
+        "subtitle.has_forced",
+        "subtitle.track_count",
         "tmdb.days_since_release",
         "tmdb.in_collection",
         "tmdb.collection_name",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.release_date",
+        "tmdb.runtime_minutes",
         "tmdb.vote_average",
         "tmdb.vote_count",
+        "trakt.rating",
+        "trakt.vote_count",
         "video.codec_family",
+        "video.bitrate_kbps",
+        "video.bit_depth",
         "video.color_primaries",
         "video.color_space",
         "video.color_transfer",
@@ -336,6 +474,8 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "watch.last_viewed_at",
         "watch.never_watched",
         "watch.view_count",
+        *PLAYBACK_RULE_FIELDS,
+        "movie.version_count",
     },
     TARGET_SERIES: {
         "anilist.favourites",
@@ -349,25 +489,44 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "disk.free_percent",
         "imdb.rating",
         "imdb.vote_count",
+        "letterboxd.score",
+        "letterboxd.vote_count",
+        "metacritic.metascore",
+        "metacritic.user_score",
+        "metacritic.user_vote_count",
+        "metacritic.vote_count",
         "library.id",
         "media.days_since_added",
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
+        "rottentomatoes.popcorn_meter",
+        "rottentomatoes.popcorn_vote_count",
+        "rottentomatoes.tomato_meter",
+        "rottentomatoes.tomato_vote_count",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
+        "sonarr.latest_season_has_unaired_episodes",
+        "sonarr.latest_season_has_finale",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
+        "trakt.rating",
+        "trakt.vote_count",
         "video.codec_family",
         "video.dolby_vision",
         "video.hdr",
@@ -377,6 +536,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "watch.last_viewed_at",
         "watch.never_watched",
         "watch.view_count",
+        *PLAYBACK_RULE_FIELDS,
     },
     TARGET_SEASON: {
         "anilist.favourites",
@@ -391,11 +551,18 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "disk.free_percent",
         "imdb.rating",
         "imdb.vote_count",
+        "letterboxd.score",
+        "letterboxd.vote_count",
+        "metacritic.metascore",
+        "metacritic.user_score",
+        "metacritic.user_vote_count",
+        "metacritic.vote_count",
         "library.id",
         "media.days_since_added",
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "season.air_date",
         "season.days_since_air_date",
@@ -408,16 +575,26 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
+        "rottentomatoes.popcorn_meter",
+        "rottentomatoes.popcorn_vote_count",
+        "rottentomatoes.tomato_meter",
+        "rottentomatoes.tomato_vote_count",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
+        "trakt.rating",
+        "trakt.vote_count",
         "video.codec_family",
         "video.dolby_vision",
         "video.hdr",
@@ -427,6 +604,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "watch.last_viewed_at",
         "watch.never_watched",
         "watch.view_count",
+        *PLAYBACK_RULE_FIELDS,
     },
     TARGET_EPISODE: {
         "anilist.favourites",
@@ -442,11 +620,18 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "episode.season_number",
         "imdb.rating",
         "imdb.vote_count",
+        "letterboxd.score",
+        "letterboxd.vote_count",
+        "metacritic.metascore",
+        "metacritic.user_score",
+        "metacritic.user_vote_count",
+        "metacritic.vote_count",
         "library.id",
         "media.days_since_added",
         "media.file_name",
         "media.path",
         "media.size",
+        "media.year",
         "media_server.collections",
         "season.air_date",
         "season.days_since_air_date",
@@ -459,19 +644,30 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "seerr.requested",
         "seerr.requested_by_user_ids",
         "seerr.requester_has_watched",
+        "rottentomatoes.popcorn_meter",
+        "rottentomatoes.popcorn_vote_count",
+        "rottentomatoes.tomato_meter",
+        "rottentomatoes.tomato_vote_count",
         "series.status",
+        "series.library_season_count",
+        "series.tmdb_season_count",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
         "tmdb.first_air_date",
         "tmdb.last_air_date",
         "tmdb.genres",
+        "tmdb.original_language",
+        "tmdb.origin_country",
         "tmdb.popularity",
         "tmdb.vote_average",
         "tmdb.vote_count",
+        "trakt.rating",
+        "trakt.vote_count",
         "watch.days_since_last_watched",
         "watch.last_viewed_at",
         "watch.never_watched",
         "watch.view_count",
+        *PLAYBACK_RULE_FIELDS,
     },
 }
 
@@ -634,6 +830,90 @@ class SeerrRequestResolver:
         if value is None:
             return None
         return bool(value)
+
+
+class SonarrEpisodeStateResolver:
+    """Holds Sonarr latest-season episode state for one rule evaluation run."""
+
+    _ctx: ContextVar[SonarrEpisodeStateResolver | None] = ContextVar(
+        "sonarr_episode_state_resolver", default=None
+    )
+
+    __slots__ = ("_values_by_series_id",)
+
+    def __init__(
+        self,
+        values_by_series_id: Mapping[int, Mapping[str, object]] | None = None,
+    ) -> None:
+        self._values_by_series_id: dict[int, dict[str, object]] = {
+            int(series_id): dict(values)
+            for series_id, values in (values_by_series_id or {}).items()
+        }
+
+    def activate(self) -> None:
+        """Install this resolver for the current async context."""
+        SonarrEpisodeStateResolver._ctx.set(self)
+
+    @classmethod
+    def current(cls) -> SonarrEpisodeStateResolver | None:
+        """Return the resolver active in the current async context, or None."""
+        return cls._ctx.get()
+
+    def resolve(self, series_id: int | None, field: str) -> object:
+        """Return a Sonarr field value or the unavailable sentinel."""
+        if series_id is None:
+            return RULE_VALUE_UNAVAILABLE
+        return self._values_by_series_id.get(series_id, {}).get(
+            field, RULE_VALUE_UNAVAILABLE
+        )
+
+
+class PlaybackHistoryResolver:
+    """Holds provider-neutral playback aggregates for one rule evaluation run."""
+
+    _ctx: ContextVar[PlaybackHistoryResolver | None] = ContextVar(
+        "playback_history_resolver", default=None
+    )
+
+    __slots__ = ("_values_by_target",)
+
+    def __init__(
+        self,
+        values_by_target: Mapping[tuple[str, int], Mapping[str, object]] | None = None,
+    ) -> None:
+        self._values_by_target = {
+            (str(scope), int(target_id)): dict(values)
+            for (scope, target_id), values in (values_by_target or {}).items()
+        }
+
+    def activate(self) -> None:
+        PlaybackHistoryResolver._ctx.set(self)
+
+    @classmethod
+    def current(cls) -> PlaybackHistoryResolver | None:
+        return cls._ctx.get()
+
+    def resolve(self, target_scope: str, target_id: int | None, field: str) -> object:
+        if target_id is None:
+            return RULE_VALUE_UNAVAILABLE
+        return self._values_by_target.get((target_scope, target_id), {}).get(
+            field, RULE_VALUE_UNAVAILABLE
+        )
+
+
+def _playback_context(
+    resolver: PlaybackHistoryResolver | None,
+    target_scope: str,
+    target_id: int | None,
+) -> dict[str, object]:
+    return {
+        field: (
+            resolver.resolve(target_scope, target_id, field)
+            if resolver
+            else RULE_VALUE_UNAVAILABLE
+        )
+        for field in PLAYBACK_RULE_FIELDS
+    }
 
 
 def normalize_rule_target(rule: ReclaimRule) -> str:
@@ -801,6 +1081,73 @@ def evaluate_advanced_rule(
     return True, matched, reasons
 
 
+def evaluate_advanced_rule_state(
+    rule: ReclaimRule,
+    *,
+    target_scope: str,
+    movie: Movie | None = None,
+    version: MovieVersion | None = None,
+    series: Series | None = None,
+    season: Season | None = None,
+    episode: Episode | None = None,
+) -> bool | None:
+    """Evaluate a rule using three-valued logic for unavailable external data."""
+    definition = normalize_rule_definition(rule)
+    if not definition:
+        return False
+    root = definition.get("root")
+    if not isinstance(root, dict):
+        return False
+    context = _build_context(
+        target_scope,
+        movie,
+        version,
+        series,
+        season,
+        episode,
+        _rule_uses_disk_fields(definition),
+    )
+    return _evaluate_node_state(root, context)
+
+
+def _evaluate_node_state(
+    node: dict[str, Any],
+    context: dict[str, Any],
+) -> bool | None:
+    """Return True, False, or None when unavailable values affect the result."""
+    if node.get("type") == "group":
+        op = str(node.get("op", "")).lower()
+        children = node.get("children")
+        if (
+            op not in {"and", "or"}
+            or not isinstance(children, list)
+            or not children
+            or not all(isinstance(child, dict) for child in children)
+        ):
+            return False
+        child_states = [_evaluate_node_state(child, context) for child in children]
+        if op == "and":
+            if False in child_states:
+                return False
+            return None if None in child_states else True
+        if True in child_states:
+            return True
+        return None if None in child_states else False
+
+    if node.get("type") != "condition":
+        return False
+    field = str(node.get("field", ""))
+    actual = context.get(field)
+    if actual is RULE_VALUE_UNAVAILABLE:
+        return None
+    return _matches_operator(
+        actual,
+        str(node.get("operator", "")),
+        node.get("value"),
+        field=field,
+    )
+
+
 def _rule_uses_disk_fields(definition: RuleDefinition | None) -> bool:
     """Return True if the rule definition references any disk.* fields."""
     return bool(
@@ -919,6 +1266,8 @@ def _build_context(
     now = datetime.now(UTC)
     _resolver = DiskStatsResolver.current() if compute_disk else None
     _seerr_resolver = SeerrRequestResolver.current()
+    _sonarr_resolver = SonarrEpisodeStateResolver.current()
+    _playback_resolver = PlaybackHistoryResolver.current()
     if target_scope == TARGET_MOVIE_VERSION and movie and version:
         size = version.size if version.size and version.size > 0 else movie.size
         _disk = (
@@ -932,6 +1281,8 @@ def _build_context(
             "media.path": [version.path] if version.path else [],
             "media.file_name": [_file_name] if _file_name else [],
             "media.size": size,
+            "media.year": movie.year,
+            "media.container": version.container,
             "media_server.collections": version.media_server_collection_names or [],
             "media.days_since_added": _days_between(
                 version.added_at or movie.added_at, now
@@ -940,6 +1291,7 @@ def _build_context(
             "watch.last_viewed_at": _last_viewed,
             "watch.days_since_last_watched": _days_between(_last_viewed, now),
             "watch.never_watched": movie.view_count == 0 or _last_viewed is None,
+            **_playback_context(_playback_resolver, TARGET_MOVIE_VERSION, version.id),
             "tmdb.release_date": movie.tmdb_release_date,
             "tmdb.in_collection": (
                 movie.tmdb_collection_id is not None
@@ -948,6 +1300,9 @@ def _build_context(
             ),
             "tmdb.collection_name": movie.tmdb_collection_name,
             "tmdb.genres": normalize_genre_names(movie.genres) or [],
+            "tmdb.original_language": normalize_language(movie.original_language),
+            "tmdb.origin_country": _normalized_country_list(movie.origin_country),
+            "tmdb.runtime_minutes": movie.runtime,
             "tmdb.days_since_release": _days_between(movie.tmdb_release_date, now),
             "tmdb.popularity": movie.popularity,
             "tmdb.vote_average": movie.vote_average,
@@ -957,23 +1312,45 @@ def _build_context(
             "anilist.score": movie.anilist_score,
             "anilist.popularity": movie.anilist_popularity,
             "anilist.favourites": movie.anilist_favourites,
+            "rottentomatoes.tomato_meter": movie.rottentomatoes_tomato_meter,
+            "rottentomatoes.tomato_vote_count": (
+                movie.rottentomatoes_tomato_vote_count
+            ),
+            "rottentomatoes.popcorn_meter": movie.rottentomatoes_popcorn_meter,
+            "rottentomatoes.popcorn_vote_count": (
+                movie.rottentomatoes_popcorn_vote_count
+            ),
+            "metacritic.metascore": movie.metacritic_metascore,
+            "metacritic.vote_count": movie.metacritic_vote_count,
+            "metacritic.user_score": movie.metacritic_user_score,
+            "metacritic.user_vote_count": movie.metacritic_user_vote_count,
+            "trakt.rating": movie.trakt_rating,
+            "trakt.vote_count": movie.trakt_vote_count,
+            "letterboxd.score": movie.letterboxd_score,
+            "letterboxd.vote_count": movie.letterboxd_vote_count,
             "video.codec_family": version.video_codec_family,
             "audio.codec_family": version.audio_codec_family,
             "video.hdr": version.video_hdr,
             "video.dolby_vision": version.video_dolby_vision,
             "video.width": version.video_width,
             "video.height": version.video_height,
+            "video.bitrate_kbps": _bitrate_kbps(version.video_bitrate, version.service),
+            "video.bit_depth": version.video_bit_depth,
             "video.resolution": version.video_resolution,
             "audio.channels": version.audio_channels,
             "audio.track_count": version.audio_count,
+            "audio.bitrate_kbps": _bitrate_kbps(version.audio_bitrate, version.service),
             "audio.languages": version.audio_languages,
             "subtitle.languages": version.subtitle_languages,
+            "subtitle.track_count": version.subtitle_count,
+            "subtitle.has_forced": version.subtitle_has_forced,
             "video.color_space": version.video_color_space,
             "video.color_transfer": version.video_color_transfer,
             "video.color_primaries": version.video_color_primaries,
             "media.duration": version.duration,
             "arr.tags": movie.arr_tags or [],
             "arr.monitored": movie.is_monitored,
+            "movie.version_count": len(movie.versions or []),
             "seerr.requested": (
                 _seerr_resolver.resolve(MediaType.MOVIE, movie.tmdb_id)
                 if _seerr_resolver
@@ -1013,12 +1390,14 @@ def _build_context(
             "media.path": [ref.path for ref in refs if ref.path],
             "media.file_name": _series_file_names,
             "media.size": series.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(series.added_at, now),
             "watch.view_count": series.view_count,
             "watch.last_viewed_at": _last_viewed,
             "watch.days_since_last_watched": _days_between(_last_viewed, now),
             "watch.never_watched": series.view_count == 0 or _last_viewed is None,
+            **_playback_context(_playback_resolver, TARGET_SERIES, series.id),
             "tmdb.first_air_date": series.tmdb_first_air_date,
             "tmdb.last_air_date": series.tmdb_last_air_date,
             "tmdb.days_since_first_air_date": _days_between(
@@ -1031,12 +1410,32 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
+            "rottentomatoes.tomato_meter": series.rottentomatoes_tomato_meter,
+            "rottentomatoes.tomato_vote_count": (
+                series.rottentomatoes_tomato_vote_count
+            ),
+            "rottentomatoes.popcorn_meter": series.rottentomatoes_popcorn_meter,
+            "rottentomatoes.popcorn_vote_count": (
+                series.rottentomatoes_popcorn_vote_count
+            ),
+            "metacritic.metascore": series.metacritic_metascore,
+            "metacritic.vote_count": series.metacritic_vote_count,
+            "metacritic.user_score": series.metacritic_user_score,
+            "metacritic.user_vote_count": series.metacritic_user_vote_count,
+            "trakt.rating": series.trakt_rating,
+            "trakt.vote_count": series.trakt_vote_count,
+            "letterboxd.score": series.letterboxd_score,
+            "letterboxd.vote_count": series.letterboxd_vote_count,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "video.codec_family": series.video_codec_families,
             "audio.codec_family": series.audio_codec_families,
             "video.hdr": series.has_hdr,
@@ -1047,6 +1446,18 @@ def _build_context(
             "subtitle.languages": series.subtitle_languages,
             "arr.tags": series.arr_tags or [],
             "arr.monitored": series.is_monitored,
+            "sonarr.latest_season_has_unaired_episodes": (
+                _sonarr_resolver.resolve(
+                    series.id, "sonarr.latest_season_has_unaired_episodes"
+                )
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
+            "sonarr.latest_season_has_finale": (
+                _sonarr_resolver.resolve(series.id, "sonarr.latest_season_has_finale")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
                 _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
                 if _seerr_resolver
@@ -1092,6 +1503,7 @@ def _build_context(
             "media.path": [ref.path for ref in refs if ref.path],
             "media.file_name": [_season_file_name] if _season_file_name else [],
             "media.size": season.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(season.added_at, now),
             "watch.view_count": season.view_count,
@@ -1099,6 +1511,7 @@ def _build_context(
             "watch.days_since_last_watched": _days_between(_last_viewed, now),
             "watch.never_watched": (season.view_count or 0) == 0
             or _last_viewed is None,
+            **_playback_context(_playback_resolver, TARGET_SEASON, season.id),
             "season.air_date": season.air_date,
             "season.days_since_air_date": _days_between(season.air_date, now),
             "season.season_number": season.season_number,
@@ -1119,12 +1532,32 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
+            "rottentomatoes.tomato_meter": series.rottentomatoes_tomato_meter,
+            "rottentomatoes.tomato_vote_count": (
+                series.rottentomatoes_tomato_vote_count
+            ),
+            "rottentomatoes.popcorn_meter": series.rottentomatoes_popcorn_meter,
+            "rottentomatoes.popcorn_vote_count": (
+                series.rottentomatoes_popcorn_vote_count
+            ),
+            "metacritic.metascore": series.metacritic_metascore,
+            "metacritic.vote_count": series.metacritic_vote_count,
+            "metacritic.user_score": series.metacritic_user_score,
+            "metacritic.user_vote_count": series.metacritic_user_vote_count,
+            "trakt.rating": series.trakt_rating,
+            "trakt.vote_count": series.trakt_vote_count,
+            "letterboxd.score": series.letterboxd_score,
+            "letterboxd.vote_count": series.letterboxd_vote_count,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "video.codec_family": season.video_codec_families,
             "audio.codec_family": season.audio_codec_families,
             "video.hdr": season.has_hdr,
@@ -1189,12 +1622,14 @@ def _build_context(
             "media.path": [episode.path] if episode.path else [],
             "media.file_name": [_episode_file_name] if _episode_file_name else [],
             "media.size": episode.size,
+            "media.year": series.year,
             "media_server.collections": _collections,
             "media.days_since_added": _days_between(season.added_at, now),
             "watch.view_count": episode.view_count,
             "watch.last_viewed_at": _last_viewed_ep,
             "watch.days_since_last_watched": _days_between(_last_viewed_ep, now),
             "watch.never_watched": episode.view_count == 0 or _last_viewed_ep is None,
+            **_playback_context(_playback_resolver, TARGET_EPISODE, episode.id),
             "episode.number": episode.episode_number,
             "episode.season_number": season.season_number,
             "episode.air_date": episode.air_date,
@@ -1219,12 +1654,32 @@ def _build_context(
             "tmdb.vote_average": series.vote_average,
             "tmdb.vote_count": series.vote_count,
             "tmdb.genres": normalize_genre_names(series.genres) or [],
+            "tmdb.original_language": normalize_language(series.original_language),
+            "tmdb.origin_country": _normalized_country_list(series.origin_country),
             "imdb.rating": series.imdb_rating,
             "imdb.vote_count": series.imdb_vote_count,
             "anilist.score": series.anilist_score,
             "anilist.popularity": series.anilist_popularity,
             "anilist.favourites": series.anilist_favourites,
+            "rottentomatoes.tomato_meter": series.rottentomatoes_tomato_meter,
+            "rottentomatoes.tomato_vote_count": (
+                series.rottentomatoes_tomato_vote_count
+            ),
+            "rottentomatoes.popcorn_meter": series.rottentomatoes_popcorn_meter,
+            "rottentomatoes.popcorn_vote_count": (
+                series.rottentomatoes_popcorn_vote_count
+            ),
+            "metacritic.metascore": series.metacritic_metascore,
+            "metacritic.vote_count": series.metacritic_vote_count,
+            "metacritic.user_score": series.metacritic_user_score,
+            "metacritic.user_vote_count": series.metacritic_user_vote_count,
+            "trakt.rating": series.trakt_rating,
+            "trakt.vote_count": series.trakt_vote_count,
+            "letterboxd.score": series.letterboxd_score,
+            "letterboxd.vote_count": series.letterboxd_vote_count,
             "series.status": series.status,
+            "series.tmdb_season_count": series.season_count,
+            "series.library_season_count": _library_season_count(series),
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
             "seerr.requested": (
@@ -1318,9 +1773,15 @@ def _matches_operator(
     actual: Any, operator: str, expected: Any, *, field: str | None = None
 ) -> bool:
     """Evaluate a single condition operator against the provided actual and expected values."""
+    if actual is RULE_VALUE_UNAVAILABLE:
+        return False
     if operator == "exists":
+        if field in LANGUAGE_FIELDS:
+            return bool(_normalized_language_values(actual))
         return _exists(actual)
     if operator == "not_exists":
+        if field in LANGUAGE_FIELDS:
+            return not _normalized_language_values(actual)
         return not _exists(actual)
     if operator == "is_true":
         return actual is True
@@ -1427,10 +1888,21 @@ def _matches_list_operator(
             return not has_all
         return False
 
-    actual_values = {_normalize(value) for value in _as_list(actual) if _exists(value)}
-    expected_values = {
-        _normalize(value) for value in _as_list(expected) if _exists(value)
-    }
+    if field in LANGUAGE_FIELDS:
+        actual_values = _normalized_language_values(actual)
+        expected_values = _normalized_language_values(expected)
+    elif field in COUNTRY_FIELDS:
+        actual_values = _normalized_country_values(actual)
+        expected_values = _normalized_country_values(expected)
+    else:
+        actual_values = {
+            _normalize(value) for value in _as_list(actual) if _exists(value)
+        }
+        expected_values = {
+            _normalize(value) for value in _as_list(expected) if _exists(value)
+        }
+    if field in FAIL_CLOSED_LIST_FIELDS and (not actual_values or not expected_values):
+        return False
     if not expected_values:
         return False
     has_any = bool(actual_values & expected_values)
@@ -1444,6 +1916,39 @@ def _matches_list_operator(
     if operator == "not_contains_all":
         return not has_all
     return False
+
+
+def _normalized_language_values(value: Any) -> set[str]:
+    return {
+        normalized
+        for item in _as_list(value)
+        if (normalized := normalize_language(item)) is not None
+    }
+
+
+def _normalized_country_values(value: Any) -> set[str]:
+    return {
+        normalized
+        for item in _as_list(value)
+        if (normalized := str(item or "").strip().upper())
+    }
+
+
+def _normalized_country_list(value: Any) -> list[str]:
+    return sorted(_normalized_country_values(value))
+
+
+def _library_season_count(series: Series) -> int:
+    return sum(1 for season in (series.seasons or []) if season.season_number > 0)
+
+
+def _bitrate_kbps(value: Any, service: Service) -> float | int | None:
+    bitrate = _number(value)
+    if bitrate is None:
+        return None
+    if service in {Service.JELLYFIN, Service.EMBY}:
+        bitrate /= 1000
+    return int(bitrate) if bitrate.is_integer() else bitrate
 
 
 def _matches_path_prefix(actual: Any, expected: Any) -> bool:

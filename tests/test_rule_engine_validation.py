@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from backend.core.rule_engine import (
+    TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
+    TARGET_SERIES,
     derive_path_scope_library_ids,
     validate_rule_definition,
 )
@@ -25,6 +27,105 @@ def _definition(field: str, operator: str, value: object = 1) -> dict[str, objec
 
 
 class RuleDefinitionValidationTests(unittest.TestCase):
+    def test_accepts_extended_metadata_fields_for_supported_scopes(self) -> None:
+        cases = [
+            (TARGET_MOVIE_VERSION, "media.year", "equals", 2005),
+            (TARGET_MOVIE_VERSION, "media.container", "contains_any", ["mkv"]),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.original_language",
+                "contains_any",
+                ["eng"],
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.origin_country",
+                "contains_any",
+                ["US"],
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "tmdb.runtime_minutes",
+                "greater_than",
+                90,
+            ),
+            (
+                TARGET_MOVIE_VERSION,
+                "video.bitrate_kbps",
+                "greater_than",
+                8000,
+            ),
+            (TARGET_MOVIE_VERSION, "video.bit_depth", "equals", 10),
+            (
+                TARGET_MOVIE_VERSION,
+                "audio.bitrate_kbps",
+                "greater_than",
+                500,
+            ),
+            (TARGET_MOVIE_VERSION, "subtitle.track_count", "greater_than", 0),
+            (TARGET_MOVIE_VERSION, "subtitle.has_forced", "is_true", None),
+            (TARGET_MOVIE_VERSION, "movie.version_count", "greater_than", 1),
+            (TARGET_SERIES, "series.tmdb_season_count", "greater_than", 2),
+            (
+                TARGET_SERIES,
+                "sonarr.latest_season_has_unaired_episodes",
+                "is_true",
+                None,
+            ),
+            (
+                TARGET_SERIES,
+                "sonarr.latest_season_has_finale",
+                "is_false",
+                None,
+            ),
+            (TARGET_SEASON, "series.library_season_count", "greater_than", 2),
+            (TARGET_EPISODE, "tmdb.original_language", "contains_any", ["jpn"]),
+            (TARGET_MOVIE_VERSION, "playback.has_activity", "is_true", None),
+            (TARGET_SERIES, "playback.play_count", "greater_than", 2),
+            (
+                TARGET_SEASON,
+                "playback.total_duration_minutes",
+                "greater_than",
+                60,
+            ),
+            (
+                TARGET_EPISODE,
+                "playback.last_activity_at",
+                "before",
+                "2026-01-01",
+            ),
+        ]
+        for scope, field, operator, value in cases:
+            with self.subTest(scope=scope, field=field):
+                validate_rule_definition(
+                    _definition(field, operator, value),
+                    target_scope=scope,
+                )
+
+    def test_rejects_version_only_metadata_for_series_scope(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Rule field\\(s\\) not available for target_scope 'series': "
+            "'video.bitrate_kbps'",
+        ):
+            validate_rule_definition(
+                _definition("video.bitrate_kbps", "greater_than", 8000),
+                target_scope=TARGET_SERIES,
+            )
+
+    def test_rejects_sonarr_episode_state_for_non_series_scope(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Rule field\\(s\\) not available for target_scope 'season'",
+        ):
+            validate_rule_definition(
+                _definition(
+                    "sonarr.latest_season_has_unaired_episodes",
+                    "is_true",
+                ),
+                target_scope=TARGET_SEASON,
+            )
+
     def test_accepts_nested_and_or_groups(self) -> None:
         definition = {
             "version": 1,
@@ -267,6 +368,35 @@ class RuleDefinitionValidationTests(unittest.TestCase):
         validate_rule_definition(
             _definition("anilist.score", "greater_than_or_equal", 80),
         )
+
+    def test_accepts_external_rating_numeric_operators(self) -> None:
+        for field in (
+            "rottentomatoes.tomato_meter",
+            "rottentomatoes.tomato_vote_count",
+            "rottentomatoes.popcorn_meter",
+            "rottentomatoes.popcorn_vote_count",
+            "metacritic.metascore",
+            "metacritic.vote_count",
+            "metacritic.user_score",
+            "metacritic.user_vote_count",
+            "trakt.rating",
+            "trakt.vote_count",
+            "letterboxd.score",
+            "letterboxd.vote_count",
+        ):
+            with self.subTest(field=field):
+                validate_rule_definition(
+                    _definition(field, "greater_than_or_equal", 80),
+                )
+
+    def test_rejects_external_rating_temporal_operator(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Unsupported rule operator 'before' for field 'rottentomatoes.tomato_meter'",
+        ):
+            validate_rule_definition(
+                _definition("rottentomatoes.tomato_meter", "before", "2026-01-01"),
+            )
 
     def test_rejects_anilist_score_temporal_operator(self) -> None:
         with self.assertRaisesRegex(
