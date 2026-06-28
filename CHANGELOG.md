@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Information section in media server settings for some additional details on initial setup
+- Descriptions for Radarr, Sonarr, Seerr, Tautulli, MDBlist, and OMDb service configurations
 
 ### Changed
 
