@@ -20,6 +20,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Split up MDBlist and OMDb into their own tasks
     - If you was using these before MDBlist will run on your existing schedule and OMDb will be set to a new default
   - Improved the verbiage around what each task is for
+- Updated dependencies
+  - Alembic to 1.18.5
+  - Authlib to 1.7.2
+  - Cryptography to 49.0.0
+  - FastAPI to 0.138.1
+  - Granian to 2.7.7
+  - Niquests to 3.20.0
+  - PyJWT to 2.12.1
+  - Slowapi to 0.1.10
+  - Sqlalchemy to 2.0.51
+  - Basedpyright to 1.39.9
+  - Pytest to 9.1.1
+  - Ruff to 0.15.20
+  - Uvicorn to 0.49.0
+  - Pyinstaller to 6.21.0
+  - Pystray to 00.19.5
+  - Platformdirs to 4.10.0
+  - Filelock to 3.29.4
 
 ### Fixed
 
