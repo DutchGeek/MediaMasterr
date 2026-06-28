@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Information section in media server settings for some additional details on initial setup
+
 ### Changed
 
 - Add tests for file op jobs to mitigate sqlite lock/race issues

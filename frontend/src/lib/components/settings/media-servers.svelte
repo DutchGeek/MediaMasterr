@@ -19,6 +19,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import Checkbox from "$lib/components/ui/checkbox/checkbox.svelte";
+  import Notice from "$lib/components/notice.svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { MEDIA_SERVERS as SERVERS } from "$lib/types/shared";
 
@@ -447,6 +448,24 @@
           <strong>linked</strong> for watch history and user data only.
         </p>
       </div>
+
+      <Notice title={"Tip"}>
+        <p>
+          For the best experience, configure your <strong>*Arr</strong>
+          applications,
+          <strong>Seerr</strong>, and <strong>Tautulli</strong>
+          <i>(if desired)</i> before running your first sync. This helps
+          Reclaimerr build a complete view of your media, requests, and playback
+          history.
+          <br />
+          <br />
+          <i
+            >Note: If you configure these later you will simply just have to
+            wait or run the
+            <strong>Sync Media</strong> task after
+          </i>
+        </p>
+      </Notice>
 
       <hr />
 
