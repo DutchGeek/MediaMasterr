@@ -10,6 +10,7 @@ from typing import Literal, Protocol, cast
 
 from cryptography.fernet import InvalidToken
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.encryption import fer_decrypt
@@ -38,6 +39,7 @@ PLAYBACK_MOVIE_MIN_SECONDS = 15
 PLAYBACK_EPISODE_MIN_SECONDS = 7
 PLAYBACK_TARGET_SCOPES = ("movie_version", "series", "season", "episode")
 PLAYBACK_PREVIEW_REFRESH_INTERVAL = timedelta(minutes=5)
+PLAYBACK_EVENT_INSERT_BATCH_SIZE = 50
 
 _playback_refresh_lock = Lock()
 
@@ -477,6 +479,17 @@ async def _upsert_events(
 ) -> int:
     """Insert new playback events and update existing ones."""
 
+    events_by_key: dict[str, _NormalizedEvent] = {}
+    for event in events:
+        events_by_key[event.source_event_key] = event
+    duplicate_count = len(events) - len(events_by_key)
+    if duplicate_count:
+        LOG.debug(
+            f"Deduplicated {duplicate_count} playback history event(s) from "
+            f"{provider.value} config {config.id}"
+        )
+    events = list(events_by_key.values())
+
     movie_map, episode_map = await _identity_maps(session, observed_service)
     existing_by_key: dict[str, PlaybackHistoryEvent] = {}
     keys = [event.source_event_key for event in events]
@@ -492,7 +505,7 @@ async def _upsert_events(
         ).scalars()
         existing_by_key.update({row.source_event_key: row for row in rows})
 
-    inserted = 0
+    new_values: list[dict[str, object]] = []
     for event in events:
         movie_id = series_id = season_id = episode_id = tmdb_id = None
         season_number = episode_number = None
@@ -514,26 +527,25 @@ async def _upsert_events(
 
         existing = existing_by_key.get(event.source_event_key)
         if existing is None:
-            session.add(
-                PlaybackHistoryEvent(
-                    source_service=provider,
-                    source_service_config_id=config.id,
-                    source_event_key=event.source_event_key,
-                    source_item_id=event.source_item_id,
-                    provider_media_type=event.provider_media_type,
-                    played_at=event.played_at,
-                    duration_seconds=event.duration_seconds,
-                    source_user_id=event.source_user_id,
-                    tmdb_id=tmdb_id,
-                    season_number=season_number,
-                    episode_number=episode_number,
-                    movie_id=movie_id,
-                    series_id=series_id,
-                    season_id=season_id,
-                    episode_id=episode_id,
-                )
+            new_values.append(
+                {
+                    "source_service": provider,
+                    "source_service_config_id": config.id,
+                    "source_event_key": event.source_event_key,
+                    "source_item_id": event.source_item_id,
+                    "provider_media_type": event.provider_media_type,
+                    "played_at": event.played_at,
+                    "duration_seconds": event.duration_seconds,
+                    "source_user_id": event.source_user_id,
+                    "tmdb_id": tmdb_id,
+                    "season_number": season_number,
+                    "episode_number": episode_number,
+                    "movie_id": movie_id,
+                    "series_id": series_id,
+                    "season_id": season_id,
+                    "episode_id": episode_id,
+                }
             )
-            inserted += 1
             continue
 
         existing.source_item_id = event.source_item_id
@@ -549,6 +561,30 @@ async def _upsert_events(
             existing.series_id = series_id
             existing.season_id = season_id
             existing.episode_id = episode_id
+    return await _insert_new_events(session, new_values)
+
+
+async def _insert_new_events(
+    session: AsyncSession, values: list[dict[str, object]]
+) -> int:
+    """Insert playback events while treating uniqueness conflicts as existing rows."""
+
+    inserted = 0
+    for offset in range(0, len(values), PLAYBACK_EVENT_INSERT_BATCH_SIZE):
+        batch = values[offset : offset + PLAYBACK_EVENT_INSERT_BATCH_SIZE]
+        statement = (
+            sqlite_insert(PlaybackHistoryEvent)
+            .values(batch)
+            .on_conflict_do_nothing(
+                index_elements=[
+                    PlaybackHistoryEvent.source_service_config_id,
+                    PlaybackHistoryEvent.source_event_key,
+                ]
+            )
+            .returning(PlaybackHistoryEvent.source_event_key)
+        )
+        result = await session.execute(statement)
+        inserted += len(result.scalars().all())
     return inserted
 
 

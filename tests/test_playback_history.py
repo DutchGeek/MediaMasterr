@@ -30,9 +30,11 @@ from backend.services import playback_history
 from backend.services.jellyfin import JellyfinService
 from backend.services.playback_history import (
     _config_api_key,
+    _insert_new_events,
     _normalize_reporting_events,
     _normalize_tautulli_events,
     _refresh_reporting_config,
+    _upsert_events,
     rebuild_playback_history_aggregates,
 )
 from backend.services.tautulli import TautulliClient
@@ -233,6 +235,110 @@ class PlaybackHistoryAggregateTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         if self.db_path.exists():
             self.db_path.unlink()
+
+    async def test_upsert_events_deduplicates_reporting_batch(self) -> None:
+        reporting_row = {
+            "DateCreated": "2026-06-28 16:58:19.712081",
+            "UserId": "user-1",
+            "ItemId": "episode-1",
+            "ItemType": "Episode",
+            "PlayDuration": 1214,
+        }
+        events = _normalize_reporting_events([reporting_row, reporting_row])
+
+        async with self.sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.JELLYFIN,
+                base_url="http://jellyfin",
+                api_key="key",
+                enabled=True,
+            )
+            db.add(config)
+            await db.flush()
+            first_imported = await _upsert_events(
+                db,
+                config=config,
+                provider=Service.JELLYFIN,
+                observed_service=Service.JELLYFIN,
+                events=events,
+            )
+            await db.commit()
+            config_id = config.id
+
+        async with self.sessionmaker() as db:
+            config = await db.get(ServiceConfig, config_id)
+            self.assertIsNotNone(config)
+            assert config is not None
+            second_imported = await _upsert_events(
+                db,
+                config=config,
+                provider=Service.JELLYFIN,
+                observed_service=Service.JELLYFIN,
+                events=events,
+            )
+            await db.commit()
+            stored_events = (
+                (await db.execute(select(PlaybackHistoryEvent))).scalars().all()
+            )
+
+        self.assertEqual(first_imported, 1)
+        self.assertEqual(second_imported, 0)
+        self.assertEqual(len(stored_events), 1)
+        self.assertEqual(stored_events[0].source_event_key, events[0].source_event_key)
+
+    async def test_insert_new_events_ignores_existing_event_conflict(self) -> None:
+        async with self.sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.JELLYFIN,
+                base_url="http://jellyfin",
+                api_key="key",
+                enabled=True,
+            )
+            db.add(config)
+            await db.flush()
+            db.add(
+                PlaybackHistoryEvent(
+                    source_service=Service.JELLYFIN,
+                    source_service_config_id=config.id,
+                    source_event_key="existing-key",
+                    source_item_id="episode-1",
+                    provider_media_type="episode",
+                    played_at=datetime(2026, 6, 28, 16, 58),
+                    duration_seconds=1214,
+                    source_user_id="user-1",
+                )
+            )
+            await db.commit()
+
+            inserted = await _insert_new_events(
+                db,
+                [
+                    {
+                        "source_service": Service.JELLYFIN,
+                        "source_service_config_id": config.id,
+                        "source_event_key": "existing-key",
+                        "source_item_id": "episode-1",
+                        "provider_media_type": "episode",
+                        "played_at": datetime(2026, 6, 28, 16, 58),
+                        "duration_seconds": 1214,
+                        "source_user_id": "user-1",
+                        "tmdb_id": None,
+                        "season_number": None,
+                        "episode_number": None,
+                        "movie_id": None,
+                        "series_id": None,
+                        "season_id": None,
+                        "episode_id": None,
+                    }
+                ],
+            )
+            await db.commit()
+            stored_events = (
+                (await db.execute(select(PlaybackHistoryEvent))).scalars().all()
+            )
+
+        self.assertEqual(inserted, 0)
+        self.assertEqual(len(stored_events), 1)
 
     async def test_durable_totals_include_pre_readd_history_but_watch_does_not(
         self,
