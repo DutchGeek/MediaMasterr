@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-06-30
+
+### Added
+
+- Information section in media server settings for some additional details on initial setup
+- Descriptions for Radarr, Sonarr, Seerr, Tautulli, MDBlist, and OMDb service configurations
+- Additional information for metadata tasks
+- Rules
+  - arr.days_since_file_added
+    - Added nullable Radarr/Sonarr dates added on dates
+    - Syncs Radarr movie files and Sonarr episode files with season/series roll-ups
+    - Added API fields, sorting, UI labels, and arr.days_since_file_added rules
+    - Added focused regression tests and documentation
+  - seerr.last_requested_at
+  - seerr.days_since_last_requested
+- Auto delete delayed periods
+  - Global defaults: movies 14 days, TV 7 days
+  - Optional per-rule override; longest matched delay wins
+  - Candidate API/UI shows delay, deadline, and countdown
+  - Scheduled deletion reports waiting; manual actions bypass delays
+  - Daily 2 AM default while preserving existing schedules
+    - **Note: if you previously had this running on more than a 24 hour task I'd suggest dropping it down to 24 hours since it makes sense for this task to run once per day**
+
+### Changed
+
+- Add tests for file op jobs to mitigate sqlite lock/race issues
+- Organized tasks for metadata
+  - Split up MDBlist and OMDb into their own tasks
+    - If you was using these before MDBlist will run on your existing schedule and OMDb will be set to a new default
+  - Improved the verbiage around what each task is for
+- Updated dependencies
+  - Alembic to 1.18.5
+  - Authlib to 1.7.2
+  - Cryptography to 49.0.0
+  - FastAPI to 0.138.2
+  - Granian to 2.7.8
+  - Niquests to 3.20.0
+  - PyJWT to 2.12.1
+  - Slowapi to 0.1.10
+  - Sqlalchemy to 2.0.51
+  - Basedpyright to 1.39.9
+  - Pytest to 9.1.1
+  - Ruff to 0.15.20
+  - Uvicorn to 0.49.0
+  - Pyinstaller to 6.21.0
+  - Pystray to 00.19.5
+  - Platformdirs to 4.10.0
+  - Filelock to 3.29.4
+
+### Fixed
+
+- Propagate database errors instead of misclassifying them as provider failures
+- SQL error that could happen with duplicates when inserting playback history
+
 ## [0.1.6] - 2026-06-25
 
 ### Added

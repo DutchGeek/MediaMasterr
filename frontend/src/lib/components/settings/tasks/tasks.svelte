@@ -16,6 +16,7 @@
   import EditTaskScheduleDialog from "./edit-task-schedule-dialog.svelte";
   import { ScheduleType, TaskStatus } from "$lib/types/shared";
   import { getStatusColor, getTaskStatusText } from "$lib/utils/tasks";
+  import Notice from "$lib/components/notice.svelte";
 
   interface Props {
     svgIcon: Component | null;
@@ -45,11 +46,22 @@
     has_main_server: boolean;
   }
 
+  const externalRatingsTaskOrder = [
+    "imdb_ratings_refresh",
+    "anilist_ratings_refresh",
+    "mdblist_ratings_refresh",
+    "omdb_ratings_refresh",
+  ];
+  const externalRatingsTasks = new Set(externalRatingsTaskOrder);
+
   let tasks = $state<TaskDetails[]>([]);
   let hasMainServer = $state(true);
   let loading = $state(true);
   let refreshInterval: number | null = null;
   let actionInProgress = $state<Record<string, boolean>>({});
+  let firstExternalRatingsTaskId = $derived(
+    tasks.find((task) => externalRatingsTasks.has(task.id))?.id ?? null,
+  );
 
   // edit dialog state
   let editDialogOpen = $state(false);
@@ -59,7 +71,17 @@
   const fetchTasks = async () => {
     try {
       const response = await get_api<TasksResponse>("/api/tasks/tasks");
-      tasks = response.tasks;
+      const generalTasks = response.tasks.filter(
+        (task) => !externalRatingsTasks.has(task.id),
+      );
+      const ratingsTasks = response.tasks
+        .filter((task) => externalRatingsTasks.has(task.id))
+        .sort(
+          (left, right) =>
+            externalRatingsTaskOrder.indexOf(left.id) -
+            externalRatingsTaskOrder.indexOf(right.id),
+        );
+      tasks = [...generalTasks, ...ratingsTasks];
       hasMainServer = response.has_main_server;
     } catch (error) {
       console.error("Failed to fetch tasks:", error);
@@ -188,6 +210,38 @@
   {:else}
     <div class="space-y-4">
       {#each tasks as task (task.id)}
+        {#if task.id === firstExternalRatingsTaskId}
+          <div class="pt-4">
+            <h3 class="text-base font-semibold text-foreground">
+              External Ratings
+            </h3>
+            <Notice class="mt-2 text-sm">
+              <p>
+                TMDb is the <strong>main source</strong> for media metadata. The tasks
+                below supplements data with additional detailed information that allows
+                additional rules when utilized.
+              </p>
+              <br />
+              <p>
+                Note: <a
+                  href="https://mdblist.com/"
+                  target="_blank"
+                  referrerpolicy="no-referrer"
+                  class="hyper-link">MDBList</a
+                >
+                and
+                <a
+                  href="https://www.omdbapi.com/apikey.aspx"
+                  target="_blank"
+                  referrerpolicy="no-referrer"
+                  class="hyper-link">OMDb</a
+                >
+                requires an API key to to be configured. All other metadata providers
+                do not require anything to function.
+              </p>
+            </Notice>
+          </div>
+        {/if}
         {@const displayStatus = getDisplayStatus(task)}
         <div class="border rounded-lg p-4 hover:bg-accent transition-colors">
           <div class="flex flex-col sm:flex-row items-start justify-between">

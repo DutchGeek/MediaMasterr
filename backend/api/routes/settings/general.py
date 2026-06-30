@@ -201,6 +201,8 @@ async def update_general_settings(
         request.add_arr_import_exclusions_on_delete
     )
     settings.auto_delete_enabled = request.auto_delete_enabled
+    settings.auto_delete_movie_delay_days = request.auto_delete_movie_delay_days
+    settings.auto_delete_series_delay_days = request.auto_delete_series_delay_days
     settings.application_url = request.application_url
     settings.favorites_ignore_enabled = request.favorites_ignore_enabled
     settings.favorites_protect_all_users = request.favorites_protect_all_users

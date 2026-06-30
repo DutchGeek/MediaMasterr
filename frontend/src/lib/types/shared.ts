@@ -274,6 +274,8 @@ export interface GeneralSettings {
   default_arr_delete_behavior: "unmonitor" | "remove_if_empty";
   add_arr_import_exclusions_on_delete: boolean;
   auto_delete_enabled: boolean;
+  auto_delete_movie_delay_days: number;
+  auto_delete_series_delay_days: number;
   application_url: string | null;
   favorites_ignore_enabled: boolean;
   favorites_protect_all_users: boolean;
@@ -306,6 +308,9 @@ export interface MetadataProviderStatus {
   last_run_requests: number | null;
   last_run_request_limit: number | null;
   disabled_reason: string | null;
+  last_checked_at: string | null;
+  last_successful_refresh_at: string | null;
+  last_error: string | null;
   coverage: MetadataProviderCoverage;
 }
 
@@ -417,6 +422,7 @@ export interface RuleAction {
   arr_tag: string | null;
   arr_action: "delete" | "unmonitor";
   media_server_action: "delete" | null;
+  auto_delete_delay_days: number | null;
   radarr_service_config_id: number | null;
   sonarr_service_config_id: number | null;
 }
@@ -548,6 +554,7 @@ export interface MovieVersion {
   path: string | null;
   size: number;
   added_at: string | null;
+  arr_added_at: string | null;
   container: string | null;
 }
 
@@ -602,6 +609,7 @@ export interface MovieWithStatus {
   view_count: number;
   status: MediaStatusInfo;
   added_at: string | null;
+  arr_added_at: string | null;
 }
 
 export interface SeriesServiceRef {
@@ -665,6 +673,7 @@ export interface SeriesWithStatus {
   library_season_count: number;
   library_episode_count: number;
   added_at: string | null;
+  arr_added_at: string | null;
 }
 
 export interface SeasonWithStatus {
@@ -673,6 +682,8 @@ export interface SeasonWithStatus {
   episode_count: number | null;
   size: number | null; // bytes
   view_count: number;
+  added_at: string | null;
+  arr_added_at: string | null;
   last_viewed_at: string | null;
   air_date: string | null;
   status: MediaStatusInfo;
@@ -687,6 +698,7 @@ export interface EpisodeWithStatus {
   size: number | null;
   view_count: number;
   air_date: string | null;
+  arr_added_at: string | null;
   last_viewed_at: string | null;
   status: MediaStatusInfo;
 }
@@ -933,6 +945,7 @@ export interface ReclaimCandidateEntry {
   tmdb_status: string | null;
   media_library_names: string[] | null;
   media_added_at: string | null;
+  media_arr_added_at: string | null;
   media_last_viewed_at: string | null;
   media_view_count: number | null;
   version_service: string | null;
@@ -976,6 +989,10 @@ export interface ReclaimCandidateEntry {
   estimated_space_bytes: number | null;
   has_pending_request: boolean;
   created_at: string;
+  auto_delete_delay_days: number;
+  auto_delete_eligible_at: string;
+  auto_delete_is_eligible: boolean;
+  auto_delete_is_active: boolean;
   // populated for season level candidates
   season_id: number | null;
   season_number: number | null;

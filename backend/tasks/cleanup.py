@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
     PLAYBACK_RULE_FIELDS,
@@ -38,6 +39,7 @@ from backend.core.task_tracking import track_task_execution
 from backend.core.utils.datetime_utils import ensure_utc
 from backend.core.utils.filesystem import (
     find_season_folder,
+    mapped_path_variants,
     move_directory,
     move_media,
     move_season_files,
@@ -47,6 +49,7 @@ from backend.core.utils.filesystem import (
 )
 from backend.core.utils.request import summarize_error_message
 from backend.core.utils.resolution import guesstimate_resolution
+from backend.core.workflow_locks import candidate_workflow_lock
 from backend.database import async_db
 from backend.database.models import (
     DeleteRequest,
@@ -221,11 +224,38 @@ async def _is_auto_delete_enabled() -> bool:
     return bool(enabled)
 
 
-async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
+async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int, int]:
     async with async_db() as db:
         candidates = (await db.execute(select(ReclaimCandidate))).scalars().all()
         if not candidates:
-            return [], 0
+            return [], 0, 0
+
+        settings_row = (await db.execute(select(GeneralSettings))).scalars().first()
+        movie_delay_days = (
+            settings_row.auto_delete_movie_delay_days if settings_row else 14
+        )
+        series_delay_days = (
+            settings_row.auto_delete_series_delay_days if settings_row else 7
+        )
+        rule_ids = {
+            rule_id
+            for candidate in candidates
+            for rule_id in (candidate.matched_rule_ids or [])
+        }
+        rule_actions_by_id = {
+            rule.id: rule.action
+            for rule in (
+                (
+                    await db.execute(
+                        select(ReclaimRule).where(ReclaimRule.id.in_(rule_ids))
+                    )
+                )
+                .scalars()
+                .all()
+                if rule_ids
+                else []
+            )
+        }
 
         now = datetime.now(UTC)
         blocked_movie_ids: set[int] = set()
@@ -338,6 +368,8 @@ async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
             )
 
         eligible_ids: list[int] = []
+        blocked_count = 0
+        waiting_count = 0
         for candidate in candidates:
             blocked = False
             if candidate.media_type is MediaType.MOVIE:
@@ -364,10 +396,25 @@ async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
                     )
                 )
 
-            if not blocked:
-                eligible_ids.append(candidate.id)
+            if blocked:
+                blocked_count += 1
+                continue
 
-        return eligible_ids, len(candidates) - len(eligible_ids)
+            policy = resolve_auto_delete_policy(
+                media_type=candidate.media_type,
+                matched_rule_ids=candidate.matched_rule_ids,
+                created_at=candidate.created_at,
+                rule_actions_by_id=rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+            if policy.is_eligible:
+                eligible_ids.append(candidate.id)
+            else:
+                waiting_count += 1
+
+        return eligible_ids, blocked_count, waiting_count
 
 
 def _normalize_favorites_username(value: str) -> str:
@@ -825,27 +872,28 @@ async def scan_cleanup_candidates() -> None:
     LOG.info("Starting cleanup candidates scan")
 
     async with track_task_execution(Task.SCAN_CLEANUP_CANDIDATES):
-        try:
-            scan_started_at = datetime.now(UTC)
-            async with async_db() as session:
-                response = await _scan_with_db(session)
-                if response and response[0] > 0:
-                    try:
-                        context = await build_cleanup_notification_context(
-                            created_count=response[0],
-                            created_since=scan_started_at,
-                        )
-                        await notify_all_users(
-                            notification_type=NotificationType.NEW_CLEANUP_CANDIDATES,
-                            title="New Cleanup Candidates Found",
-                            message=f"There are {response[0]} new cleanup candidates",
-                            context=context,
-                        )
-                    except Exception as e:
-                        LOG.error(f"Error sending cleanup scan notification: {e}")
-        except Exception as e:
-            LOG.error(f"Error scanning cleanup candidates: {e}", exc_info=True)
-            raise
+        async with candidate_workflow_lock:
+            try:
+                scan_started_at = datetime.now(UTC)
+                async with async_db() as session:
+                    response = await _scan_with_db(session)
+                    if response and response[0] > 0:
+                        try:
+                            context = await build_cleanup_notification_context(
+                                created_count=response[0],
+                                created_since=scan_started_at,
+                            )
+                            await notify_all_users(
+                                notification_type=NotificationType.NEW_CLEANUP_CANDIDATES,
+                                title="New Cleanup Candidates Found",
+                                message=f"There are {response[0]} new cleanup candidates",
+                                context=context,
+                            )
+                        except Exception as e:
+                            LOG.error(f"Error sending cleanup scan notification: {e}")
+            except Exception as e:
+                LOG.error(f"Error scanning cleanup candidates: {e}", exc_info=True)
+                raise
 
 
 def _collect_arr_tag_labels(rules: list[ReclaimRule]) -> set[str]:
@@ -1621,6 +1669,9 @@ def _rule_uses_seerr_fields(rule: ReclaimRule) -> bool:
         rule.definition, field="seerr.requester_has_watched"
     ):
         return True
+    for field in ("seerr.last_requested_at", "seerr.days_since_last_requested"):
+        for _ in collect_rule_conditions(rule.definition, field=field):
+            return True
     return False
 
 
@@ -1802,6 +1853,12 @@ async def _activate_seerr_request_resolver_for_rules(
             continue
         requester_ids_by_key[key].update(user_ids)
 
+    latest_active_request_at_by_key = {
+        key: requested_at
+        for key, requested_at in snapshot.latest_active_request_at_by_key.items()
+        if key in requester_ids_by_key
+    }
+
     relevant_keys = set(requester_ids_by_key.keys())
     watch_rows = (
         await db.execute(
@@ -1859,6 +1916,7 @@ async def _activate_seerr_request_resolver_for_rules(
     SeerrRequestResolver(
         requester_ids_by_key,
         requester_has_watched_by_key=requester_has_watched_by_key,
+        latest_active_request_at_by_key=latest_active_request_at_by_key,
     ).activate()
     LOG.debug(
         f"Activated Seerr request resolver for {len(movie_tmdb_ids)} movie keys and "
@@ -2476,15 +2534,15 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         )
 
         preserved_protection_rule_ids: set[int] = set()
+        seerr_skipped_rules = 0
+        seerr_skip_reason: str | None = None
         seerr_ready, seerr_error = await _activate_seerr_request_resolver_for_rules(
             db,
             list(rules),
             require_fresh=True,
             allow_stale_on_failure=False,
         )
-        if seerr_ready:
-            await clear_seerr_rule_skip_notice(db)
-        else:
+        if not seerr_ready:
             seerr_dependent_rules = [r for r in rules if _rule_uses_seerr_fields(r)]
             if seerr_dependent_rules:
                 preserved_protection_rule_ids = {
@@ -2493,38 +2551,39 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                     if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
                 }
                 rules = [r for r in rules if not _rule_uses_seerr_fields(r)]
-                skipped = len(seerr_dependent_rules)
-                reason = seerr_error or "Failed to refresh Seerr request snapshot"
-                await set_seerr_rule_skip_notice(
-                    db,
-                    skipped_rules=skipped,
-                    reason=reason,
+                seerr_skipped_rules = len(seerr_dependent_rules)
+                seerr_skip_reason = (
+                    seerr_error or "Failed to refresh Seerr request snapshot"
                 )
                 LOG.warning(
-                    f"Skipping {skipped} Seerr dependent cleanup rule(s) this run: {reason}"
+                    f"Skipping {seerr_skipped_rules} Seerr dependent cleanup rule(s) "
+                    f"this run: {seerr_skip_reason}"
                 )
-                try:
-                    await notify_admins(
-                        notification_type=NotificationType.ADMIN_MESSAGE,
-                        title="Seerr rules skipped during cleanup scan",
-                        message=(
-                            f"Skipped {skipped} Seerr dependent rule(s) for this cleanup run "
-                            "because Seerr request data could not be refreshed."
-                        ),
-                        context={"reason": reason},
-                    )
-                except Exception as notify_error:
-                    LOG.error(
-                        f"Failed to notify admins about skipped Seerr rules: {notify_error}"
-                    )
-            else:
-                await clear_seerr_rule_skip_notice(db)
 
         sonarr_rule_result = await _activate_sonarr_episode_state_for_rules(
             db,
             list(rules),
             sonarr_series_snapshot=sonarr_series_snapshot,
         )
+
+        # Provider refreshes use their own sessions. End this session's read
+        # transaction before they write, and defer all notice/candidate writes
+        # until those refreshes are complete.
+        await db.commit()
+
+        playback_rule_result = await _activate_playback_history_for_rules(
+            db, list(rules), require_fresh=True
+        )
+
+        if seerr_skipped_rules:
+            await set_seerr_rule_skip_notice(
+                db,
+                skipped_rules=seerr_skipped_rules,
+                reason=seerr_skip_reason or "Failed to refresh Seerr request snapshot",
+            )
+        else:
+            await clear_seerr_rule_skip_notice(db)
+
         if sonarr_rule_result.unavailable_series_ids:
             await set_sonarr_rule_data_notice(
                 db,
@@ -2534,9 +2593,6 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
         else:
             await clear_sonarr_rule_data_notice(db)
 
-        playback_rule_result = await _activate_playback_history_for_rules(
-            db, list(rules), require_fresh=True
-        )
         if playback_rule_result.unavailable_count:
             playback_dependent_protection_rules = {
                 rule.id
@@ -2680,6 +2736,23 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
             candidates_removed += del_result.rowcount or 0
 
         await db.commit()
+
+        if seerr_skipped_rules:
+            try:
+                await notify_admins(
+                    notification_type=NotificationType.ADMIN_MESSAGE,
+                    title="Seerr rules skipped during cleanup scan",
+                    message=(
+                        f"Skipped {seerr_skipped_rules} Seerr dependent rule(s) for "
+                        "this cleanup run because Seerr request data could not be "
+                        "refreshed."
+                    ),
+                    context={"reason": seerr_skip_reason},
+                )
+            except Exception as notify_error:
+                LOG.error(
+                    f"Failed to notify admins about skipped Seerr rules: {notify_error}"
+                )
 
         try:
             await _sync_leaving_soon_collections(db)
@@ -3712,6 +3785,12 @@ def _evaluate_rule_for_episode(
 
 
 async def tag_cleanup_candidates() -> None:
+    """Serialize tag reconciliation with other candidate workflows."""
+    async with candidate_workflow_lock:
+        await _tag_cleanup_candidates_unlocked()
+
+
+async def _tag_cleanup_candidates_unlocked() -> None:
     """Sync rule scoped rec-* tags for cleanup candidates in Radarr/Sonarr."""
     # check if services are configured before doing any work
     if not service_manager.radarr and not service_manager.sonarr:
@@ -4074,6 +4153,12 @@ async def _sync_expected_arr_tags(
 
 
 async def delete_cleanup_candidates() -> dict[str, int]:
+    """Serialize automatic deletion with other candidate workflows."""
+    async with candidate_workflow_lock:
+        return await _delete_cleanup_candidates_unlocked()
+
+
+async def _delete_cleanup_candidates_unlocked() -> dict[str, int]:
     """Automatically delete eligible cleanup candidates when globally enabled."""
     LOG.info("Starting automatic cleanup candidate deletion")
 
@@ -4082,15 +4167,31 @@ async def delete_cleanup_candidates() -> dict[str, int]:
             LOG.info(
                 "Automatic cleanup deletion skipped because it is disabled in General Settings"
             )
-            return {"eligible": 0, "skipped": 0, "deleted": 0, "failed": 0}
+            return {
+                "eligible": 0,
+                "waiting": 0,
+                "skipped": 0,
+                "deleted": 0,
+                "failed": 0,
+            }
 
-        eligible_ids, skipped_count = await _select_auto_delete_eligible_candidate_ids()
+        (
+            eligible_ids,
+            skipped_count,
+            waiting_count,
+        ) = await _select_auto_delete_eligible_candidate_ids()
         if not eligible_ids:
             LOG.info(
                 "Automatic cleanup deletion found no eligible candidates "
-                f"(skipped={skipped_count})"
+                f"(waiting={waiting_count}, skipped={skipped_count})"
             )
-            return {"eligible": 0, "skipped": skipped_count, "deleted": 0, "failed": 0}
+            return {
+                "eligible": 0,
+                "waiting": waiting_count,
+                "skipped": skipped_count,
+                "deleted": 0,
+                "failed": 0,
+            }
 
         deleted_count, failed_count = await delete_specific_candidates(
             eligible_ids,
@@ -4098,6 +4199,7 @@ async def delete_cleanup_candidates() -> dict[str, int]:
         )
         summary = {
             "eligible": len(eligible_ids),
+            "waiting": waiting_count,
             "skipped": skipped_count,
             "deleted": deleted_count,
             "failed": failed_count,
@@ -4105,6 +4207,7 @@ async def delete_cleanup_candidates() -> dict[str, int]:
         LOG.info(
             "Automatic cleanup deletion completed: "
             f"eligible={summary['eligible']}, "
+            f"waiting={summary['waiting']}, "
             f"skipped={summary['skipped']}, "
             f"deleted={summary['deleted']}, "
             f"failed={summary['failed']}"
@@ -4202,76 +4305,6 @@ def _episode_media_server_id(
     return None
 
 
-def _mapping_applies_to_scope(
-    mapping: Mapping[str, Any],
-    *,
-    service_type: str | None,
-    service_config_id: int | None,
-) -> bool:
-    mapping_service_type = str(mapping.get("service_type") or "").lower()
-    mapping_config_id = mapping.get("service_config_id")
-    if mapping_config_id is not None:
-        return service_config_id is not None and mapping_config_id == service_config_id
-    if mapping_service_type:
-        return service_type is not None and mapping_service_type == service_type.lower()
-    return True
-
-
-def _mapped_path_variants(
-    path: str | None,
-    path_mappings: Sequence[Mapping[str, Any]] | None,
-    *,
-    service_type: str | None = None,
-    service_config_id: int | None = None,
-) -> set[str]:
-    """Return normalized raw and path-mapped variants without touching the filesystem."""
-    if not path:
-        return set()
-
-    normalized = normalize_fpath(path, strip_ending_slash=True)
-    if not normalized:
-        return set()
-
-    variants = {normalized}
-    sorted_mappings = sorted(
-        path_mappings or [],
-        key=lambda m: (
-            0
-            if service_config_id is not None
-            and m.get("service_config_id") == service_config_id
-            else 1
-            if service_type
-            and str(m.get("service_type") or "").lower() == service_type.lower()
-            and not m.get("service_config_id")
-            else 2
-            if not m.get("service_type") and not m.get("service_config_id")
-            else 3,
-            -len(str(m.get("source_prefix") or "")),
-        ),
-    )
-
-    for mapping in sorted_mappings:
-        if not _mapping_applies_to_scope(
-            mapping,
-            service_type=service_type,
-            service_config_id=service_config_id,
-        ):
-            continue
-        source = normalize_fpath(
-            str(mapping.get("source_prefix") or ""), strip_ending_slash=True
-        )
-        local = normalize_fpath(
-            str(mapping.get("local_prefix") or ""), strip_ending_slash=True
-        )
-        if not source or not local:
-            continue
-        if normalized == source or normalized.startswith(source + "/"):
-            suffix = normalized[len(source) :]
-            variants.add(normalize_fpath(local + suffix, strip_ending_slash=True))
-
-    return {variant for variant in variants if variant}
-
-
 def _path_is_inside_folder(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder + "/")
 
@@ -4285,12 +4318,12 @@ def _path_matches_arr_folder(
     arr_service_type: str | None = None,
     arr_service_config_id: int | None = None,
 ) -> bool:
-    path_variants = _mapped_path_variants(
+    path_variants = mapped_path_variants(
         path,
         path_mappings,
         service_type=path_service_type,
     )
-    arr_variants = _mapped_path_variants(
+    arr_variants = mapped_path_variants(
         arr_folder,
         path_mappings,
         service_type=arr_service_type,

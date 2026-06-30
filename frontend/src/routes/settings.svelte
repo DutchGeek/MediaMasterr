@@ -47,6 +47,7 @@
     id: SettingsTab;
     label: string;
     icon: any;
+    desc?: string;
     baseUrlPlaceholder?: string;
     adminOnly?: boolean;
     lockName?: boolean;
@@ -110,7 +111,7 @@
   const isMetadataProviderTab = (serviceId: string) =>
     metadataProviderTabs.includes(serviceId as SettingsTab);
 
-  // Default extra settings are sent when saved and keep initial form fields populated.
+  // default extra settings are sent when saved and keep initial form fields populated.
   const DEFAULT_EXTRA_SETTINGS: Partial<Record<string, Record<string, any>>> = {
     [SettingsTab.Radarr]: { timeout: 300 },
     [SettingsTab.Sonarr]: { timeout: 300 },
@@ -138,6 +139,7 @@
           id: SettingsTab.Radarr,
           label: "Radarr",
           icon: RadarrSVG,
+          desc: "Enable this to integrate with Radarr for movie management and automated cleanup",
           baseUrlPlaceholder: "e.g. http://localhost:7878",
           adminOnly: true,
         },
@@ -145,6 +147,7 @@
           id: SettingsTab.Sonarr,
           label: "Sonarr",
           icon: SonarrSVG,
+          desc: "Enable this to integrate with Sonarr for series management and automated cleanup",
           baseUrlPlaceholder: "e.g. http://localhost:8989",
           adminOnly: true,
         },
@@ -152,6 +155,7 @@
           id: SettingsTab.Seerr,
           label: "Seerr",
           icon: SeerrSVG,
+          desc: "Enable this to use Seerr request data for cleanup rules and to synchronize media deletions",
           baseUrlPlaceholder: "e.g. http://localhost:5055",
           adminOnly: true,
           lockName: true,
@@ -160,6 +164,7 @@
           id: SettingsTab.Tautulli,
           label: "Tautulli",
           icon: TautulliSVG,
+          desc: "Enable this to improve Plex playback history by supplementing it with data from Tautulli",
           baseUrlPlaceholder: "e.g. http://localhost:8181",
           adminOnly: true,
           lockName: true,
@@ -174,6 +179,9 @@
           id: SettingsTab.MDBList,
           label: "MDBList",
           icon: KeyRound,
+          desc:
+            "Enable this to allow Reclaimerr to collect metadata for Rotten Tomatoes, Metacritic, " +
+            "Trakt, and Letterboxd.",
           baseUrlPlaceholder: "https://api.mdblist.com",
           adminOnly: true,
           lockName: true,
@@ -183,6 +191,7 @@
           id: SettingsTab.OMDb,
           label: "OMDb",
           icon: KeyRound,
+          desc: "Enable this to fill/supplement Tomatometer and Metacritic metadata",
           baseUrlPlaceholder: "https://www.omdbapi.com",
           adminOnly: true,
           lockName: true,
@@ -931,6 +940,7 @@
               tabLabel={tabs.find((t) => t.id === activeTab)?.label || ""}
               tabIcon={getTabIcon(activeTab)}
               enabled={serviceState[activeTab].config.enabled}
+              desc={tabs.find((t) => t.id === activeTab)?.desc || ""}
               name={serviceState[activeTab].config.name}
               lockedName={tabs.find((t) => t.id === activeTab)?.lockName
                 ? tabs.find((t) => t.id === activeTab)?.label
@@ -952,9 +962,6 @@
                   provider={getMetadataProviderStatus(activeTab)}
                   loading={metadataProviderStatusLoading}
                   error={metadataProviderStatusError}
-                  lastCheckedAt={metadataProviderStatus?.last_checked_at}
-                  lastSuccessfulRefreshAt={metadataProviderStatus?.last_successful_refresh_at}
-                  lastError={metadataProviderStatus?.last_error}
                 />
               </div>
             {/if}

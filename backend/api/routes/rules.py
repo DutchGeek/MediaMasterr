@@ -105,6 +105,7 @@ def _action_or_default(action: dict[str, Any] | None) -> dict[str, Any]:
         "arr_tag": None,
         "arr_action": "delete",
         "media_server_action": "delete",
+        "auto_delete_delay_days": None,
         "radarr_service_config_id": None,
         "sonarr_service_config_id": None,
         **(action or {}),
@@ -135,6 +136,14 @@ def _normalize_rule_action(
     normalized["outcome"] = outcome
     normalized["candidate"] = outcome == RULE_OUTCOME_CANDIDATE
     normalized["tag_enabled"] = bool(normalized.get("tag_enabled", True))
+    raw_auto_delete_delay = normalized.get("auto_delete_delay_days")
+    normalized["auto_delete_delay_days"] = (
+        raw_auto_delete_delay
+        if isinstance(raw_auto_delete_delay, int)
+        and not isinstance(raw_auto_delete_delay, bool)
+        and 0 <= raw_auto_delete_delay <= 3650
+        else None
+    )
     normalized["arr_tag"] = _slugify_rule_tag(
         str(normalized.get("arr_tag") or rule_name)
     )
@@ -147,6 +156,7 @@ def _normalize_rule_action(
         normalized["arr_tag"] = None
         normalized["arr_action"] = "delete"
         normalized["media_server_action"] = None
+        normalized["auto_delete_delay_days"] = None
         normalized["radarr_service_config_id"] = None
         normalized["sonarr_service_config_id"] = None
     return normalized

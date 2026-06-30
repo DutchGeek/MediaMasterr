@@ -99,6 +99,9 @@
   );
   let tagEnabled = $state(initial.action?.tag_enabled ?? false);
   let arrTag = $state(initial.action?.arr_tag ?? "");
+  let autoDeleteDelayDays = $state(
+    initial.action?.auto_delete_delay_days?.toString() ?? "",
+  );
 
   let radarrArrAction = $state<"delete" | "unmonitor">(
     initial.targetScope === "movie_version"
@@ -600,6 +603,18 @@
   const save = async () => {
     saving = true;
     try {
+      const autoDeleteDelay = autoDeleteDelayDays.trim()
+        ? Number(autoDeleteDelayDays)
+        : null;
+      if (
+        autoDeleteDelay !== null &&
+        (!Number.isInteger(autoDeleteDelay) ||
+          autoDeleteDelay < 0 ||
+          autoDeleteDelay > 3650)
+      ) {
+        toast.error("Auto-delete delay must be a whole number from 0 to 3650");
+        return;
+      }
       await onSave({
         name: name.trim(),
         enabled,
@@ -613,6 +628,8 @@
           arr_tag: outcome === "candidate" ? normalizedTag : null,
           arr_action: arrAction,
           media_server_action: outcome === "candidate" ? "delete" : null,
+          auto_delete_delay_days:
+            outcome === "candidate" ? autoDeleteDelay : null,
           radarr_service_config_id:
             outcome === "candidate" && targetScope === "movie_version"
               ? radarrServiceConfigId
@@ -986,6 +1003,36 @@
   </div>
 
   {#if outcome === "candidate"}
+    <div class="rounded-lg border border-border bg-card p-5 space-y-3">
+      <div>
+        <h3 class="font-semibold text-foreground">Automatic Delete Delay</h3>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Optionally override the global {targetScope === "movie_version"
+            ? "movie"
+            : "TV"} review period for candidates created by this rule.
+        </p>
+      </div>
+      <div class="space-y-2">
+        <Label for="autoDeleteDelayDays" class="text-sm text-foreground">
+          Delay in days
+        </Label>
+        <Input
+          id="autoDeleteDelayDays"
+          type="number"
+          min="0"
+          max="3650"
+          step="1"
+          bind:value={autoDeleteDelayDays}
+          placeholder="Use global default"
+          class="max-w-xs"
+        />
+        <p class="text-xs text-muted-foreground">
+          Leave blank to inherit the global default. Use 0 for immediate
+          eligibility. If multiple rules match, the longest delay wins.
+        </p>
+      </div>
+    </div>
+
     <div class="rounded-lg border border-border bg-card p-5 space-y-4">
       <div>
         <h3 class="font-semibold text-foreground flex items-center gap-2">
@@ -1028,7 +1075,7 @@
           }}
         >
           <Select.Trigger
-            class="w-full bg-card text-card-foreground cursor-pointer"
+            class="w-full max-w-sm bg-card text-card-foreground cursor-pointer"
           >
             {#if selectedArrInstanceName}
               {selectedArrInstanceName}

@@ -7,6 +7,7 @@
     tabLabel: string;
     tabIcon: Component | null;
     enabled: boolean;
+    desc?: string;
     name?: string;
     lockedName?: string;
     baseUrl: string;
@@ -25,6 +26,7 @@
     tabLabel,
     tabIcon,
     enabled,
+    desc = "",
     name = "",
     lockedName,
     baseUrl,
@@ -47,23 +49,31 @@
 </script>
 
 <div class="space-y-6">
-  <div class="flex items-center justify-between mb-6">
-    <h2 class="flex items-center gap-3 text-xl font-semibold text-foreground">
-      {#if tabIcon}
-        {@const Icon = tabIcon}
-        <Icon class="size-5" aria-hidden="true" />
-      {/if}
-      <span class="align-middle">{tabLabel}</span>
-    </h2>
-    <label class="flex items-center gap-2 cursor-pointer">
-      <span class="text-sm text-foreground">Enable</span>
-      <Switch
-        class="cursor-pointer"
-        checked={disableToggle ? true : enabled}
-        disabled={disableToggle}
-        onCheckedChange={(checked) => dispatchChange("enabled", checked)}
-      />
-    </label>
+  <div class="flex flex-col mb-6">
+    <!-- label and toggle -->
+    <div class="flex justify-between">
+      <h2 class="flex items-center gap-3 text-xl font-semibold text-foreground">
+        {#if tabIcon}
+          {@const Icon = tabIcon}
+          <Icon class="size-5" aria-hidden="true" />
+        {/if}
+        <span class="align-middle">{tabLabel}</span>
+      </h2>
+      <label class="flex items-center gap-2 cursor-pointer">
+        <span class="text-sm text-foreground">Enable</span>
+        <Switch
+          class="cursor-pointer"
+          checked={disableToggle ? true : enabled}
+          disabled={disableToggle}
+          onCheckedChange={(checked) => dispatchChange("enabled", checked)}
+        />
+      </label>
+    </div>
+
+    <!-- optional description -->
+    {#if desc}
+      <p class="text-sm text-muted-foreground break-normal mt-1">{desc}</p>
+    {/if}
   </div>
 
   <div>

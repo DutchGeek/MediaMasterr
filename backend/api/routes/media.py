@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.candidate_views import normalize_reason_parts, reason_tokens
 from backend.core.auth import get_current_user, has_permission, require_page_access
+from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.core.utils.misc import normalize_genre_names
 from backend.core.utils.resolution import guesstimate_resolution
@@ -15,6 +16,7 @@ from backend.database import get_db
 from backend.database.models import (
     DeleteRequest,
     Episode,
+    GeneralSettings,
     Movie,
     MovieArrRef,
     MovieVersion,
@@ -22,11 +24,13 @@ from backend.database.models import (
     ProtectionRequest,
     ReclaimCandidate,
     ReclaimHistory,
+    ReclaimRule,
     Season,
     Series,
     SeriesArrRef,
     SeriesServiceRef,
     ServiceMediaLibrary,
+    TaskSchedule,
     User,
 )
 from backend.enums import (
@@ -35,6 +39,7 @@ from backend.enums import (
     PageAccess,
     Permission,
     ProtectionRequestStatus,
+    Task,
     UserRole,
 )
 from backend.jobs.candidate_file_ops import queue_candidate_file_op_job
@@ -404,7 +409,9 @@ async def get_movies(
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    sort_by: str = Query("title", pattern="^(title|added_at|size|vote_average|year)$"),
+    sort_by: str = Query(
+        "title", pattern="^(title|added_at|arr_added_at|size|vote_average|year)$"
+    ),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     search: str | None = Query(None, max_length=200),
     candidates_only: bool = Query(False),
@@ -554,6 +561,7 @@ async def get_movies(
                     path=v.path,
                     size=v.size,
                     added_at=to_utc_isoformat(v.added_at),
+                    arr_added_at=to_utc_isoformat(v.arr_added_at),
                     file_name=v.file_name,
                     container=v.container,
                     duration=v.duration,
@@ -652,6 +660,7 @@ async def get_movies(
             "view_count": movie.view_count,
             "status": status,
             "added_at": to_utc_isoformat(movie.added_at),
+            "arr_added_at": to_utc_isoformat(movie.arr_added_at),
         }
         items.append(MovieWithStatus(**movie_dict))
 
@@ -672,7 +681,9 @@ async def get_series(
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    sort_by: str = Query("title", pattern="^(title|added_at|size|vote_average|year)$"),
+    sort_by: str = Query(
+        "title", pattern="^(title|added_at|arr_added_at|size|vote_average|year)$"
+    ),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     search: str | None = Query(None, max_length=200),
     candidates_only: bool = Query(False),
@@ -926,6 +937,7 @@ async def get_series(
             "library_season_count": season_counts.get(series.id, 0),
             "library_episode_count": episode_counts.get(series.id, 0),
             "added_at": to_utc_isoformat(series.added_at),
+            "arr_added_at": to_utc_isoformat(series.arr_added_at),
         }
         items.append(SeriesWithStatus(**series_dict))
 
@@ -1067,6 +1079,7 @@ async def get_series_seasons(
                 size=season.size,
                 view_count=season.view_count or 0,
                 added_at=to_utc_isoformat(season.added_at),
+                arr_added_at=to_utc_isoformat(season.arr_added_at),
                 last_viewed_at=to_utc_isoformat(season.last_viewed_at),
                 air_date=to_utc_isoformat(season.air_date),
                 has_hdr=season.has_hdr,
@@ -1216,6 +1229,7 @@ async def get_series_episodes(
                 size=episode.size,
                 view_count=episode.view_count,
                 air_date=to_utc_isoformat(episode.air_date),
+                arr_added_at=to_utc_isoformat(episode.arr_added_at),
                 last_viewed_at=to_utc_isoformat(episode.last_viewed_at),
                 status=MediaStatusInfo(
                     is_candidate=cand is not None,
@@ -1305,6 +1319,7 @@ async def get_candidates(
             Movie.vote_count.label("movie_vote_count"),
             Movie.status.label("movie_status"),
             Movie.added_at.label("movie_added_at"),
+            Movie.arr_added_at.label("movie_arr_added_at"),
             Movie.last_viewed_at.label("movie_last_viewed_at"),
             Movie.view_count.label("movie_view_count"),
             # movie version
@@ -1312,6 +1327,7 @@ async def get_candidates(
             MovieVersion.library_id.label("version_library_id"),
             MovieVersion.library_name.label("version_library_name"),
             MovieVersion.added_at.label("version_added_at"),
+            MovieVersion.arr_added_at.label("version_arr_added_at"),
             MovieVersion.video_codec_family.label("version_video_codec_family"),
             MovieVersion.audio_codec_family.label("version_audio_codec_family"),
             MovieVersion.video_width.label("version_video_width"),
@@ -1381,15 +1397,18 @@ async def get_candidates(
             Series.vote_count.label("series_vote_count"),
             Series.status.label("series_status"),
             Series.added_at.label("series_added_at"),
+            Series.arr_added_at.label("series_arr_added_at"),
             Series.last_viewed_at.label("series_last_viewed_at"),
             Series.view_count.label("series_view_count"),
             Season.added_at.label("season_added_at"),
+            Season.arr_added_at.label("season_arr_added_at"),
             Season.view_count.label("season_view_count"),
             Season.last_viewed_at.label("season_last_viewed_at"),
             # episode
             Episode.size.label("episode_size"),
             Episode.episode_number.label("episode_number"),
             Episode.name.label("episode_name"),
+            Episode.arr_added_at.label("episode_arr_added_at"),
             Episode.view_count.label("episode_view_count"),
             Episode.last_viewed_at.label("episode_last_viewed_at"),
         )
@@ -1435,6 +1454,56 @@ async def get_candidates(
                 row.ReclaimCandidate.id,
             ),
         )
+
+    auto_delete_settings_row = (
+        await db.execute(
+            select(
+                GeneralSettings,
+                select(TaskSchedule.enabled)
+                .where(TaskSchedule.task == Task.DELETE_CLEANUP_CANDIDATES)
+                .scalar_subquery(),
+            )
+        )
+    ).first()
+    auto_delete_settings = (
+        auto_delete_settings_row[0] if auto_delete_settings_row is not None else None
+    )
+    auto_delete_task_enabled = bool(
+        auto_delete_settings_row[1] if auto_delete_settings_row is not None else False
+    )
+    auto_delete_is_active = bool(
+        auto_delete_settings is not None
+        and auto_delete_settings.auto_delete_enabled
+        and auto_delete_task_enabled
+    )
+    auto_delete_movie_delay_days = (
+        auto_delete_settings.auto_delete_movie_delay_days
+        if auto_delete_settings is not None
+        else 14
+    )
+    auto_delete_series_delay_days = (
+        auto_delete_settings.auto_delete_series_delay_days
+        if auto_delete_settings is not None
+        else 7
+    )
+    candidate_rule_ids = {
+        rule_id
+        for row in rows
+        for rule_id in (row.ReclaimCandidate.matched_rule_ids or [])
+    }
+    candidate_rule_actions_by_id: dict[int, dict[str, Any] | None] = {}
+    if candidate_rule_ids:
+        candidate_rule_actions_by_id = {
+            rule.id: rule.action
+            for rule in (
+                await db.execute(
+                    select(ReclaimRule).where(ReclaimRule.id.in_(candidate_rule_ids))
+                )
+            )
+            .scalars()
+            .all()
+        }
+    candidate_policy_now = datetime.now(UTC)
 
     # collect IDs to check for pending exception requests in one query each
     movie_ids = [
@@ -1542,6 +1611,15 @@ async def get_candidates(
     items_out: list[CandidateEntry] = []
     for row in rows:
         c = row.ReclaimCandidate
+        auto_delete_policy = resolve_auto_delete_policy(
+            media_type=cast(MediaType, c.media_type),
+            matched_rule_ids=cast(list[int], c.matched_rule_ids),
+            created_at=cast(datetime, c.created_at),
+            rule_actions_by_id=candidate_rule_actions_by_id,
+            movie_delay_days=auto_delete_movie_delay_days,
+            series_delay_days=auto_delete_series_delay_days,
+            now=candidate_policy_now,
+        )
         is_movie = c.media_type is MediaType.MOVIE
         media_id = c.movie_id if is_movie else c.series_id
         media_title = row.movie_title if is_movie else row.series_title
@@ -1651,6 +1729,11 @@ async def get_candidates(
                 if c.movie_version_id is not None
                 else row.movie_added_at
             )
+            media_arr_added_at = (
+                row.version_arr_added_at
+                if c.movie_version_id is not None
+                else row.movie_arr_added_at
+            )
             media_last_viewed_at = row.movie_last_viewed_at
             media_view_count = row.movie_view_count
         else:
@@ -1660,14 +1743,17 @@ async def get_candidates(
             ] or None
             if c.episode_id is not None:
                 media_added_at = None
+                media_arr_added_at = row.episode_arr_added_at
                 media_last_viewed_at = row.episode_last_viewed_at
                 media_view_count = row.episode_view_count
             elif c.season_id is not None:
                 media_added_at = row.season_added_at
+                media_arr_added_at = row.season_arr_added_at
                 media_last_viewed_at = row.season_last_viewed_at
                 media_view_count = row.season_view_count
             else:
                 media_added_at = row.series_added_at
+                media_arr_added_at = row.series_arr_added_at
                 media_last_viewed_at = row.series_last_viewed_at
                 media_view_count = row.series_view_count
         library_name_by_id = dict(global_library_name_by_id)
@@ -1767,6 +1853,7 @@ async def get_candidates(
                 tmdb_status=tmdb_status,
                 media_library_names=media_library_names,
                 media_added_at=to_utc_isoformat(media_added_at),
+                media_arr_added_at=to_utc_isoformat(media_arr_added_at),
                 media_last_viewed_at=to_utc_isoformat(media_last_viewed_at),
                 media_view_count=media_view_count,
                 movie_version_id=c.movie_version_id,
@@ -1793,6 +1880,12 @@ async def get_candidates(
                 estimated_space_bytes=estimated_space_bytes,
                 has_pending_request=has_pending,
                 created_at=to_utc_isoformat(c.created_at) or "",
+                auto_delete_delay_days=auto_delete_policy.delay_days,
+                auto_delete_eligible_at=(
+                    to_utc_isoformat(auto_delete_policy.eligible_at) or ""
+                ),
+                auto_delete_is_eligible=auto_delete_policy.is_eligible,
+                auto_delete_is_active=auto_delete_is_active,
                 season_id=c.season_id,
                 season_number=row.season_number,
                 series_title=row.series_title if c.season_id is not None else None,

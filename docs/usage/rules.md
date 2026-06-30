@@ -30,6 +30,13 @@ item. These entries are read-only on the Protected page because changing the
 rule is the source of truth. If a protection rule and a candidate rule match
 the same item, protection always takes precedence.
 
+Cleanup-candidate rules can optionally override the automatic deletion delay.
+Leave the override empty to inherit the global movie or TV delay. Values from
+`0` through `3650` days are supported, with `0` meaning immediately eligible.
+When multiple cleanup-candidate rules match the same item, Reclaimerr uses the
+longest applicable delay so a shorter rule cannot reduce another rule's review
+period.
+
 ## Target Scopes
 
 Fields are limited to scopes where Reclaimerr has meaningful data.
@@ -96,13 +103,19 @@ rule.
 
 ### General Media Fields
 
-| Field           | Scope         | Value                                                    |
-| --------------- | ------------- | -------------------------------------------------------- |
-| Year            | All scopes    | Movie year or the parent series year                     |
-| Size            | All scopes    | Bytes for the evaluated file, series, season, or episode |
-| Duration        | Movie version | Media-server duration in milliseconds                    |
-| Container       | Movie version | File container such as `mkv` or `mp4`                    |
-| Path / Filename | All scopes    | Local media-server path information                      |
+| Field                            | Scope         | Value                                                    |
+| -------------------------------- | ------------- | -------------------------------------------------------- |
+| Year                             | All scopes    | Movie year or the parent series year                     |
+| Size                             | All scopes    | Bytes for the evaluated file, series, season, or episode |
+| Duration                         | Movie version | Media-server duration in milliseconds                    |
+| Container                        | Movie version | File container such as `mkv` or `mp4`                    |
+| Path / Filename                  | All scopes    | Local media-server path information                      |
+| Days since added                 | All scopes    | Age of the existing media-server added date              |
+| Days since latest Arr file added | All scopes    | Age of Radarr/Sonarr's latest file-import date           |
+
+Arr file-added dates are populated during Radarr and Sonarr syncs. They remain
+empty when an item cannot be matched or an Arr service is not configured; the
+existing media-server added date is not replaced or backfilled.
 
 ### TMDB Metadata
 
@@ -149,11 +162,13 @@ Rotten Tomatoes, Metacritic, Trakt, and Letterboxd plus vote counts. OMDb is
 used as a fallback for Tomatometer and Metacritic when an IMDb ID is available.
 Direct Rotten Tomatoes and Metacritic scraping is intentionally not used.
 
-Ratings are refreshed by the `Refresh External Ratings` task. If a provider has
-not been configured, the media has no matching provider ID, or the provider does
-not return a rating, that field is missing. Numeric comparisons do not match
-missing ratings; use `does not exist` when you specifically want to find media
-without a cached rating.
+Ratings are refreshed by the provider-specific `Refresh MDBList Ratings` and
+`Refresh OMDb Ratings` tasks. They keep independent schedules and caches.
+MDBList values remain authoritative, while OMDb fills missing Tomatometer and
+Metacritic values. If a provider has not been configured, the media has no
+matching provider ID, or the provider does not return a rating, that field is
+missing. Numeric comparisons do not match missing ratings; use `does not exist`
+when you specifically want to find media without a cached rating.
 
 The Metadata Providers settings page shows per-refresh request usage and cached
 movie/series coverage for MDBList and OMDb. Provider rate-limit headers are
@@ -199,6 +214,20 @@ episode rules and are inherited from the parent series.
 
 These values may differ when the local library contains only part of a series,
 TMDB metadata has changed, or specials are present.
+
+### Seerr Request Dates
+
+Seerr request dates are available to movie-version, series, season, and episode
+rules:
+
+| Field                                  | Meaning                                      |
+| -------------------------------------- | -------------------------------------------- |
+| Seerr latest active request            | Newest pending or approved request timestamp |
+| Days since latest active Seerr request | Whole days since that request                |
+
+Declined requests are excluded. TV scopes currently inherit the latest active
+request for the whole series, matching the existing Seerr request fields. If
+Seerr is unavailable, these values are unknown and cannot create candidates.
 
 ### Sonarr Episode State
 

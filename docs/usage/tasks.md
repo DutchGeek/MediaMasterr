@@ -8,8 +8,16 @@ Tasks are scheduled jobs that keep Reclaimerr running on its own.
 - **Tag cleanup candidates** - marks candidates in the media server
 - **Delete cleanup candidates** - deletes eligible candidates when you opt in
 - **Sync media** - refreshes connected services and libraries
-- **Refresh External Ratings** - refreshes cached Rotten Tomatoes, Metacritic,
-  Trakt, and Letterboxd values from configured MDBList/OMDb providers
+- **Refresh IMDb Ratings** - refreshes the IMDb dataset cache
+- **Refresh AniList Ratings** - refreshes AniBridge mappings and AniList metadata
+- **Refresh MDBList Ratings** - refreshes Rotten Tomatoes, Metacritic, Trakt,
+  and Letterboxd values supplied by MDBList
+- **Refresh OMDb Ratings** - refreshes Tomatometer and Metacritic fallback values
+  without replacing values available from MDBList
+
+The Tasks page groups these four jobs under **External Ratings**. MDBList and
+OMDb have independent schedules and refresh state; their default schedules are
+6 AM and 7 AM respectively.
 
 ## Automatic Cleanup Deletion
 
@@ -21,11 +29,29 @@ To enable it:
 2. Enable the `Delete Cleanup Candidates` task in Tasks.
 3. Review the schedule before letting it run unattended.
 
+New installations default to a daily 2 AM delete task, with the task disabled.
+Upgrades keep the schedule that is already configured.
+
+Candidates must also finish their review period. The global defaults are 14
+days for movies and 7 days for TV. A candidate rule can override the delay;
+when several candidate rules match, the longest applicable delay wins. A
+delay of `0` makes the candidate immediately eligible. The exact eligibility
+time is calculated from when the candidate was first created, so changing the
+current delay recalculates existing candidates without resetting their clock.
+The task deletes an eligible candidate on its next run.
+
 Reclaimerr skips anything with:
 
 - active protection
 - pending protection requests
 - pending delete requests
+
+The task summary reports candidates still in their review period as `waiting`
+and protected or otherwise blocked candidates as `skipped`.
+
+Manual delete and move actions bypass the automatic review period. If a cleanup
+scan removes a candidate because it no longer matches, a later match creates a
+new candidate with a new review-period clock.
 
 The deletion flow is:
 

@@ -17,6 +17,7 @@
   import {
     UNKNOWN_VALUE,
     candidateMediaMetaFields,
+    earliestAutoDeleteEntry,
     groupEpisodesBySeason,
     newestCandidateCreatedAt,
     seriesGroupCountLabel,
@@ -128,12 +129,21 @@
         row.seriesEntry ? [row.seriesEntry, ...row.seasons] : row.seasons,
       )}
       {@const groupMetaSource = row.seriesEntry ?? row.seasons[0]}
+      {@const groupEntries = row.seriesEntry
+        ? [row.seriesEntry, ...row.seasons]
+        : row.seasons}
+      {@const groupAutoDelete =
+        earliestAutoDeleteEntry(groupEntries) ?? groupMetaSource}
       {@const groupMetaFields = candidateMediaMetaFields(
         {
           ...groupMetaSource,
           created_at: groupDateAdded ?? groupMetaSource.created_at,
+          auto_delete_delay_days: groupAutoDelete.auto_delete_delay_days,
+          auto_delete_eligible_at: groupAutoDelete.auto_delete_eligible_at,
+          auto_delete_is_eligible: groupAutoDelete.auto_delete_is_eligible,
         },
         formatDate,
+        true,
       )}
       <div class="p-4 space-y-3">
         <div class="flex gap-3">
@@ -181,10 +191,15 @@
                 </div>
                 <div class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
                   {#each groupMetaFields as field}
-                    <span class="text-xs text-muted-foreground wrap-break-word">
-                      {field.label}:
-                      <span class="font-medium text-foreground/80"
-                        >{field.value}</span
+                    <span
+                      class={`text-xs wrap-break-word ${field.containerClass ?? ""}`}
+                    >
+                      <span class={field.labelClass ?? "text-muted-foreground"}
+                        >{field.label}:</span
+                      >
+                      <span
+                        class={field.valueClass ??
+                          "font-medium text-foreground/80"}>{field.value}</span
                       >
                     </span>
                   {/each}
@@ -279,11 +294,17 @@
                     {/if}
 
                     {#each metaFields as field}
-                      <div class="space-y-1 text-xs">
-                        <div class="tracking-wide text-muted-foreground">
+                      <div
+                        class={`space-y-1 text-xs ${field.containerClass ?? ""}`}
+                      >
+                        <div
+                          class={`tracking-wide ${field.labelClass ?? "text-muted-foreground"}`}
+                        >
                           {field.label.toUpperCase()}
                         </div>
-                        <div class="text-foreground break-all">
+                        <div
+                          class={`break-all ${field.valueClass ?? "text-foreground"}`}
+                        >
                           {field.value}
                         </div>
                       </div>
@@ -422,11 +443,17 @@
                           {/if}
 
                           {#each metaFields as field}
-                            <div class="space-y-1 text-xs">
-                              <div class="tracking-wide text-muted-foreground">
+                            <div
+                              class={`space-y-1 text-xs ${field.containerClass ?? ""}`}
+                            >
+                              <div
+                                class={`tracking-wide ${field.labelClass ?? "text-muted-foreground"}`}
+                              >
                                 {field.label.toUpperCase()}
                               </div>
-                              <div class="text-foreground break-all">
+                              <div
+                                class={`break-all ${field.valueClass ?? "text-foreground"}`}
+                              >
                                 {field.value}
                               </div>
                             </div>

@@ -7,9 +7,12 @@
     extractPathNoFile,
     fileNameFromPath,
   } from "$lib/utils/candidate-rules";
-  import { candidateMediaMetaFields } from "$lib/components/candidates/view-utils";
+  import {
+    candidateMediaMetaFields,
+    type CandidateMetaField,
+  } from "$lib/components/candidates/view-utils";
 
-  type DetailField = { label: string; value: string };
+  type DetailField = CandidateMetaField;
   type DetailSection = { title: string; fields: DetailField[] };
 
   interface Props {
@@ -135,9 +138,15 @@
       </h4>
       <div class="space-y-1.5">
         {#each section.fields as field}
-          <div class="min-w-0">
-            <div class="text-xs text-muted-foreground">{field.label}</div>
-            <div class="text-sm leading-6 text-foreground break-all">
+          <div class={`min-w-0 ${field.containerClass ?? ""}`}>
+            <div
+              class={`text-xs ${field.labelClass ?? "text-muted-foreground"}`}
+            >
+              {field.label}
+            </div>
+            <div
+              class={`text-sm leading-6 break-all ${field.valueClass ?? "text-foreground"}`}
+            >
               {field.value}
             </div>
           </div>

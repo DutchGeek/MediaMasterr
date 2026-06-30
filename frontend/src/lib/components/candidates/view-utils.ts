@@ -10,6 +10,12 @@ const candidateCreatedAtEpoch = (createdAt: string): number => {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 };
 
+const candidateDateEpoch = (value: string): number => {
+  const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(value);
+  const parsed = Date.parse(hasTimezone ? value : `${value}Z`);
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+};
+
 export const newestCandidateCreatedAt = (
   entries: ReclaimCandidateEntry[],
 ): string | null => {
@@ -27,6 +33,45 @@ export const newestCandidateCreatedAt = (
   }
 
   return newest;
+};
+
+export const earliestAutoDeleteEntry = (
+  entries: ReclaimCandidateEntry[],
+): ReclaimCandidateEntry | null => {
+  if (entries.length === 0) return null;
+
+  return entries.reduce((earliest, entry) =>
+    candidateDateEpoch(entry.auto_delete_eligible_at) <
+    candidateDateEpoch(earliest.auto_delete_eligible_at)
+      ? entry
+      : earliest,
+  );
+};
+
+const autoDeleteDelayLabel = (delayDays: number): string =>
+  delayDays === 0 ? "no delay" : `${delayDays}-day delay`;
+
+export const candidateAutoDeleteLabel = (
+  entry: ReclaimCandidateEntry,
+  formatDate: (value: string) => string,
+): string => {
+  const eligibleAt = candidateDateEpoch(entry.auto_delete_eligible_at);
+  const remainingMs = eligibleAt - Date.now();
+  const isEligible = entry.auto_delete_is_eligible || remainingMs <= 0;
+  const policy = autoDeleteDelayLabel(entry.auto_delete_delay_days);
+  const date = formatDate(entry.auto_delete_eligible_at);
+
+  if (!entry.auto_delete_is_active) {
+    return `${date} (${policy}; disabled)`;
+  }
+  if (isEligible) return `Eligible now (${policy}; ${date})`;
+
+  const remainingHours = Math.max(1, Math.ceil(remainingMs / 3_600_000));
+  const remaining =
+    remainingHours >= 48
+      ? `${Math.ceil(remainingHours / 24)} days`
+      : `${remainingHours} hour${remainingHours === 1 ? "" : "s"}`;
+  return `In ${remaining} (${policy}; ${date})`;
 };
 
 export const movieSummaryChips = (entry: ReclaimCandidateEntry): string[] => {
@@ -49,6 +94,9 @@ export const movieSummaryChips = (entry: ReclaimCandidateEntry): string[] => {
 export type CandidateMetaField = {
   label: string;
   value: string;
+  containerClass?: string;
+  labelClass?: string;
+  valueClass?: string;
 };
 
 export const candidateLibraryNames = (
@@ -74,6 +122,7 @@ export const candidateMediaMetaFields = (
   entry: ReclaimCandidateEntry,
   formatDate: (value: string) => string,
   includeFlagged = true,
+  // autoDeleteLabel = "Auto-delete",
 ): CandidateMetaField[] => {
   const fields: CandidateMetaField[] = [];
   const libraries = candidateLibraryNames(entry);
@@ -82,7 +131,16 @@ export const candidateMediaMetaFields = (
   }
   fields.push({ label: "Watch Count", value: candidateWatchCountLabel(entry) });
   if (entry.media_added_at) {
-    fields.push({ label: "Added", value: formatDate(entry.media_added_at) });
+    fields.push({
+      label: "Media server added",
+      value: formatDate(entry.media_added_at),
+    });
+  }
+  if (entry.media_arr_added_at) {
+    fields.push({
+      label: "Latest Arr file added",
+      value: formatDate(entry.media_arr_added_at),
+    });
   }
   if (entry.media_last_viewed_at) {
     fields.push({
@@ -93,6 +151,19 @@ export const candidateMediaMetaFields = (
   if (includeFlagged) {
     fields.push({ label: "Flagged", value: formatDate(entry.created_at) });
   }
+  fields.push({
+    // label: entry.auto_delete_is_active
+    //   ? autoDeleteLabel
+    //   : "Auto-delete eligibility",
+    label: "Auto delete",
+    value: candidateAutoDeleteLabel(entry, formatDate),
+    // containerClass: "rounded-sm bg-destructive/10 px-1.5",
+    // labelClass: "font-medium text-destructive/75",
+    valueClass: entry.auto_delete_is_active
+      ? "font-semibold text-destructive/70"
+      : "",
+    // : "font-medium text-muted-foreground",
+  });
   return fields;
 };
 

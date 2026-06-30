@@ -307,6 +307,8 @@ class GeneralSettings(Base):
         Boolean, default=True
     )
     auto_delete_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_delete_movie_delay_days: Mapped[int] = mapped_column(Integer, default=14)
+    auto_delete_series_delay_days: Mapped[int] = mapped_column(Integer, default=7)
     application_url: Mapped[str | None] = mapped_column(String(500), default=None)
 
     # favorites
@@ -591,6 +593,18 @@ class Movie(Base):
     external_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None
     )
+    mdblist_ratings_cache: Mapped[dict[str, int | None] | None] = mapped_column(
+        JSON, default=None
+    )
+    mdblist_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    omdb_ratings_cache: Mapped[dict[str, int | None] | None] = mapped_column(
+        JSON, default=None
+    )
+    omdb_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
 
     # metadata info
     tmdb_title: Mapped[str | None] = mapped_column(String(512), default=None)
@@ -625,6 +639,9 @@ class Movie(Base):
 
     # lifecycle tracking
     added_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None, init=False
+    )
+    arr_added_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None, init=False
     )
     # we're only soft deleting data to maintain TMDB metadata on re-add
@@ -683,6 +700,7 @@ class MovieVersion(Base):
     path: Mapped[str | None] = mapped_column(String(1024), default=None)
     size: Mapped[int] = mapped_column(Integer, default=0)
     added_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    arr_added_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     file_name: Mapped[str | None] = mapped_column(String(255), default=None)
     container: Mapped[str | None] = mapped_column(String(20), default=None)
     duration: Mapped[float | None] = mapped_column(Float, default=None)
@@ -1044,6 +1062,18 @@ class Series(Base):
     external_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None
     )
+    mdblist_ratings_cache: Mapped[dict[str, int | None] | None] = mapped_column(
+        JSON, default=None
+    )
+    mdblist_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    omdb_ratings_cache: Mapped[dict[str, int | None] | None] = mapped_column(
+        JSON, default=None
+    )
+    omdb_ratings_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
     tvdb_id: Mapped[str | None] = mapped_column(
         String(20), unique=True, index=True, default=None
     )
@@ -1089,6 +1119,9 @@ class Series(Base):
 
     # lifecycle tracking
     added_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None, init=False
+    )
+    arr_added_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None, init=False
     )
     # we're only soft deleting data to maintain TMDB metadata on re-add
@@ -1170,6 +1203,9 @@ class Season(Base):
     added_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None, init=False
     )
+    arr_added_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None, init=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), init=False
     )
@@ -1214,6 +1250,9 @@ class Episode(Base):
     # watch tracking
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    arr_added_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None, init=False
+    )
 
     # service specific IDs
     plex_rating_key: Mapped[str | None] = mapped_column(String(100), default=None)

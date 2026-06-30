@@ -86,9 +86,15 @@
           </div>
           <div class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
             {#each metaFields as field}
-              <span class="text-xs text-muted-foreground wrap-break-word">
-                {field.label}:
-                <span class="font-medium text-foreground/80">{field.value}</span
+              <span
+                class={`text-xs wrap-break-word ${field.containerClass ?? ""}`}
+              >
+                <span class={field.labelClass ?? "text-muted-foreground"}
+                  >{field.label}:</span
+                >
+                <span
+                  class={field.valueClass ?? "font-medium text-foreground/80"}
+                  >{field.value}</span
                 >
               </span>
             {/each}
