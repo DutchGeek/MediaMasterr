@@ -598,6 +598,10 @@ class CandidateEntry(CandidateEntryBase):
     id: int
     has_pending_request: bool
     created_at: str
+    auto_delete_delay_days: int
+    auto_delete_eligible_at: str
+    auto_delete_is_eligible: bool
+    auto_delete_is_active: bool
 
 
 class RulePreviewEntry(CandidateEntryBase):

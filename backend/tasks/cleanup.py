@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.logger import LOG
 from backend.core.rule_engine import (
     PLAYBACK_RULE_FIELDS,
@@ -223,11 +224,38 @@ async def _is_auto_delete_enabled() -> bool:
     return bool(enabled)
 
 
-async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
+async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int, int]:
     async with async_db() as db:
         candidates = (await db.execute(select(ReclaimCandidate))).scalars().all()
         if not candidates:
-            return [], 0
+            return [], 0, 0
+
+        settings_row = (await db.execute(select(GeneralSettings))).scalars().first()
+        movie_delay_days = (
+            settings_row.auto_delete_movie_delay_days if settings_row else 14
+        )
+        series_delay_days = (
+            settings_row.auto_delete_series_delay_days if settings_row else 7
+        )
+        rule_ids = {
+            rule_id
+            for candidate in candidates
+            for rule_id in (candidate.matched_rule_ids or [])
+        }
+        rule_actions_by_id = {
+            cast(int, rule.id): cast(dict[str, Any] | None, rule.action)
+            for rule in (
+                (
+                    await db.execute(
+                        select(ReclaimRule).where(ReclaimRule.id.in_(rule_ids))
+                    )
+                )
+                .scalars()
+                .all()
+                if rule_ids
+                else []
+            )
+        }
 
         now = datetime.now(UTC)
         blocked_movie_ids: set[int] = set()
@@ -340,6 +368,8 @@ async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
             )
 
         eligible_ids: list[int] = []
+        blocked_count = 0
+        waiting_count = 0
         for candidate in candidates:
             blocked = False
             if candidate.media_type is MediaType.MOVIE:
@@ -366,10 +396,25 @@ async def _select_auto_delete_eligible_candidate_ids() -> tuple[list[int], int]:
                     )
                 )
 
-            if not blocked:
-                eligible_ids.append(candidate.id)
+            if blocked:
+                blocked_count += 1
+                continue
 
-        return eligible_ids, len(candidates) - len(eligible_ids)
+            policy = resolve_auto_delete_policy(
+                media_type=cast(MediaType, candidate.media_type),
+                matched_rule_ids=cast(list[int], candidate.matched_rule_ids),
+                created_at=cast(datetime, candidate.created_at),
+                rule_actions_by_id=rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+            if policy.is_eligible:
+                eligible_ids.append(candidate.id)
+            else:
+                waiting_count += 1
+
+        return eligible_ids, blocked_count, waiting_count
 
 
 def _normalize_favorites_username(value: str) -> str:
@@ -4122,15 +4167,31 @@ async def _delete_cleanup_candidates_unlocked() -> dict[str, int]:
             LOG.info(
                 "Automatic cleanup deletion skipped because it is disabled in General Settings"
             )
-            return {"eligible": 0, "skipped": 0, "deleted": 0, "failed": 0}
+            return {
+                "eligible": 0,
+                "waiting": 0,
+                "skipped": 0,
+                "deleted": 0,
+                "failed": 0,
+            }
 
-        eligible_ids, skipped_count = await _select_auto_delete_eligible_candidate_ids()
+        (
+            eligible_ids,
+            skipped_count,
+            waiting_count,
+        ) = await _select_auto_delete_eligible_candidate_ids()
         if not eligible_ids:
             LOG.info(
                 "Automatic cleanup deletion found no eligible candidates "
-                f"(skipped={skipped_count})"
+                f"(waiting={waiting_count}, skipped={skipped_count})"
             )
-            return {"eligible": 0, "skipped": skipped_count, "deleted": 0, "failed": 0}
+            return {
+                "eligible": 0,
+                "waiting": waiting_count,
+                "skipped": skipped_count,
+                "deleted": 0,
+                "failed": 0,
+            }
 
         deleted_count, failed_count = await delete_specific_candidates(
             eligible_ids,
@@ -4138,6 +4199,7 @@ async def _delete_cleanup_candidates_unlocked() -> dict[str, int]:
         )
         summary = {
             "eligible": len(eligible_ids),
+            "waiting": waiting_count,
             "skipped": skipped_count,
             "deleted": deleted_count,
             "failed": failed_count,
@@ -4145,6 +4207,7 @@ async def _delete_cleanup_candidates_unlocked() -> dict[str, int]:
         LOG.info(
             "Automatic cleanup deletion completed: "
             f"eligible={summary['eligible']}, "
+            f"waiting={summary['waiting']}, "
             f"skipped={summary['skipped']}, "
             f"deleted={summary['deleted']}, "
             f"failed={summary['failed']}"

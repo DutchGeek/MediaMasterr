@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Added focused regression tests and documentation
   - seerr.last_requested_at
   - seerr.days_since_last_requested
+- Auto delete delayed periods
+  - Global defaults: movies 14 days, TV 7 days
+  - Optional per-rule override; longest matched delay wins
+  - Candidate API/UI shows delay, deadline, and countdown
+  - Scheduled deletion reports waiting; manual actions bypass delays
+  - Daily 2 AM default while preserving existing schedules
+    - **Note: if you previously had this running on more than a 24 hour task I'd suggest dropping it down to 24 hours since it makes sense for this task to run once per day**
 
 ### Changed
 

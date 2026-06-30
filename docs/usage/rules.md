@@ -30,6 +30,13 @@ item. These entries are read-only on the Protected page because changing the
 rule is the source of truth. If a protection rule and a candidate rule match
 the same item, protection always takes precedence.
 
+Cleanup-candidate rules can optionally override the automatic deletion delay.
+Leave the override empty to inherit the global movie or TV delay. Values from
+`0` through `3650` days are supported, with `0` meaning immediately eligible.
+When multiple cleanup-candidate rules match the same item, Reclaimerr uses the
+longest applicable delay so a shorter rule cannot reduce another rule's review
+period.
+
 ## Target Scopes
 
 Fields are limited to scopes where Reclaimerr has meaningful data.

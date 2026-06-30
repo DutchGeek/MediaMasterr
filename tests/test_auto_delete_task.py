@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,6 +15,7 @@ from backend.api.routes.settings.general import (
     update_general_settings,
 )
 from backend.api.routes.tasks import run_task_now
+from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.task_runtime import (
     DISABLE_ABLE_TASKS,
     MAIN_SERVER_REQUIRED_TASKS,
@@ -31,7 +33,11 @@ from backend.database.models import (
 )
 from backend.enums import MediaType, ScheduleType, Task, UserRole
 from backend.models.settings import GeneralSettingsResponse
-from backend.scheduler import DEFAULT_SCHEDULES, update_task_schedule
+from backend.scheduler import (
+    DEFAULT_SCHEDULES,
+    ensure_default_schedules,
+    update_task_schedule,
+)
 from backend.tasks.cleanup import delete_cleanup_candidates
 
 
@@ -65,6 +71,8 @@ def test_auto_delete_defaults_and_metadata():
         async with session_maker() as db_session:
             settings = await get_general_settings(_admin_user(), db_session)
             assert settings.auto_delete_enabled is False
+            assert settings.auto_delete_movie_delay_days == 14
+            assert settings.auto_delete_series_delay_days == 7
 
         default_schedule = next(
             item
@@ -74,7 +82,8 @@ def test_auto_delete_defaults_and_metadata():
         assert Task.DELETE_CLEANUP_CANDIDATES in MAIN_SERVER_REQUIRED_TASKS
         assert Task.DELETE_CLEANUP_CANDIDATES in DISABLE_ABLE_TASKS
         assert default_schedule["schedule_type"] is ScheduleType.CRON
-        assert default_schedule["schedule_value"] == "0 2 * * 0"
+        assert default_schedule["schedule_value"] == "0 2 * * *"
+        assert default_schedule["default_schedule_value"] == "0 2 * * *"
         assert default_schedule["enabled"] is False
 
         playback_schedule = next(
@@ -110,6 +119,55 @@ def test_auto_delete_defaults_and_metadata():
         await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_auto_delete_policy_uses_longest_applicable_delay():
+    created_at = datetime(2026, 6, 1, 12, tzinfo=UTC)
+
+    policy = resolve_auto_delete_policy(
+        media_type=MediaType.MOVIE,
+        matched_rule_ids=[1, 2],
+        created_at=created_at,
+        rule_actions_by_id={
+            1: {"auto_delete_delay_days": 3},
+            2: {"auto_delete_delay_days": 30},
+        },
+        movie_delay_days=14,
+        series_delay_days=7,
+        now=created_at + timedelta(days=20),
+    )
+
+    assert policy.delay_days == 30
+    assert policy.eligible_at == created_at + timedelta(days=30)
+    assert policy.is_eligible is False
+
+
+def test_auto_delete_policy_inherits_global_delay_and_supports_zero():
+    created_at = datetime(2026, 6, 1, 12)
+
+    inherited = resolve_auto_delete_policy(
+        media_type=MediaType.SERIES,
+        matched_rule_ids=[1],
+        created_at=created_at,
+        rule_actions_by_id={1: None},
+        movie_delay_days=14,
+        series_delay_days=7,
+        now=datetime(2026, 6, 8, 12, tzinfo=UTC),
+    )
+    immediate = resolve_auto_delete_policy(
+        media_type=MediaType.SERIES,
+        matched_rule_ids=[2],
+        created_at=created_at,
+        rule_actions_by_id={2: {"auto_delete_delay_days": 0}},
+        movie_delay_days=14,
+        series_delay_days=7,
+        now=datetime(2026, 6, 1, 12, tzinfo=UTC),
+    )
+
+    assert inherited.delay_days == 7
+    assert inherited.is_eligible is True
+    assert immediate.delay_days == 0
+    assert immediate.is_eligible is True
 
 
 def test_execute_task_refreshes_playback_history(monkeypatch):
@@ -287,7 +345,13 @@ def test_delete_cleanup_candidates_skips_overlapping_entries(monkeypatch):
         async with session_maker() as db_session:
             admin = _admin_user()
             db_session.add(admin)
-            db_session.add(GeneralSettings(auto_delete_enabled=True))
+            db_session.add(
+                GeneralSettings(
+                    auto_delete_enabled=True,
+                    auto_delete_movie_delay_days=0,
+                    auto_delete_series_delay_days=0,
+                )
+            )
 
             movie_candidate = ReclaimCandidate(
                 media_type=MediaType.MOVIE,
@@ -415,10 +479,117 @@ def test_delete_cleanup_candidates_skips_overlapping_entries(monkeypatch):
             assert captured["candidate_ids"] == [safe_episode_candidate.id]
             assert summary == {
                 "eligible": 1,
+                "waiting": 0,
                 "skipped": 5,
                 "deleted": 1,
                 "failed": 0,
             }
+
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_default_schedule_update_preserves_existing_auto_delete_schedule():
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+
+        async with session_maker() as db_session:
+            existing = TaskSchedule(
+                task=Task.DELETE_CLEANUP_CANDIDATES,
+                description="old description",
+                schedule_type=ScheduleType.CRON,
+                schedule_value="0 4 * * 0",
+                default_schedule_type=ScheduleType.CRON,
+                default_schedule_value="0 2 * * 0",
+                enabled=True,
+            )
+            db_session.add(existing)
+            await db_session.commit()
+
+            await ensure_default_schedules(db_session)
+            await db_session.refresh(existing)
+
+            assert existing.schedule_type is ScheduleType.CRON
+            assert existing.schedule_value == "0 4 * * 0"
+            assert existing.default_schedule_value == "0 2 * * *"
+            assert existing.enabled is True
+
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_delete_cleanup_candidates_waits_for_review_period(monkeypatch):
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+
+        now = datetime.now(UTC)
+        async with session_maker() as db_session:
+            db_session.add(
+                GeneralSettings(
+                    auto_delete_enabled=True,
+                    auto_delete_movie_delay_days=14,
+                    auto_delete_series_delay_days=7,
+                )
+            )
+            waiting_candidate = ReclaimCandidate(
+                media_type=MediaType.MOVIE,
+                matched_rule_ids=[],
+                matched_criteria={},
+                reason="waiting movie",
+            )
+            eligible_candidate = ReclaimCandidate(
+                media_type=MediaType.SERIES,
+                matched_rule_ids=[],
+                matched_criteria={},
+                reason="eligible series",
+            )
+            db_session.add_all([waiting_candidate, eligible_candidate])
+            await db_session.flush()
+            waiting_candidate.created_at = now - timedelta(days=1)
+            eligible_candidate.created_at = now - timedelta(days=8)
+            await db_session.commit()
+
+        async_db_override = _async_db_override(session_maker)
+        monkeypatch.setattr("backend.tasks.cleanup.async_db", async_db_override)
+
+        @asynccontextmanager
+        async def fake_track_task_execution(_task: Task):
+            yield None
+
+        monkeypatch.setattr(
+            "backend.tasks.cleanup.track_task_execution",
+            fake_track_task_execution,
+        )
+        delete_mock = AsyncMock(return_value=(1, 0))
+        monkeypatch.setattr(
+            "backend.tasks.cleanup.delete_specific_candidates",
+            delete_mock,
+        )
+
+        summary = await delete_cleanup_candidates()
+
+        delete_mock.assert_awaited_once_with(
+            [eligible_candidate.id], approved_by="system:auto-delete"
+        )
+        assert summary == {
+            "eligible": 1,
+            "waiting": 1,
+            "skipped": 0,
+            "deleted": 1,
+            "failed": 0,
+        }
 
         await engine.dispose()
 

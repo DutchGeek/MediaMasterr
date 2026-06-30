@@ -2,6 +2,12 @@
 
 Reclaimerr deletes candidates in a fixed order.
 
+Scheduled automatic deletion first applies the candidate's review period. The
+global movie and TV delays can be overridden by candidate rules, and the
+longest delay from all matching rules wins. Candidates remain visible and
+tagged while waiting; Reclaimerr does not move them to a quarantine folder.
+Manual delete and move actions are immediate and do not use this delay.
+
 When Leaving Soon collections are enabled, Reclaimerr first removes the affected
 movie or series from its managed Plex, Jellyfin, and Emby collections. This
 prevents media-server collections from retaining links to files that are about
@@ -11,11 +17,11 @@ collections so failed or partially completed actions remain represented.
 
 ## Deletion Modes
 
-| Mode | Behavior |
-| --- | --- |
-| `delete` | Delete through Radarr, Sonarr, or the media server route used for the candidate |
-| `move` | Move the file to the configured destination and remove the source record |
-| `fallback deletion` | Use the media server when ARR cannot handle the delete path |
+| Mode                | Behavior                                                                        |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `delete`            | Delete through Radarr, Sonarr, or the media server route used for the candidate |
+| `move`              | Move the file to the configured destination and remove the source record        |
+| `fallback deletion` | Use the media server when ARR cannot handle the delete path                     |
 
 ## Routing Order
 

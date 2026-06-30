@@ -62,6 +62,8 @@
   let mediaServerFallbackEnabled = $state(true);
   let addArrImportExclusionsOnDelete = $state(true);
   let autoDeleteEnabled = $state(false);
+  let autoDeleteMovieDelayDays = $state(14);
+  let autoDeleteSeriesDelayDays = $state(7);
   let applicationUrl = $state("");
   let favoritesIgnoreEnabled = $state(false);
   let favoritesProtectAllUsers = $state(false);
@@ -151,6 +153,18 @@
       if (defaultAllowedPages.length === 0) {
         throw new Error("Select at least one default page for new users");
       }
+      if (
+        !Number.isInteger(autoDeleteMovieDelayDays) ||
+        autoDeleteMovieDelayDays < 0 ||
+        autoDeleteMovieDelayDays > 3650 ||
+        !Number.isInteger(autoDeleteSeriesDelayDays) ||
+        autoDeleteSeriesDelayDays < 0 ||
+        autoDeleteSeriesDelayDays > 3650
+      ) {
+        throw new Error(
+          "Automatic delete delays must be whole numbers from 0 to 3650",
+        );
+      }
 
       // save settings to backend
       await put_api("/api/settings/general", {
@@ -182,6 +196,8 @@
         default_arr_delete_behavior: defaultArrDeleteBehavior,
         add_arr_import_exclusions_on_delete: addArrImportExclusionsOnDelete,
         auto_delete_enabled: autoDeleteEnabled,
+        auto_delete_movie_delay_days: autoDeleteMovieDelayDays,
+        auto_delete_series_delay_days: autoDeleteSeriesDelayDays,
         application_url: applicationUrl.trim() || null,
         favorites_ignore_enabled: favoritesIgnoreEnabled,
         favorites_protect_all_users: favoritesProtectAllUsers,
@@ -399,6 +415,8 @@
         addArrImportExclusionsOnDelete =
           settings.add_arr_import_exclusions_on_delete ?? true;
         autoDeleteEnabled = settings.auto_delete_enabled ?? false;
+        autoDeleteMovieDelayDays = settings.auto_delete_movie_delay_days ?? 14;
+        autoDeleteSeriesDelayDays = settings.auto_delete_series_delay_days ?? 7;
         applicationUrl = settings.application_url ?? "";
         favoritesIgnoreEnabled = settings.favorites_ignore_enabled ?? false;
         favoritesProtectAllUsers =
@@ -1207,15 +1225,51 @@
         automatically until this setting is enabled and the task is separately
         enabled in the <strong>Tasks</strong> section.
       </p>
+      <div class="grid gap-3 sm:grid-cols-2 mb-3">
+        <div class="space-y-2">
+          <Label for="autoDeleteMovieDelayDays" class="text-sm text-foreground">
+            Movie review period (days)
+          </Label>
+          <Input
+            id="autoDeleteMovieDelayDays"
+            type="number"
+            min="0"
+            max="3650"
+            step="1"
+            bind:value={autoDeleteMovieDelayDays}
+          />
+        </div>
+        <div class="space-y-2">
+          <Label
+            for="autoDeleteSeriesDelayDays"
+            class="text-sm text-foreground"
+          >
+            TV review period (days)
+          </Label>
+          <Input
+            id="autoDeleteSeriesDelayDays"
+            type="number"
+            min="0"
+            max="3650"
+            step="1"
+            bind:value={autoDeleteSeriesDelayDays}
+          />
+        </div>
+      </div>
+      <p class="text-xs text-muted-foreground mb-3">
+        The countdown starts when an item first becomes a candidate. Rule-level
+        overrides can replace these defaults; when multiple rules match, the
+        longest delay wins. Use 0 for immediate eligibility.
+      </p>
       <div
         class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-foreground"
       >
         <p class="font-medium">Warning</p>
         <p class="mt-1">
           When both the opt-in and task schedule are enabled, Reclaimerr will
-          permanently delete current cleanup candidates without per-item
-          approval. Protected media and items with pending protection or delete
-          requests are skipped.
+          permanently delete cleanup candidates after their review period
+          expires without per-item approval. Protected media and items with
+          pending protection or delete requests are skipped.
         </p>
         <p class="mt-2 text-xs text-muted-foreground">
           Turning this off automatically disables the scheduled delete task and
@@ -1329,7 +1383,7 @@
       <AlertDialog.Description class="text-muted-foreground">
         This only unlocks the scheduled delete task. Once you also enable the
         task in <strong>Tasks</strong>, Reclaimerr can permanently delete
-        eligible cleanup candidates automatically.
+        cleanup candidates after their configured review period.
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer class="flex justify-end gap-3 pt-4">

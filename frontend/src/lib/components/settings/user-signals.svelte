@@ -42,6 +42,8 @@
     default_arr_delete_behavior: "unmonitor",
     add_arr_import_exclusions_on_delete: true,
     auto_delete_enabled: false,
+    auto_delete_movie_delay_days: 14,
+    auto_delete_series_delay_days: 7,
     application_url: null,
     favorites_ignore_enabled: false,
     favorites_protect_all_users: false,

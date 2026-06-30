@@ -52,6 +52,23 @@ def test_legacy_rule_action_defaults_to_candidate() -> None:
     action = _normalize_rule_action(None, "Legacy Rule", "movie_version")
     assert action["outcome"] == "candidate"
     assert action["candidate"] is True
+    assert action["auto_delete_delay_days"] is None
+
+
+@pytest.mark.parametrize(
+    ("raw_delay", "expected"),
+    [(0, 0), (3650, 3650), (-1, None), (3651, None), (True, None), ("7", None)],
+)
+def test_candidate_rule_action_normalizes_auto_delete_delay(
+    raw_delay: object, expected: int | None
+) -> None:
+    action = _normalize_rule_action(
+        {"auto_delete_delay_days": raw_delay},
+        "Candidate Rule",
+        "movie_version",
+    )
+
+    assert action["auto_delete_delay_days"] == expected
 
 
 def test_protection_rule_action_disables_destructive_settings() -> None:
@@ -72,6 +89,7 @@ def test_protection_rule_action_disables_destructive_settings() -> None:
     assert action["tag_enabled"] is False
     assert action["arr_tag"] is None
     assert action["media_server_action"] is None
+    assert action["auto_delete_delay_days"] is None
     assert action["radarr_service_config_id"] is None
 
 

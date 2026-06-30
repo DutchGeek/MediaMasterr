@@ -114,9 +114,9 @@ DEFAULT_SCHEDULES: tuple[DefaultSchedule, ...] = (
             "General Settings automatic deletion opt-in before this task can be enabled."
         ),
         "schedule_type": ScheduleType.CRON,
-        "schedule_value": "0 2 * * 0",  # weekly on Sunday at 2 AM
+        "schedule_value": "0 2 * * *",  # daily at 2 AM
         "default_schedule_type": ScheduleType.CRON,
-        "default_schedule_value": "0 2 * * 0",
+        "default_schedule_value": "0 2 * * *",
         "enabled": False,
     },
     {

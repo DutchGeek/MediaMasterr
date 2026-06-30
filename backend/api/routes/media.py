@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.candidate_views import normalize_reason_parts, reason_tokens
 from backend.core.auth import get_current_user, has_permission, require_page_access
+from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.core.utils.misc import normalize_genre_names
 from backend.core.utils.resolution import guesstimate_resolution
@@ -15,6 +16,7 @@ from backend.database import get_db
 from backend.database.models import (
     DeleteRequest,
     Episode,
+    GeneralSettings,
     Movie,
     MovieArrRef,
     MovieVersion,
@@ -22,11 +24,13 @@ from backend.database.models import (
     ProtectionRequest,
     ReclaimCandidate,
     ReclaimHistory,
+    ReclaimRule,
     Season,
     Series,
     SeriesArrRef,
     SeriesServiceRef,
     ServiceMediaLibrary,
+    TaskSchedule,
     User,
 )
 from backend.enums import (
@@ -35,6 +39,7 @@ from backend.enums import (
     PageAccess,
     Permission,
     ProtectionRequestStatus,
+    Task,
     UserRole,
 )
 from backend.jobs.candidate_file_ops import queue_candidate_file_op_job
@@ -1450,6 +1455,56 @@ async def get_candidates(
             ),
         )
 
+    auto_delete_settings_row = (
+        await db.execute(
+            select(
+                GeneralSettings,
+                select(TaskSchedule.enabled)
+                .where(TaskSchedule.task == Task.DELETE_CLEANUP_CANDIDATES)
+                .scalar_subquery(),
+            )
+        )
+    ).first()
+    auto_delete_settings = (
+        auto_delete_settings_row[0] if auto_delete_settings_row is not None else None
+    )
+    auto_delete_task_enabled = bool(
+        auto_delete_settings_row[1] if auto_delete_settings_row is not None else False
+    )
+    auto_delete_is_active = bool(
+        auto_delete_settings is not None
+        and auto_delete_settings.auto_delete_enabled
+        and auto_delete_task_enabled
+    )
+    auto_delete_movie_delay_days = (
+        auto_delete_settings.auto_delete_movie_delay_days
+        if auto_delete_settings is not None
+        else 14
+    )
+    auto_delete_series_delay_days = (
+        auto_delete_settings.auto_delete_series_delay_days
+        if auto_delete_settings is not None
+        else 7
+    )
+    candidate_rule_ids = {
+        rule_id
+        for row in rows
+        for rule_id in (row.ReclaimCandidate.matched_rule_ids or [])
+    }
+    candidate_rule_actions_by_id: dict[int, dict[str, Any] | None] = {}
+    if candidate_rule_ids:
+        candidate_rule_actions_by_id = {
+            cast(int, rule.id): cast(dict[str, Any] | None, rule.action)
+            for rule in (
+                await db.execute(
+                    select(ReclaimRule).where(ReclaimRule.id.in_(candidate_rule_ids))
+                )
+            )
+            .scalars()
+            .all()
+        }
+    candidate_policy_now = datetime.now(UTC)
+
     # collect IDs to check for pending exception requests in one query each
     movie_ids = [
         r.ReclaimCandidate.movie_id
@@ -1556,6 +1611,15 @@ async def get_candidates(
     items_out: list[CandidateEntry] = []
     for row in rows:
         c = row.ReclaimCandidate
+        auto_delete_policy = resolve_auto_delete_policy(
+            media_type=cast(MediaType, c.media_type),
+            matched_rule_ids=cast(list[int], c.matched_rule_ids),
+            created_at=cast(datetime, c.created_at),
+            rule_actions_by_id=candidate_rule_actions_by_id,
+            movie_delay_days=auto_delete_movie_delay_days,
+            series_delay_days=auto_delete_series_delay_days,
+            now=candidate_policy_now,
+        )
         is_movie = c.media_type is MediaType.MOVIE
         media_id = c.movie_id if is_movie else c.series_id
         media_title = row.movie_title if is_movie else row.series_title
@@ -1816,6 +1880,12 @@ async def get_candidates(
                 estimated_space_bytes=estimated_space_bytes,
                 has_pending_request=has_pending,
                 created_at=to_utc_isoformat(c.created_at) or "",
+                auto_delete_delay_days=auto_delete_policy.delay_days,
+                auto_delete_eligible_at=(
+                    to_utc_isoformat(auto_delete_policy.eligible_at) or ""
+                ),
+                auto_delete_is_eligible=auto_delete_policy.is_eligible,
+                auto_delete_is_active=auto_delete_is_active,
                 season_id=c.season_id,
                 season_number=row.season_number,
                 series_title=row.series_title if c.season_id is not None else None,

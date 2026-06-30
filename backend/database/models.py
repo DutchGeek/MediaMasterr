@@ -307,6 +307,8 @@ class GeneralSettings(Base):
         Boolean, default=True
     )
     auto_delete_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_delete_movie_delay_days: Mapped[int] = mapped_column(Integer, default=14)
+    auto_delete_series_delay_days: Mapped[int] = mapped_column(Integer, default=7)
     application_url: Mapped[str | None] = mapped_column(String(500), default=None)
 
     # favorites
