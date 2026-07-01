@@ -289,7 +289,7 @@ Playback Reporting plugin and Tautulli, then evaluates provider-neutral fields:
 | Playback plays               | Number of qualifying playback events         |
 | Playback duration            | Total qualifying playback minutes            |
 | Longest playback             | Longest qualifying playback in minutes       |
-| Playback users               | Distinct source users with qualifying events |
+| Playback user count          | Number of distinct source users with qualifying events |
 | Last playback activity       | Most recent qualifying event timestamp       |
 | Days since playback activity | Whole days since the most recent event       |
 

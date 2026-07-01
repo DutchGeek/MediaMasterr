@@ -365,7 +365,7 @@
     },
     {
       value: "playback.unique_user_count",
-      label: "Playback users",
+      label: "Playback user count",
       kind: "number",
       operators: numericOperators,
       defaultOperator: "greater_than_or_equal",

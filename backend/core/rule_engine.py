@@ -110,7 +110,7 @@ FIELD_LABELS: dict[str, str] = {
     "playback.play_count": "Playback plays",
     "playback.total_duration_minutes": "Playback duration (minutes)",
     "playback.longest_duration_minutes": "Longest playback (minutes)",
-    "playback.unique_user_count": "Playback users",
+    "playback.unique_user_count": "Playback user count",
     "playback.last_activity_at": "Last playback activity",
     "playback.days_since_last_activity": "Days since playback activity",
     "tmdb.popularity": "Popularity",
