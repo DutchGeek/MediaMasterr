@@ -1208,7 +1208,7 @@ async def _activate_playback_history_for_rules(
     elif not snapshot.has_configured_provider:
         error = "No Playback Reporting or Tautulli provider is configured"
     else:
-        error = "No configured playback provider can observe these media targets"
+        error = "Some media targets are not observable by the configured playback providers"
     return _PlaybackRuleDataResult(
         snapshot=snapshot,
         unavailable_count=unavailable_count,
