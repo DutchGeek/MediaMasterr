@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Documented that manually marking watched doesn’t create playback events
     - Existing saved rules remain compatible
 
+### Fixes
+
+- Docker: Granian now replaces the shell and runs as PID 1, ensuring Docker's SIGTERM reaches it directly during container shutdown
+
 ## [0.1.8] - 2026-07-01
 
 ### Added
