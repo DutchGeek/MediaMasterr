@@ -3840,17 +3840,27 @@ def _get_arr_action(
     ``unmonitor`` we honor that, otherwise any matched rule implies ``delete``.
     Synthetic/no-rule candidates fall back to the global delete behavior.
     """
-    has_matched_rule = False
-    for rule_id in candidate.matched_rule_ids or []:
-        rule = rules.get(rule_id)
-        if not rule:
-            continue
-        has_matched_rule = True
-        if _rule_action(rule).get("arr_action") == "unmonitor":
-            return "unmonitor"
-    if has_matched_rule:
-        return "delete"
-    return default_behavior
+    matched_rules = [
+        (rule_id, rules[rule_id])
+        for rule_id in candidate.matched_rule_ids or []
+        if rule_id in rules
+    ]
+    matched_rule_ids = [rule_id for rule_id, _rule in matched_rules]
+    if any(
+        _rule_action(rule).get("arr_action") == "unmonitor"
+        for _rule_id, rule in matched_rules
+    ):
+        resolved_action: ArrDeleteAction = "unmonitor"
+    else:
+        resolved_action = "delete" if matched_rule_ids else default_behavior
+
+    source = "matched_rule" if matched_rule_ids else "global_fallback"
+    LOG.debug(
+        f"Resolved ARR action for candidate {candidate.id}: {resolved_action} "
+        f"(source={source}, matched_rule_ids={matched_rule_ids}, "
+        f"configured_fallback={default_behavior})"
+    )
+    return resolved_action
 
 
 def _managed_tag_for_rule(rule: ReclaimRule) -> str | None:
@@ -4724,7 +4734,10 @@ async def _delete_movie_version_candidates(
                         )
                         LOG.info(
                             f"Removed '{movie.title}' from Radarr entirely "
-                            f"(no files remaining, config_id={config_id}, arr_id={arr_movie_id})"
+                            f"(no files remaining, config_id={config_id}, "
+                            f"arr_id={arr_movie_id}, resolved_action={cand_arr_action}, "
+                            f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                            f"configured_fallback={default_arr_delete_behavior})"
                         )
                     except Exception as arr_err:
                         LOG.warning(
@@ -6515,7 +6528,10 @@ async def _delete_season_candidates(
                     )
                     LOG.info(
                         f"Removed '{series_obj.title}' from Sonarr entirely "
-                        f"(no files remaining, sonarr_id={sonarr_ref_id})"
+                        f"(no files remaining, sonarr_id={sonarr_ref_id}, "
+                        f"resolved_action={cand_arr_action}, "
+                        f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                        f"configured_fallback={default_arr_delete_behavior})"
                     )
             except Exception as e:
                 LOG.warning(
@@ -6932,7 +6948,10 @@ async def _delete_episode_candidates(
                         )
                         LOG.info(
                             f"Removed '{series_obj.title}' from Sonarr entirely "
-                            f"(no files remaining, sonarr_id={sonarr_ref_id})"
+                            f"(no files remaining, sonarr_id={sonarr_ref_id}, "
+                            f"resolved_action={cand_arr_action}, "
+                            f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                            f"configured_fallback={default_arr_delete_behavior})"
                         )
                 except Exception as e:
                     LOG.warning(

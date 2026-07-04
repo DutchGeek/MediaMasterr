@@ -441,6 +441,36 @@ class _RadarrTagRefreshClientFake:
 
 
 class CleanupMediaRuleTests(unittest.TestCase):
+    def test_arr_action_resolution_logs_rule_and_fallback_sources(self) -> None:
+        rule_candidate = cast(Any, SimpleNamespace(id=41, matched_rule_ids=[7, 8]))
+        rules = {
+            7: cast(Any, SimpleNamespace(action={"arr_action": "delete"})),
+            8: cast(Any, SimpleNamespace(action={"arr_action": "unmonitor"})),
+        }
+        with patch.object(cleanup_tasks.LOG, "debug") as debug:
+            action = cleanup_tasks._get_arr_action(
+                rule_candidate, rules, default_behavior="remove_if_empty"
+            )
+
+        self.assertEqual(action, "unmonitor")
+        message = debug.call_args.args[0]
+        self.assertIn("candidate 41: unmonitor", message)
+        self.assertIn("source=matched_rule", message)
+        self.assertIn("matched_rule_ids=[7, 8]", message)
+        self.assertIn("configured_fallback=remove_if_empty", message)
+
+        fallback_candidate = cast(Any, SimpleNamespace(id=42, matched_rule_ids=[]))
+        with patch.object(cleanup_tasks.LOG, "debug") as debug:
+            action = cleanup_tasks._get_arr_action(
+                fallback_candidate, {}, default_behavior="unmonitor"
+            )
+
+        self.assertEqual(action, "unmonitor")
+        message = debug.call_args.args[0]
+        self.assertIn("candidate 42: unmonitor", message)
+        self.assertIn("source=global_fallback", message)
+        self.assertIn("matched_rule_ids=[]", message)
+
     def test_movie_version_extended_metadata_fields_match(self) -> None:
         movie = Movie(
             title="Movie",
