@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
-from backend.services.plex import PlexService
+from backend.enums import MediaType
+from backend.services.plex import PlexService, _history_record_rating_key
 
 
 def test_get_section_metadata_items_paginates_until_total_size(monkeypatch) -> None:
@@ -73,5 +76,73 @@ def test_get_section_metadata_items_paginates_until_total_size(monkeypatch) -> N
                 "X-Plex-Container-Size": 2,
             },
         ]
+
+    asyncio.run(run())
+
+
+def test_history_record_rating_key_falls_back_to_metadata_paths() -> None:
+    record = {
+        "key": "/library/metadata/62906",
+        "parentKey": "/library/metadata/62000",
+        "grandparentKey": "/library/metadata/61155",
+    }
+
+    assert _history_record_rating_key(record, "ratingKey") == "62906"
+    assert _history_record_rating_key(record, "parentRatingKey") == "62000"
+    assert _history_record_rating_key(record, "grandparentRatingKey") == "61155"
+
+
+def test_watched_user_snapshots_accept_grandparent_key_path(monkeypatch) -> None:
+    async def run() -> None:
+        watched_at = datetime(2026, 7, 4, 12, 0, tzinfo=UTC)
+
+        async def fake_get_movies(
+            self: PlexService, included_libraries: list[str] | None = None
+        ) -> list[object]:
+            return []
+
+        async def fake_get_series(
+            self: PlexService, included_libraries: list[str] | None = None
+        ) -> list[object]:
+            return [
+                SimpleNamespace(
+                    id="61155",
+                    external_ids=SimpleNamespace(tmdb=12345),
+                )
+            ]
+
+        async def fake_get_sections(self: PlexService) -> list[dict[str, str]]:
+            return [{"key": "2", "title": "TV Shows", "type": "show"}]
+
+        async def fake_get_history(
+            self: PlexService, **kwargs: object
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "type": "episode",
+                    "ratingKey": "62906",
+                    "grandparentKey": "/library/metadata/61155",
+                    "accountID": "490001441",
+                    "viewedAt": int(watched_at.timestamp()),
+                }
+            ]
+
+        async def fake_get_users(self: PlexService) -> dict[str, str]:
+            return {"490001441": "alice"}
+
+        monkeypatch.setattr(PlexService, "get_movies", fake_get_movies)
+        monkeypatch.setattr(PlexService, "get_series", fake_get_series)
+        monkeypatch.setattr(PlexService, "get_library_sections", fake_get_sections)
+        monkeypatch.setattr(PlexService, "_get_all_history_records", fake_get_history)
+        monkeypatch.setattr(PlexService, "_get_plex_tv_user_map", fake_get_users)
+
+        service = PlexService("token", "http://plex.local")
+        (
+            snapshots,
+            max_viewed_at,
+        ) = await service.get_watched_user_snapshots_with_cursor()
+
+        assert snapshots == [(MediaType.SERIES, 12345, "alice", watched_at, None)]
+        assert max_viewed_at == watched_at
 
     asyncio.run(run())

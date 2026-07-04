@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Metacritic count pill not styled the same as the others
+- Plex episode history responses that expose series IDs through `grandparentKey` now populate series, season, and episode requester-watch rules correctly
 
 ## [0.1.9] - 2026-07-02
 

@@ -49,6 +49,23 @@ _EPISODE_METADATA_BATCH_SIZE = 100
 _SECTION_METADATA_PAGE_SIZE = 1000
 
 
+def _history_record_rating_key(record: Mapping[str, object], field: str) -> str:
+    """Extract a Plex rating key from either its scalar or metadata-path form."""
+    direct = str(record.get(field) or "").strip()
+    if direct:
+        return direct
+
+    path_field = {
+        "ratingKey": "key",
+        "parentRatingKey": "parentKey",
+        "grandparentRatingKey": "grandparentKey",
+    }.get(field)
+    path = str(record.get(path_field) or "").strip() if path_field else ""
+    if not path:
+        return ""
+    return PurePosixPath(path.rstrip("/")).name
+
+
 class _HistoryAggregate:
     __slots__ = ("account_ids", "last_viewed_at", "view_count")
 
@@ -1481,7 +1498,7 @@ class PlexService:
         # key -> [view_count, max_lva, set(accountIDs)]
         aggregated: dict[str, _HistoryAggregate] = {}
         for record in records:
-            key = str(record.get(key_field, ""))
+            key = _history_record_rating_key(record, key_field)
             if not key:
                 continue
             if rating_keys is not None and key not in rating_keys:
@@ -1767,7 +1784,7 @@ class PlexService:
             if not watch_user_key:
                 continue
 
-            movie_key = str(record.get("ratingKey", "")).strip()
+            movie_key = _history_record_rating_key(record, "ratingKey")
             tmdb_movie = movie_tmdb_by_rating_key.get(movie_key)
             if tmdb_movie is not None:
                 key = (MediaType.MOVIE, tmdb_movie, watch_user_key)
@@ -1775,7 +1792,7 @@ class PlexService:
                 if prev is None or watched_at > prev[0]:
                     merged[key] = (watched_at, None)
 
-            series_key = str(record.get("grandparentRatingKey", "")).strip()
+            series_key = _history_record_rating_key(record, "grandparentRatingKey")
             tmdb_series = series_tmdb_by_rating_key.get(series_key)
             if tmdb_series is not None:
                 key = (MediaType.SERIES, tmdb_series, watch_user_key)
