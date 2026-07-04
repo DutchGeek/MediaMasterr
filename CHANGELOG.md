@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Matched rule IDs
     - Configured fallback
 
+### Fixed
+
+- Metacritic count pill not styled the same as the others
+
 ## [0.1.9] - 2026-07-02
 
 ### Added

@@ -75,6 +75,7 @@
     icon: SourceIcon;
     metrics: Metric[];
     summaryMetricKey?: string;
+    summaryTone?: MetricTone;
     sourceLabel?: string | null;
     linkHref?: string;
     linkLabel?: string;
@@ -141,6 +142,9 @@
     card.metrics.find((metric) => metric.tone === "rating") ??
     card.metrics[0] ??
     null;
+
+  const getSummaryTone = (card: SourceCard, metric: Metric): MetricTone =>
+    card.summaryTone ?? metric.tone;
 
   const tmdbRatingFmt = $derived.by(() => {
     if (tmdbRating == null) return null;
@@ -449,6 +453,7 @@
         icon: "metacritic",
         metrics: metacriticMetrics,
         summaryMetricKey: "metascore",
+        summaryTone: "rating",
         sourceLabel: externalRatingsSourceLabel,
       });
     }
@@ -575,7 +580,7 @@
                     rel="noopener noreferrer"
                     aria-label={card.linkLabel}
                     tabindex="-1"
-                    class={`${summaryPillClass} ${metricToneClass(metric.tone)} hover:border-primary/50 hover:bg-primary/10 hover:text-primary`}
+                    class={`${summaryPillClass} ${metricToneClass(getSummaryTone(card, metric))} hover:border-primary/50 hover:bg-primary/10 hover:text-primary`}
                   >
                     {#if card.icon === "tomatometer"}
                       <RottenTomatoesSvg
@@ -608,7 +613,7 @@
                 {:else}
                   <span
                     {...props}
-                    class={`${summaryPillClass} ${metricToneClass(metric.tone)}`}
+                    class={`${summaryPillClass} ${metricToneClass(getSummaryTone(card, metric))}`}
                     tabindex="-1"
                   >
                     {#if card.icon === "tomatometer"}
