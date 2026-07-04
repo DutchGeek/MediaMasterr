@@ -2265,6 +2265,30 @@ class CleanupMediaRuleTests(unittest.TestCase):
             )
         )
 
+    def test_compute_requester_has_watched_supports_series_keys(self) -> None:
+        media_key: tuple[MediaType, int] = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        watch_by_service_and_user = {
+            media_key: {
+                Service.PLEX: {"alice": datetime(2026, 1, 2, 12, 0, tzinfo=UTC)}
+            }
+        }
+
+        self.assertTrue(
+            _compute_requester_has_watched_for_key(
+                media_key=media_key,
+                snapshot=snapshot,
+                watch_by_service_and_user=watch_by_service_and_user,
+                mappings=[],
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

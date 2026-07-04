@@ -151,7 +151,32 @@ def test_rule_context_exposes_latest_active_seerr_request_for_every_scope() -> N
         ),
     )
 
-    assert all(context["seerr.last_requested_at"] == requested_at for context in contexts)
     assert all(
-        context["seerr.days_since_last_requested"] == 40 for context in contexts
+        context["seerr.last_requested_at"] == requested_at for context in contexts
     )
+    assert all(context["seerr.days_since_last_requested"] == 40 for context in contexts)
+
+
+def test_rule_context_propagates_series_requester_watched_to_every_tv_scope() -> None:
+    series = Series(title="Series", tmdb_id=5920)
+    season = Season(series_id=1, season_number=3)
+    episode = Episode(season_id=1, episode_number=23)
+    SeerrRequestResolver(
+        requester_has_watched_by_key={(MediaType.SERIES, 5920): True}
+    ).activate()
+
+    contexts = (
+        _build_context(TARGET_SERIES, None, None, series, None, compute_disk=False),
+        _build_context(TARGET_SEASON, None, None, series, season, compute_disk=False),
+        _build_context(
+            TARGET_EPISODE,
+            None,
+            None,
+            series,
+            season,
+            episode,
+            compute_disk=False,
+        ),
+    )
+
+    assert all(context["seerr.requester_has_watched"] is True for context in contexts)
