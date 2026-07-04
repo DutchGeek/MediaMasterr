@@ -5,17 +5,33 @@ from typing import Any
 
 from sqlalchemy import select
 
+from backend.core.logger import LOG
 from backend.core.utils.request import summarize_error_message
 from backend.core.workflow_locks import candidate_workflow_lock
 from backend.database import async_db
-from backend.database.models import BackgroundJob, DeleteRequest, ReclaimCandidate
-from backend.enums import BackgroundJobType, CandidateFileOpOperation
+from backend.database.models import (
+    BackgroundJob,
+    DeleteRequest,
+    Movie,
+    ReclaimCandidate,
+    Series,
+)
+from backend.enums import (
+    BackgroundJobType,
+    CandidateFileOpOperation,
+    NotificationType,
+)
 from backend.jobs.queue import enqueue_background_job, update_background_job_payload
 from backend.models.jobs import (
     CandidateFileOpJobItem,
     CandidateFileOpJobPayload,
     CandidateFileOpJobProgress,
     CandidateFileOpJobResult,
+)
+from backend.services.notifications import (
+    notify_admins,
+    notify_user,
+    request_scope_label,
 )
 from backend.tasks.cleanup import delete_specific_candidates, move_specific_candidates
 
@@ -77,7 +93,8 @@ async def _finalize_delete_request_job(
             )
             candidate_after = candidate_result.scalar_one_or_none()
 
-        if succeeded > 0 and failed == 0:
+        successful = succeeded > 0 and failed == 0
+        if successful:
             delete_request.executed_at = datetime.now(UTC)
             delete_request.execution_error = None
         else:
@@ -92,7 +109,63 @@ async def _finalize_delete_request_job(
             if candidate_after is not None:
                 await db.delete(candidate_after)
 
+        media = (
+            await db.get(Movie, delete_request.movie_id)
+            if delete_request.movie_id is not None
+            else await db.get(Series, delete_request.series_id)
+            if delete_request.series_id is not None
+            else None
+        )
+        requester_id = delete_request.requested_by_user_id
+        context = {
+            "request_id": delete_request.id,
+            "request_type": "Deletion",
+            "media_title": media.title if media else "Unknown media",
+            "media_type": delete_request.media_type.value,
+            "scope": request_scope_label(
+                delete_request.target_scope,
+                delete_request.season_number_snapshot,
+                delete_request.episode_number_snapshot,
+                delete_request.episode_name_snapshot,
+            ),
+            "reason": delete_request.reason,
+            "admin_notes": delete_request.admin_notes,
+            "error": delete_request.execution_error,
+        }
         await db.commit()
+
+    if successful:
+        try:
+            await notify_user(
+                requester_id,
+                NotificationType.DELETE_REQUEST_EXECUTION_SUCCEEDED,
+                "Deletion Completed",
+                f"Deletion completed for {context['media_title']}",
+                context=context,
+            )
+        except Exception as e:
+            LOG.error(f"Failed to notify requester of successful deletion: {e}")
+    else:
+        try:
+            await notify_user(
+                requester_id,
+                NotificationType.DELETE_REQUEST_EXECUTION_FAILED,
+                "Deletion Failed",
+                f"Deletion failed for {context['media_title']}",
+                context=context,
+            )
+        except Exception as e:
+            LOG.error(f"Failed to notify requester of failed deletion: {e}")
+        try:
+            await notify_admins(
+                NotificationType.ADMIN_DELETE_EXECUTION_FAILED,
+                "Requested Deletion Failed",
+                f"Deletion failed for {context['media_title']}",
+                context=context,
+            )
+        except Exception as e:
+            # notification delivery must never alter the recorded deletion outcome
+            LOG.error(f"Failed to notify admins of failed deletion: {e}")
 
 
 async def run_candidate_file_op_job(

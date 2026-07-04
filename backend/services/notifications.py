@@ -38,9 +38,25 @@ __all__ = [
     "notify_users",
     "notify_all_users",
     "notify_admins",
+    "request_scope_label",
 ]
 
 _DEFAULT_BODY_FORMAT = apprise.NotifyFormat.MARKDOWN
+
+
+def request_scope_label(
+    target_scope: str | None,
+    season_number: int | None = None,
+    episode_number: int | None = None,
+    episode_name: str | None = None,
+) -> str:
+    """Return a readable media scope for request notifications."""
+    if episode_number is not None:
+        label = f"S{season_number or 0:02d}E{episode_number:02d}"
+        return f"{label} - {episode_name}" if episode_name else label
+    if season_number is not None:
+        return f"Season {season_number}"
+    return (target_scope or "media").replace("_", " ").title()
 
 
 def _format_bytes(value: int | None) -> str:
@@ -168,6 +184,31 @@ def _compose_notification(
             lines.append(f"Media: {media_title}")
         if reason:
             lines.append(f"Reason: {reason}")
+        return fallback_title, "\n".join(lines), _DEFAULT_BODY_FORMAT
+
+    if notification_type in {
+        NotificationType.ADMIN_NEW_DELETE_REQUEST,
+        NotificationType.ADMIN_NEW_PROTECTION_REQUEST,
+        NotificationType.ADMIN_REQUEST_CANCELLED,
+        NotificationType.ADMIN_DELETE_EXECUTION_FAILED,
+        NotificationType.DELETE_REQUEST_EXECUTION_SUCCEEDED,
+        NotificationType.DELETE_REQUEST_EXECUTION_FAILED,
+    }:
+        if detail == "compact":
+            return fallback_title, fallback_message, _DEFAULT_BODY_FORMAT
+        fields = (
+            ("Request ID", context.get("request_id")),
+            ("Request type", context.get("request_type")),
+            ("By", context.get("actor")),
+            ("Media", context.get("media_title")),
+            ("Type", context.get("media_type")),
+            ("Scope", context.get("scope")),
+            ("Reason", context.get("reason")),
+            ("Admin notes", context.get("admin_notes")),
+            ("Error", context.get("error")),
+        )
+        lines = [fallback_message]
+        lines.extend(f"{label}: {value}" for label, value in fields if value)
         return fallback_title, "\n".join(lines), _DEFAULT_BODY_FORMAT
 
     if notification_type is NotificationType.TASK_FAILURE:
@@ -595,6 +636,12 @@ def _notification_type_to_field(notification_type: NotificationType) -> str:
         NotificationType.REQUEST_DECLINED: "request_declined",
         NotificationType.ADMIN_MESSAGE: "admin_message",
         NotificationType.TASK_FAILURE: "task_failure",
+        NotificationType.ADMIN_NEW_DELETE_REQUEST: "admin_new_delete_request",
+        NotificationType.ADMIN_NEW_PROTECTION_REQUEST: "admin_new_protection_request",
+        NotificationType.ADMIN_REQUEST_CANCELLED: "admin_request_cancelled",
+        NotificationType.ADMIN_DELETE_EXECUTION_FAILED: "admin_delete_execution_failed",
+        NotificationType.DELETE_REQUEST_EXECUTION_SUCCEEDED: "delete_request_execution_succeeded",
+        NotificationType.DELETE_REQUEST_EXECUTION_FAILED: "delete_request_execution_failed",
     }
 
     return mapping.get(notification_type, "")

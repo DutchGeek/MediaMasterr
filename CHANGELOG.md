@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- ARR action diagnostics (logging).
+- ARR action diagnostics (logging)
   - Logs now show
     - Resolved action: delete, unmonitor, or remove_if_empty
     - Source: matched rule or global fallback
     - Matched rule IDs
     - Configured fallback
+- Implemented the complete request notification lifecycle
+  - Admin notifications for new deletion/protection requests, cancellations, and deletion failures
+  - Requester notifications for successful or failed deletions
+  - Separate settings toggles and compact/standard formatting
+  - Admin-only permission validation centralized
+  - Alembic migration added (existing admin-message subscriptions carry over to new-request notifications)
+  - Added notification mapping, preference, scope, and permission tests
 
 ### Fixed
 

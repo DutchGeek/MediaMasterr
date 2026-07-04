@@ -34,13 +34,26 @@ class NotificationType(StrEnum):
     REQUEST_APPROVED = auto()
     REQUEST_DECLINED = auto()
     ADMIN_MESSAGE = auto()
+    DELETE_REQUEST_EXECUTION_SUCCEEDED = auto()
+    DELETE_REQUEST_EXECUTION_FAILED = auto()
 
     # admin exclusive notifications
     TASK_FAILURE = auto()
+    ADMIN_NEW_DELETE_REQUEST = auto()
+    ADMIN_NEW_PROTECTION_REQUEST = auto()
+    ADMIN_REQUEST_CANCELLED = auto()
+    ADMIN_DELETE_EXECUTION_FAILED = auto()
 
     def is_admin_only(self) -> bool:
         """Check if this notification type is restricted to admins."""
-        return self in (NotificationType.TASK_FAILURE,)
+        return self in {
+            NotificationType.ADMIN_MESSAGE,
+            NotificationType.TASK_FAILURE,
+            NotificationType.ADMIN_NEW_DELETE_REQUEST,
+            NotificationType.ADMIN_NEW_PROTECTION_REQUEST,
+            NotificationType.ADMIN_REQUEST_CANCELLED,
+            NotificationType.ADMIN_DELETE_EXECUTION_FAILED,
+        }
 
 
 class ScheduleType(StrEnum):

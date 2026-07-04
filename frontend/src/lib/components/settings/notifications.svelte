@@ -37,6 +37,12 @@
     requestDeclined: boolean;
     adminMessage: boolean;
     taskFailure: boolean;
+    adminNewDeleteRequest: boolean;
+    adminNewProtectionRequest: boolean;
+    adminRequestCancelled: boolean;
+    adminDeleteExecutionFailed: boolean;
+    deleteRequestExecutionSucceeded: boolean;
+    deleteRequestExecutionFailed: boolean;
     preferences: Record<string, { detail: string; max_items?: number }>;
   }
 
@@ -61,6 +67,14 @@
     [NotificationType.RequestDeclined]: "requestDeclined",
     [NotificationType.AdminMessage]: "adminMessage",
     [NotificationType.TaskFailure]: "taskFailure",
+    [NotificationType.AdminNewDeleteRequest]: "adminNewDeleteRequest",
+    [NotificationType.AdminNewProtectionRequest]: "adminNewProtectionRequest",
+    [NotificationType.AdminRequestCancelled]: "adminRequestCancelled",
+    [NotificationType.AdminDeleteExecutionFailed]: "adminDeleteExecutionFailed",
+    [NotificationType.DeleteRequestExecutionSucceeded]:
+      "deleteRequestExecutionSucceeded",
+    [NotificationType.DeleteRequestExecutionFailed]:
+      "deleteRequestExecutionFailed",
   };
 
   const defaultPreferences = () => ({
@@ -72,6 +86,12 @@
     [NotificationType.RequestDeclined]: { detail: "standard" },
     [NotificationType.AdminMessage]: { detail: "standard" },
     [NotificationType.TaskFailure]: { detail: "standard" },
+    [NotificationType.AdminNewDeleteRequest]: { detail: "standard" },
+    [NotificationType.AdminNewProtectionRequest]: { detail: "standard" },
+    [NotificationType.AdminRequestCancelled]: { detail: "standard" },
+    [NotificationType.AdminDeleteExecutionFailed]: { detail: "standard" },
+    [NotificationType.DeleteRequestExecutionSucceeded]: { detail: "standard" },
+    [NotificationType.DeleteRequestExecutionFailed]: { detail: "standard" },
   });
 
   const normalizedPreferences = (
@@ -121,6 +141,42 @@
       description: "Notified when scheduled tasks fail (Admin only)",
       adminOnly: true,
     },
+    {
+      type: NotificationType.AdminNewDeleteRequest,
+      label: "New Deletion Requests",
+      description: "Notified when a user submits a deletion request",
+      adminOnly: true,
+    },
+    {
+      type: NotificationType.AdminNewProtectionRequest,
+      label: "New Protection Requests",
+      description: "Notified when a user submits a protection request",
+      adminOnly: true,
+    },
+    {
+      type: NotificationType.AdminRequestCancelled,
+      label: "Request Cancellations",
+      description: "Notified when a user cancels a pending request",
+      adminOnly: true,
+    },
+    {
+      type: NotificationType.AdminDeleteExecutionFailed,
+      label: "Deletion Execution Failures",
+      description: "Notified when an approved deletion fails",
+      adminOnly: true,
+    },
+    {
+      type: NotificationType.DeleteRequestExecutionSucceeded,
+      label: "Deletion Completed",
+      description: "Notified when your approved deletion finishes",
+      adminOnly: false,
+    },
+    {
+      type: NotificationType.DeleteRequestExecutionFailed,
+      label: "Deletion Failed",
+      description: "Notified when your approved deletion fails",
+      adminOnly: false,
+    },
   ];
 
   // load existing notifications from API
@@ -138,6 +194,12 @@
           request_declined: boolean;
           admin_message: boolean;
           task_failure: boolean;
+          admin_new_delete_request: boolean;
+          admin_new_protection_request: boolean;
+          admin_request_cancelled: boolean;
+          admin_delete_execution_failed: boolean;
+          delete_request_execution_succeeded: boolean;
+          delete_request_execution_failed: boolean;
           preferences?: Record<string, { detail?: string; max_items?: number }>;
         }>
       >("/api/settings/notifications");
@@ -152,6 +214,12 @@
         requestDeclined: n.request_declined,
         adminMessage: n.admin_message,
         taskFailure: n.task_failure,
+        adminNewDeleteRequest: n.admin_new_delete_request,
+        adminNewProtectionRequest: n.admin_new_protection_request,
+        adminRequestCancelled: n.admin_request_cancelled,
+        adminDeleteExecutionFailed: n.admin_delete_execution_failed,
+        deleteRequestExecutionSucceeded: n.delete_request_execution_succeeded,
+        deleteRequestExecutionFailed: n.delete_request_execution_failed,
         preferences: normalizedPreferences(n.preferences),
       }));
     } catch (err: any) {
@@ -176,6 +244,12 @@
         requestDeclined: false,
         adminMessage: false,
         taskFailure: false,
+        adminNewDeleteRequest: false,
+        adminNewProtectionRequest: false,
+        adminRequestCancelled: false,
+        adminDeleteExecutionFailed: false,
+        deleteRequestExecutionSucceeded: false,
+        deleteRequestExecutionFailed: false,
         preferences: defaultPreferences(),
       },
     ];
@@ -202,6 +276,14 @@
         request_declined: notification.requestDeclined,
         admin_message: notification.adminMessage,
         task_failure: notification.taskFailure,
+        admin_new_delete_request: notification.adminNewDeleteRequest,
+        admin_new_protection_request: notification.adminNewProtectionRequest,
+        admin_request_cancelled: notification.adminRequestCancelled,
+        admin_delete_execution_failed: notification.adminDeleteExecutionFailed,
+        delete_request_execution_succeeded:
+          notification.deleteRequestExecutionSucceeded,
+        delete_request_execution_failed:
+          notification.deleteRequestExecutionFailed,
         preferences: notification.preferences,
       };
 
@@ -217,6 +299,12 @@
           request_declined: boolean;
           admin_message: boolean;
           task_failure: boolean;
+          admin_new_delete_request: boolean;
+          admin_new_protection_request: boolean;
+          admin_request_cancelled: boolean;
+          admin_delete_execution_failed: boolean;
+          delete_request_execution_succeeded: boolean;
+          delete_request_execution_failed: boolean;
           preferences?: Record<string, { detail?: string; max_items?: number }>;
         };
       }>("/api/settings/notifications", payload);
@@ -233,6 +321,14 @@
         requestDeclined: response.data.request_declined,
         adminMessage: response.data.admin_message,
         taskFailure: response.data.task_failure,
+        adminNewDeleteRequest: response.data.admin_new_delete_request,
+        adminNewProtectionRequest: response.data.admin_new_protection_request,
+        adminRequestCancelled: response.data.admin_request_cancelled,
+        adminDeleteExecutionFailed: response.data.admin_delete_execution_failed,
+        deleteRequestExecutionSucceeded:
+          response.data.delete_request_execution_succeeded,
+        deleteRequestExecutionFailed:
+          response.data.delete_request_execution_failed,
         preferences: normalizedPreferences(response.data.preferences),
       };
 

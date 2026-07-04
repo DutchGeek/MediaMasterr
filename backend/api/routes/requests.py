@@ -40,7 +40,11 @@ from backend.models.requests import (
     ProtectionRequestResponse,
     ReviewProtectionRequest,
 )
-from backend.services.notifications import notify_all_users, notify_user
+from backend.services.notifications import (
+    notify_admins,
+    notify_user,
+    request_scope_label,
+)
 
 router = APIRouter(prefix="/api", tags=["protection-requests"])
 
@@ -551,8 +555,8 @@ async def create_protection_request(
 
         # notify admins of new pending request
         try:
-            await notify_all_users(
-                notification_type=NotificationType.ADMIN_MESSAGE,
+            await notify_admins(
+                notification_type=NotificationType.ADMIN_NEW_PROTECTION_REQUEST,
                 title="New Exception Request",
                 message=f"{user.username} requested an exception for {media.title}",
                 context={
@@ -560,6 +564,14 @@ async def create_protection_request(
                     "media_title": media.title,
                     "media_type": request_data.media_type.value,
                     "reason": request_data.reason,
+                    "request_id": protection_request.id,
+                    "request_type": "Protection",
+                    "scope": request_scope_label(
+                        protection_request.target_scope,
+                        protection_request.season_number_snapshot,
+                        protection_request.episode_number_snapshot,
+                        protection_request.episode_name_snapshot,
+                    ),
                 },
             )
         except Exception as e:
@@ -998,9 +1010,40 @@ async def cancel_request(
             detail="Can only cancel pending requests",
         )
 
+    media = (
+        await db.get(Movie, request.movie_id)
+        if request.movie_id is not None
+        else await db.get(Series, request.series_id)
+        if request.series_id is not None
+        else None
+    )
+    context = {
+        "request_id": request.id,
+        "request_type": "Protection",
+        "actor": user.username,
+        "media_title": media.title if media else "Unknown media",
+        "media_type": request.media_type.value,
+        "scope": request_scope_label(
+            request.target_scope,
+            request.season_number_snapshot,
+            request.episode_number_snapshot,
+            request.episode_name_snapshot,
+        ),
+        "reason": request.reason,
+    }
     await db.delete(request)
     await db.commit()
 
     LOG.info(f"User {user.username} cancelled exception request {request_id}")
+
+    try:
+        await notify_admins(
+            NotificationType.ADMIN_REQUEST_CANCELLED,
+            "Protection Request Cancelled",
+            f"{user.username} cancelled a protection request",
+            context=context,
+        )
+    except Exception as e:
+        LOG.error(f"Failed to send cancellation notification: {e}")
 
     return {"message": "Request cancelled"}

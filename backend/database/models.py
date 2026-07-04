@@ -154,8 +154,18 @@ class NotificationSetting(Base):
     request_approved: Mapped[bool] = mapped_column(Boolean, default=False)
     request_declined: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_message: Mapped[bool] = mapped_column(Boolean, default=False)
+    delete_request_execution_succeeded: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
+    delete_request_execution_failed: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
     # admin notification types
     task_failure: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_new_delete_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_new_protection_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_request_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_delete_execution_failed: Mapped[bool] = mapped_column(Boolean, default=False)
     # per notification content preferences (formatting/detail controls)
     preferences: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 

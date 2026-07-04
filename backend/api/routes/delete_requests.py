@@ -42,7 +42,11 @@ from backend.models.requests import (
     DeleteRequestResponse,
     ReviewDeleteRequest,
 )
-from backend.services.notifications import notify_all_users, notify_user
+from backend.services.notifications import (
+    notify_admins,
+    notify_user,
+    request_scope_label,
+)
 
 router = APIRouter(prefix="/api", tags=["delete-requests"])
 
@@ -663,8 +667,8 @@ async def create_delete_request(
     )
 
     try:
-        await notify_all_users(
-            notification_type=NotificationType.ADMIN_MESSAGE,
+        await notify_admins(
+            notification_type=NotificationType.ADMIN_NEW_DELETE_REQUEST,
             title="New Delete Request",
             message=f"{user.username} requested deletion for {media.title}",
             context={
@@ -672,6 +676,14 @@ async def create_delete_request(
                 "media_title": media.title,
                 "media_type": request_data.media_type.value,
                 "reason": request_data.reason,
+                "request_id": delete_request.id,
+                "request_type": "Deletion",
+                "scope": request_scope_label(
+                    delete_request.target_scope,
+                    delete_request.season_number_snapshot,
+                    delete_request.episode_number_snapshot,
+                    delete_request.episode_name_snapshot,
+                ),
             },
         )
     except Exception as e:
@@ -1015,8 +1027,38 @@ async def cancel_delete_request(
             detail="Can only cancel pending requests",
         )
 
+    media = (
+        await db.get(Movie, request.movie_id)
+        if request.movie_id is not None
+        else await db.get(Series, request.series_id)
+        if request.series_id is not None
+        else None
+    )
+    context = {
+        "request_id": request.id,
+        "request_type": "Deletion",
+        "actor": user.username,
+        "media_title": media.title if media else "Unknown media",
+        "media_type": request.media_type.value,
+        "scope": request_scope_label(
+            request.target_scope,
+            request.season_number_snapshot,
+            request.episode_number_snapshot,
+            request.episode_name_snapshot,
+        ),
+        "reason": request.reason,
+    }
     await db.delete(request)
     await db.commit()
 
     LOG.info(f"User {user.username} cancelled delete request {request_id}")
+    try:
+        await notify_admins(
+            NotificationType.ADMIN_REQUEST_CANCELLED,
+            "Delete Request Cancelled",
+            f"{user.username} cancelled a deletion request",
+            context=context,
+        )
+    except Exception as e:
+        LOG.error(f"Failed to send cancellation notification: {e}")
     return {"message": "Request cancelled"}
