@@ -28,6 +28,8 @@ class MediaWatchSnapshotCache:
     _PLEX_SYNC_STATE_KEY = "watch_snapshot_sync"
     _PLEX_LAST_VIEWED_AT_KEY = "plex_last_viewed_at"
     _PLEX_LAST_FULL_SYNC_AT_KEY = "plex_last_full_sync_at"
+    _PLEX_FORMAT_VERSION_KEY = "format_version"
+    _PLEX_FORMAT_VERSION = 2
     _PLEX_OVERLAP_WINDOW = timedelta(days=1)
     _PLEX_FULL_REBUILD_INTERVAL = timedelta(days=7)
 
@@ -82,6 +84,24 @@ class MediaWatchSnapshotCache:
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+    @classmethod
+    def _plex_sync_state_requires_full_rebuild(
+        cls, sync_state: dict[str, Any], now: datetime
+    ) -> bool:
+        """Return whether persisted Plex watch state requires a complete rebuild."""
+        last_viewed_at = cls._parse_utc_datetime(
+            sync_state.get(cls._PLEX_LAST_VIEWED_AT_KEY)
+        )
+        last_full_sync_at = cls._parse_utc_datetime(
+            sync_state.get(cls._PLEX_LAST_FULL_SYNC_AT_KEY)
+        )
+        return (
+            sync_state.get(cls._PLEX_FORMAT_VERSION_KEY) != cls._PLEX_FORMAT_VERSION
+            or last_viewed_at is None
+            or last_full_sync_at is None
+            or now >= last_full_sync_at + cls._PLEX_FULL_REBUILD_INTERVAL
+        )
 
     @classmethod
     def _build_watch_rows(
@@ -180,19 +200,20 @@ class MediaWatchSnapshotCache:
                                 last_viewed_at = self._parse_utc_datetime(
                                     sync_state.get(self._PLEX_LAST_VIEWED_AT_KEY)
                                 )
-                                last_full_sync_at = self._parse_utc_datetime(
-                                    sync_state.get(self._PLEX_LAST_FULL_SYNC_AT_KEY)
-                                )
                                 now = datetime.now(UTC)
                                 needs_full_rebuild = (
-                                    last_viewed_at is None
-                                    or last_full_sync_at is None
-                                    or now
-                                    >= (
-                                        last_full_sync_at
-                                        + self._PLEX_FULL_REBUILD_INTERVAL
+                                    self._plex_sync_state_requires_full_rebuild(
+                                        sync_state, now
                                     )
                                 )
+                                if (
+                                    sync_state.get(self._PLEX_FORMAT_VERSION_KEY)
+                                    != self._PLEX_FORMAT_VERSION
+                                ):
+                                    LOG.info(
+                                        "Rebuilding Plex watch snapshot after history "
+                                        f"format upgrade (config_id={config.id})"
+                                    )
                                 history_cutoff = None
                                 if (
                                     not needs_full_rebuild
@@ -220,6 +241,9 @@ class MediaWatchSnapshotCache:
                                 if needs_full_rebuild:
                                     sync_state[self._PLEX_LAST_FULL_SYNC_AT_KEY] = (
                                         self._to_utc_iso(now)
+                                    )
+                                    sync_state[self._PLEX_FORMAT_VERSION_KEY] = (
+                                        self._PLEX_FORMAT_VERSION
                                     )
                                 extra_settings[self._PLEX_SYNC_STATE_KEY] = sync_state
                                 config.extra_settings = extra_settings
