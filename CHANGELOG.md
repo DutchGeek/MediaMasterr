@@ -29,12 +29,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies
   - Updated Apprise to 1.12.0
   - Updated Granian to 2.7.9
+- Requester watch evaluation now combines current Plex, Jellyfin, and Emby watch snapshots with durable Playback Reporting and Tautulli history
+- Durable playback events must be at least 10 minutes long to count toward requester-watch rules
+- Seerr request data now preserves the specific seasons and request timestamp for each season
+- Playback snapshots now retain per-user, per-episode watch state instead of only series level activity
+- Duplicate playback evidence is consolidated using the latest qualifying watch timestamp
+- Added a database migration for persisted per-user episode watch snapshots
 
 ### Fixed
 
 - Metacritic count pill not styled the same as the others
 - Plex episode history responses that expose series IDs through `grandparentKey` now populate series, season, and episode requester-watch rules correctly
 - Plex watch history performs a one-time full rebuild after the TV parser upgrade so previously skipped episode plays are backfilled
+- Seerr requester-watch rules now evaluate individual TV episodes, preserve per-season request dates, combine current and durable playback history, and require complete requester progress for season and series targets
+- Seerr requester identities are automatically enriched from the Seerr user directory before explicit watch user mappings are applied
+- Seerr `requester has watched` now works correctly for Series, Season, and Episode rule targets
+- Episode targets only match episodes actually watched by the requester after requesting that season
+- Season targets require every local episode in that requested season to be watched
+- Series targets require all regular episodes across the requester’s requested seasons to be watched
+- Multiple requesters playback progress is no longer incorrectly combined
+- Later season requests no longer reset playback progress for previously requested seasons
+- Un-requested seasons and episodes no longer inherit the requested state of the entire series
+- Seerr declined and failed requests are excluded from requested-state evaluation
+- Season 0 specials are excluded from series completion requirements
+- Seerr usernames, display names, and email identities are automatically resolved through Seerr’s user directory (manual mappings remain available as a fallback)
+- Tautulli playback identities are treated as Plex identities for requester matching
+- Plex episode history using grandparentKey is now correctly associated with its series
+- Plex performs a one-time requester watch snapshot rebuild to recover episode history omitted by the previous parser
 
 ## [0.1.9] - 2026-07-02
 

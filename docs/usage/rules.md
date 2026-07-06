@@ -225,9 +225,47 @@ rules:
 | Seerr latest active request            | Newest pending or approved request timestamp |
 | Days since latest active Seerr request | Whole days since that request                |
 
-Declined requests are excluded. TV scopes currently inherit the latest active
-request for the whole series, matching the existing Seerr request fields. If
-Seerr is unavailable, these values are unknown and cannot create candidates.
+Declined and failed requests are excluded. Series rules use the latest request
+for the series. Season and episode rules use the request for their specific
+season, so requesting a later season does not reset the request age of an
+earlier season. Older Seerr responses that do not identify requested seasons
+fall back to the series request date. If Seerr is unavailable, these values are
+unknown and cannot create candidates.
+
+### Seerr Requester Watch State
+
+`Seerr requester has watched` compares each requester's playback with the time
+they requested the movie or TV season. Playback at or before the request does
+not count. The meaning depends on the rule target:
+
+| Scope         | `is true` means                                                                 |
+| ------------- | ------------------------------------------------------------------------------- |
+| Movie version | A requester watched the movie after requesting it                               |
+| Episode       | A requester watched that episode after requesting its season                    |
+| Season        | One requester watched every local episode in that requested season              |
+| Series        | One requester watched every regular local episode in the seasons they requested |
+
+Season 0 specials are excluded from series completion. Progress from different
+requesters is never combined to complete a season or series. Seasons that were
+not requested do not inherit another season's requested or watched state.
+
+Reclaimerr first matches Seerr users automatically using usernames, display
+names, and email addresses from Seerr's user directory. Explicit requester
+watch-user mappings are additive fallbacks for users whose identities differ
+between Seerr and the playback provider. Username comparisons are
+case-insensitive. Tautulli identities are treated as Plex identities when
+applying provider-scoped mappings.
+
+Requester watch state combines current per-user playback snapshots from Plex,
+Jellyfin, and Emby with durable Playback Reporting and Tautulli events. Only
+durable events lasting at least 10 minutes count for this field; this threshold
+is separate from the shorter minimums used by the general `playback.*` fields.
+When the same play is available from multiple sources, Reclaimerr keeps the
+latest qualifying timestamp.
+
+After configuring Seerr or changing identity mappings, run `Sync Media` before
+previewing the rule. Plex can provide current episode watch state directly,
+but durable Plex history requires Tautulli.
 
 ### Sonarr Episode State
 

@@ -921,6 +921,41 @@ class MediaWatchUser(Base):
     )
 
 
+class MediaWatchUserEpisode(Base):
+    """Per-user watched episodes mapped to stable series and episode coordinates."""
+
+    __tablename__ = "media_watch_user_episodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "series_tmdb_id",
+            "season_number",
+            "episode_number",
+            "watch_user_key_normalized",
+            "source_service",
+            "source_service_config_id",
+            name="uq_media_watch_user_episode_identity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    series_tmdb_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_number: Mapped[int] = mapped_column(SmallInteger, index=True)
+    episode_number: Mapped[int] = mapped_column(Integer, index=True)
+    watch_user_key: Mapped[str] = mapped_column(String(255))
+    watch_user_key_normalized: Mapped[str] = mapped_column(String(255), index=True)
+    source_service: Mapped[Service] = mapped_column(Enum(Service), index=True)
+    source_service_config_id: Mapped[int] = mapped_column(
+        ForeignKey("service_configs.id", ondelete="CASCADE"), index=True
+    )
+    last_watched_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    play_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
 class PlaybackHistoryEvent(Base):
     """Compact provider playback event retained for durable rule evaluation."""
 

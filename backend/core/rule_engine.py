@@ -801,8 +801,11 @@ class SeerrRequestResolver:
 
     __slots__ = (
         "_latest_active_request_at_by_key",
+        "_latest_active_request_at_by_target",
         "_requester_ids_by_key",
+        "_requester_ids_by_target",
         "_requester_has_watched_by_key",
+        "_requester_has_watched_by_target",
     )
 
     def __init__(
@@ -811,18 +814,38 @@ class SeerrRequestResolver:
         | None = None,
         requester_has_watched_by_key: Mapping[tuple[MediaType, int], bool]
         | None = None,
+        requester_has_watched_by_target: Mapping[
+            tuple[str, int, int | None, int | None], bool
+        ]
+        | None = None,
         latest_active_request_at_by_key: Mapping[tuple[MediaType, int], datetime]
+        | None = None,
+        requester_ids_by_target: Mapping[tuple[str, int, int | None], Iterable[int]]
+        | None = None,
+        latest_active_request_at_by_target: Mapping[
+            tuple[str, int, int | None], datetime
+        ]
         | None = None,
     ):
         self._requester_ids_by_key: dict[tuple[MediaType, int], set[int]] = {}
         for key, user_ids in (requester_ids_by_key or {}).items():
             self._requester_ids_by_key[key] = {int(v) for v in user_ids}
+        self._requester_ids_by_target = {
+            key: {int(value) for value in values}
+            for key, values in (requester_ids_by_target or {}).items()
+        }
         self._requester_has_watched_by_key: dict[tuple[MediaType, int], bool] = {
             key: bool(value)
             for key, value in (requester_has_watched_by_key or {}).items()
         }
+        self._requester_has_watched_by_target = dict(
+            requester_has_watched_by_target or {}
+        )
         self._latest_active_request_at_by_key = dict(
             latest_active_request_at_by_key or {}
+        )
+        self._latest_active_request_at_by_target = dict(
+            latest_active_request_at_by_target or {}
         )
 
     def activate(self) -> None:
@@ -835,40 +858,91 @@ class SeerrRequestResolver:
         return cls._ctx.get()
 
     def resolve_requester_ids(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
     ) -> list[int] | None:
         """Return Seerr requester IDs for the given media key if known."""
         if tmdb_id is None:
             return None
-        ids = self._requester_ids_by_key.get((media_type, tmdb_id))
+        ids: set[int] | None
+        if media_type is MediaType.SERIES and target_scope in {
+            TARGET_SEASON,
+            TARGET_EPISODE,
+        }:
+            target_key = (target_scope, tmdb_id, season_number)
+            if target_key in self._requester_ids_by_target:
+                ids = self._requester_ids_by_target[target_key]
+            else:
+                ids = self._requester_ids_by_key.get((media_type, tmdb_id))
+        else:
+            ids = self._requester_ids_by_key.get((media_type, tmdb_id))
         if ids is None:
             return None
         return sorted(ids)
 
-    def resolve(self, media_type: MediaType, tmdb_id: int | None) -> bool | None:
+    def resolve(
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
+    ) -> bool | None:
         """Return Seerr requested state for the given media key if known."""
-        requester_ids = self.resolve_requester_ids(media_type, tmdb_id)
+        requester_ids = self.resolve_requester_ids(
+            media_type,
+            tmdb_id,
+            target_scope=target_scope,
+            season_number=season_number,
+        )
         if requester_ids is None:
             return None
         return bool(requester_ids)
 
     def resolve_requester_has_watched(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
+        episode_number: int | None = None,
     ) -> bool | None:
         """Return requester watched state for the given media key if known."""
         if tmdb_id is None:
             return None
-        value = self._requester_has_watched_by_key.get((media_type, tmdb_id))
+        if media_type is MediaType.SERIES and target_scope is not None:
+            value = self._requester_has_watched_by_target.get(
+                (target_scope, tmdb_id, season_number, episode_number)
+            )
+        else:
+            value = self._requester_has_watched_by_key.get((media_type, tmdb_id))
         if value is None:
             return None
         return bool(value)
 
     def resolve_latest_active_request_at(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
     ) -> datetime | None:
         """Return the newest pending or approved Seerr request timestamp."""
         if tmdb_id is None:
             return None
+        if media_type is MediaType.SERIES and target_scope in {
+            TARGET_SEASON,
+            TARGET_EPISODE,
+        }:
+            target_key = (target_scope, tmdb_id, season_number)
+            if target_key in self._requester_ids_by_target:
+                return self._latest_active_request_at_by_target.get(target_key)
         return self._latest_active_request_at_by_key.get((media_type, tmdb_id))
 
 
@@ -1546,7 +1620,9 @@ def _build_context(
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SERIES,
                 )
                 if _seerr_resolver
                 else None
@@ -1647,13 +1723,21 @@ def _build_context(
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
             "seerr.requested": (
-                _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.last_requested_at": (
                 _seerr_resolver.resolve_latest_active_request_at(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1661,7 +1745,10 @@ def _build_context(
             "seerr.days_since_last_requested": (
                 _days_between(
                     _seerr_resolver.resolve_latest_active_request_at(
-                        MediaType.SERIES, series.tmdb_id
+                        MediaType.SERIES,
+                        series.tmdb_id,
+                        target_scope=TARGET_EPISODE,
+                        season_number=season.season_number,
                     ),
                     now,
                 )
@@ -1669,13 +1756,21 @@ def _build_context(
                 else None
             ),
             "seerr.requested_by_user_ids": (
-                _seerr_resolver.resolve_requester_ids(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve_requester_ids(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1778,13 +1873,21 @@ def _build_context(
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
             "seerr.requested": (
-                _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.last_requested_at": (
                 _seerr_resolver.resolve_latest_active_request_at(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1792,7 +1895,10 @@ def _build_context(
             "seerr.days_since_last_requested": (
                 _days_between(
                     _seerr_resolver.resolve_latest_active_request_at(
-                        MediaType.SERIES, series.tmdb_id
+                        MediaType.SERIES,
+                        series.tmdb_id,
+                        target_scope=TARGET_SEASON,
+                        season_number=season.season_number,
                     ),
                     now,
                 )
@@ -1800,13 +1906,22 @@ def _build_context(
                 else None
             ),
             "seerr.requested_by_user_ids": (
-                _seerr_resolver.resolve_requester_ids(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve_requester_ids(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                    episode_number=episode.episode_number,
                 )
                 if _seerr_resolver
                 else None

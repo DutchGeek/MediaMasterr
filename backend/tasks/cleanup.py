@@ -57,9 +57,11 @@ from backend.database.models import (
     GeneralSettings,
     MediaFavorite,
     MediaWatchUser,
+    MediaWatchUserEpisode,
     Movie,
     MovieArrRef,
     MovieVersion,
+    PlaybackHistoryEvent,
     ProtectedMedia,
     ProtectionRequest,
     ReclaimCandidate,
@@ -1793,6 +1795,85 @@ def _compute_requester_has_watched_for_key(
     return False
 
 
+def _compute_requester_tv_watch_targets_for_key(
+    *,
+    media_key: tuple[MediaType, int],
+    snapshot: SeerrRequestSnapshot,
+    watch_by_service_and_user: Mapping[
+        Service, Mapping[str, Mapping[tuple[int, int], datetime]]
+    ],
+    mappings: list[dict[str, Any]],
+    expected_episodes: set[tuple[int, int]],
+) -> dict[tuple[str, int, int | None, int | None], bool]:
+    """Compute requester-specific episode and completion state for one series."""
+    tmdb_id = media_key[1]
+    result: dict[tuple[str, int, int | None, int | None], bool] = {
+        (TARGET_EPISODE, tmdb_id, season_number, episode_number): False
+        for season_number, episode_number in expected_episodes
+    }
+    expected_by_season: dict[int, set[tuple[int, int]]] = {}
+    for coordinate in expected_episodes:
+        expected_by_season.setdefault(coordinate[0], set()).add(coordinate)
+    for season_number in expected_by_season:
+        result[(TARGET_SEASON, tmdb_id, season_number, None)] = False
+    result[(TARGET_SERIES, tmdb_id, None, None)] = False
+
+    requester_times = snapshot.latest_request_at_by_key_user.get(media_key, {})
+    for requester_id, series_requested_at in requester_times.items():
+        requested_seasons = {
+            season_number: by_user[requester_id]
+            for (series_tmdb_id, season_number), by_user in (
+                snapshot.latest_request_at_by_series_season_user.items()
+            )
+            if series_tmdb_id == tmdb_id and requester_id in by_user
+        }
+        if not requested_seasons:
+            requested_seasons = {
+                season_number: series_requested_at
+                for season_number in expected_by_season
+            }
+        requester_identity_keys = snapshot.requester_identity_keys_by_user_id.get(
+            requester_id, set()
+        ) or {str(requester_id)}
+        watched_at_by_coordinate: dict[tuple[int, int], datetime] = {}
+        for watch_service, watch_by_user in watch_by_service_and_user.items():
+            candidate_keys = _build_watch_keys_for_requester(
+                requester_id=requester_id,
+                requester_identity_keys=requester_identity_keys,
+                target_service=watch_service,
+                mappings=mappings,
+            )
+            for watch_key in candidate_keys:
+                for coordinate, watched_at in watch_by_user.get(watch_key, {}).items():
+                    watched_at_utc = ensure_utc(watched_at)
+                    existing = watched_at_by_coordinate.get(coordinate)
+                    if existing is None or watched_at_utc > existing:
+                        watched_at_by_coordinate[coordinate] = watched_at_utc
+
+        watched: set[tuple[int, int]] = set()
+        for coordinate, watched_at in watched_at_by_coordinate.items():
+            requested_at = requested_seasons.get(coordinate[0])
+            if requested_at is not None and watched_at > ensure_utc(requested_at):
+                watched.add(coordinate)
+
+        for season_number, episode_number in watched & expected_episodes:
+            result[(TARGET_EPISODE, tmdb_id, season_number, episode_number)] = True
+        for season_number, season_episodes in expected_by_season.items():
+            if season_number not in requested_seasons:
+                continue
+            if season_episodes and season_episodes.issubset(watched):
+                result[(TARGET_SEASON, tmdb_id, season_number, None)] = True
+        regular_episodes = {
+            coordinate
+            for coordinate in expected_episodes
+            if coordinate[0] > 0 and coordinate[0] in requested_seasons
+        }
+        if regular_episodes and regular_episodes.issubset(watched):
+            result[(TARGET_SERIES, tmdb_id, None, None)] = True
+
+    return result
+
+
 async def _activate_seerr_request_resolver_for_rules(
     db: AsyncSession,
     rules: list[ReclaimRule],
@@ -1908,8 +1989,74 @@ async def _activate_seerr_request_resolver_for_rules(
         settings_row.requester_watch_user_mappings if settings_row is not None else []
     )
     mappings = [m for m in raw_mappings if isinstance(m, dict)]
+
+    durable_rows = (
+        await db.execute(
+            select(
+                PlaybackHistoryEvent.source_service,
+                PlaybackHistoryEvent.provider_media_type,
+                PlaybackHistoryEvent.tmdb_id,
+                PlaybackHistoryEvent.season_number,
+                PlaybackHistoryEvent.episode_number,
+                PlaybackHistoryEvent.source_username,
+                PlaybackHistoryEvent.source_user_id,
+                PlaybackHistoryEvent.played_at,
+            ).where(
+                PlaybackHistoryEvent.duration_seconds >= 600,
+                PlaybackHistoryEvent.tmdb_id.is_not(None),
+                PlaybackHistoryEvent.provider_media_type.in_(("movie", "episode")),
+            )
+        )
+    ).all()
+    durable_episode_watches: dict[
+        int, dict[Service, dict[str, dict[tuple[int, int], datetime]]]
+    ] = {}
+    durable_event_count = 0
+    for (
+        source_service,
+        provider_media_type,
+        tmdb_id,
+        season_number,
+        episode_number,
+        source_username,
+        source_user_id,
+        played_at,
+    ) in durable_rows:
+        watch_key = _normalize_watch_key(source_username or source_user_id)
+        if not watch_key or played_at is None or tmdb_id is None:
+            continue
+        watch_service = (
+            Service.PLEX if source_service is Service.TAUTULLI else source_service
+        )
+        watched_at = ensure_utc(played_at)
+        durable_event_count += 1
+        if provider_media_type == "movie":
+            media_key = (MediaType.MOVIE, int(tmdb_id))
+            if media_key not in relevant_keys:
+                continue
+            by_user = watch_by_service_and_user.setdefault(media_key, {}).setdefault(
+                watch_service, {}
+            )
+            existing = by_user.get(watch_key)
+            if existing is None or watched_at > existing:
+                by_user[watch_key] = watched_at
+            continue
+        if season_number is None or episode_number is None:
+            continue
+        coordinate = (int(season_number), int(episode_number))
+        by_coordinate = (
+            durable_episode_watches.setdefault(int(tmdb_id), {})
+            .setdefault(watch_service, {})
+            .setdefault(watch_key, {})
+        )
+        existing = by_coordinate.get(coordinate)
+        if existing is None or watched_at > existing:
+            by_coordinate[coordinate] = watched_at
+
     requester_has_watched_by_key: dict[tuple[MediaType, int], bool] = {}
     for key in relevant_keys:
+        if key[0] is not MediaType.MOVIE:
+            continue
         requester_has_watched_by_key[key] = _compute_requester_has_watched_for_key(
             media_key=key,
             snapshot=snapshot,
@@ -1917,14 +2064,136 @@ async def _activate_seerr_request_resolver_for_rules(
             mappings=mappings,
         )
 
+    expected_episode_rows = (
+        await db.execute(
+            select(
+                Series.tmdb_id,
+                Season.season_number,
+                Episode.episode_number,
+            )
+            .join(Season, Episode.season_id == Season.id)
+            .join(Series, Season.series_id == Series.id)
+            .where(Series.tmdb_id.in_(series_tmdb_ids))
+        )
+    ).all()
+    expected_by_series: dict[int, set[tuple[int, int]]] = {}
+    for tmdb_id, season_number, episode_number in expected_episode_rows:
+        if tmdb_id is not None:
+            expected_by_series.setdefault(int(tmdb_id), set()).add(
+                (int(season_number), int(episode_number))
+            )
+
+    requester_ids_by_target: dict[tuple[str, int, int | None], set[int]] = {}
+    latest_active_request_at_by_target: dict[tuple[str, int, int | None], datetime] = {}
+    for tmdb_id in series_tmdb_ids:
+        season_numbers = {
+            season_number
+            for season_number, _episode_number in expected_by_series.get(tmdb_id, set())
+        }
+        has_season_request_data = any(
+            series_tmdb_id == tmdb_id
+            for series_tmdb_id, _season_number in (
+                snapshot.requester_ids_by_series_season
+            )
+        )
+        for season_number in season_numbers:
+            season_key = (tmdb_id, season_number)
+            user_ids = (
+                snapshot.requester_ids_by_series_season.get(season_key, set())
+                if has_season_request_data
+                else requester_ids_by_key.get((MediaType.SERIES, tmdb_id), set())
+            )
+            for target_scope in (TARGET_SEASON, TARGET_EPISODE):
+                target_key = (target_scope, tmdb_id, season_number)
+                requester_ids_by_target[target_key] = set(user_ids)
+                active_at = snapshot.latest_active_request_at_by_series_season.get(
+                    season_key
+                )
+                if active_at is None and not has_season_request_data:
+                    active_at = latest_active_request_at_by_key.get(
+                        (MediaType.SERIES, tmdb_id)
+                    )
+                if active_at is not None:
+                    latest_active_request_at_by_target[target_key] = active_at
+
+    episode_watch_rows = (
+        await db.execute(
+            select(
+                MediaWatchUserEpisode.series_tmdb_id,
+                MediaWatchUserEpisode.source_service,
+                MediaWatchUserEpisode.watch_user_key_normalized,
+                MediaWatchUserEpisode.season_number,
+                MediaWatchUserEpisode.episode_number,
+                MediaWatchUserEpisode.last_watched_at,
+            ).where(MediaWatchUserEpisode.series_tmdb_id.in_(series_tmdb_ids))
+        )
+    ).all()
+    episode_watches: dict[
+        int, dict[Service, dict[str, dict[tuple[int, int], datetime]]]
+    ] = {}
+    for (
+        tmdb_id,
+        source_service,
+        user_key,
+        season_number,
+        episode_number,
+        watched_at,
+    ) in episode_watch_rows:
+        if watched_at is None:
+            continue
+        coordinate = (int(season_number), int(episode_number))
+        by_coordinate = (
+            episode_watches.setdefault(int(tmdb_id), {})
+            .setdefault(source_service, {})
+            .setdefault(str(user_key), {})
+        )
+        watched_at_utc = ensure_utc(watched_at)
+        existing = by_coordinate.get(coordinate)
+        if existing is None or watched_at_utc > existing:
+            by_coordinate[coordinate] = watched_at_utc
+
+    for tmdb_id, durable_by_service in durable_episode_watches.items():
+        for source_service, durable_by_user in durable_by_service.items():
+            for user_key, by_coordinate in durable_by_user.items():
+                target_coordinates = (
+                    episode_watches.setdefault(tmdb_id, {})
+                    .setdefault(source_service, {})
+                    .setdefault(user_key, {})
+                )
+                for coordinate, watched_at in by_coordinate.items():
+                    existing = target_coordinates.get(coordinate)
+                    if existing is None or watched_at > existing:
+                        target_coordinates[coordinate] = watched_at
+
+    requester_has_watched_by_target: dict[
+        tuple[str, int, int | None, int | None], bool
+    ] = {}
+    for tmdb_id in series_tmdb_ids:
+        requester_has_watched_by_target.update(
+            _compute_requester_tv_watch_targets_for_key(
+                media_key=(MediaType.SERIES, tmdb_id),
+                snapshot=snapshot,
+                watch_by_service_and_user=episode_watches.get(tmdb_id, {}),
+                mappings=mappings,
+                expected_episodes=expected_by_series.get(tmdb_id, set()),
+            )
+        )
+
     SeerrRequestResolver(
         requester_ids_by_key,
         requester_has_watched_by_key=requester_has_watched_by_key,
+        requester_has_watched_by_target=requester_has_watched_by_target,
         latest_active_request_at_by_key=latest_active_request_at_by_key,
+        requester_ids_by_target=requester_ids_by_target,
+        latest_active_request_at_by_target=latest_active_request_at_by_target,
     ).activate()
     LOG.debug(
         f"Activated Seerr request resolver for {len(movie_tmdb_ids)} movie keys and "
         f"{len(series_tmdb_ids)} series keys"
+    )
+    LOG.debug(
+        "Requester-watch resolver merged "
+        f"{durable_event_count} qualifying durable playback event(s)"
     )
     if snapshot_error:
         LOG.debug(

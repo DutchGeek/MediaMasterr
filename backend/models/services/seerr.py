@@ -18,6 +18,14 @@ class SeerrPageInfo:
 
 
 @dataclass(slots=True, frozen=True)
+class SeerrRequestedSeason:
+    """One season included in a Seerr TV request."""
+
+    season_number: int
+    created_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
 class SeerrRequest:
     """Seerr media request."""
 
@@ -29,6 +37,7 @@ class SeerrRequest:
     created_at: datetime
     requested_by_id: int
     is_4k: bool
+    requested_seasons: tuple[SeerrRequestedSeason, ...] = ()
     raw: Mapping[str, Any] | None = None
 
     def __repr__(self) -> str:

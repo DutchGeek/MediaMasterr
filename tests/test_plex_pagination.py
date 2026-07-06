@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from backend.enums import MediaType
+from backend.models.media import MediaWatchSnapshot
 from backend.services.plex import PlexService, _history_record_rating_key
 
 
@@ -142,7 +143,15 @@ def test_watched_user_snapshots_accept_grandparent_key_path(monkeypatch) -> None
             max_viewed_at,
         ) = await service.get_watched_user_snapshots_with_cursor()
 
-        assert snapshots == [(MediaType.SERIES, 12345, "alice", watched_at, None)]
+        assert snapshots == [
+            MediaWatchSnapshot(
+                media_type=MediaType.SERIES,
+                tmdb_id=12345,
+                watch_user_key="alice",
+                last_watched_at=watched_at,
+                source_item_id="62906",
+            )
+        ]
         assert max_viewed_at == watched_at
 
     asyncio.run(run())

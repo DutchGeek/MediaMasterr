@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from asyncio import Lock, create_task
 from asyncio import Task as AsyncTask
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +18,15 @@ class SeerrRequestSnapshot:
     latest_request_at_by_key_user: dict[tuple[MediaType, int], dict[int, datetime]]
     requester_identity_keys_by_user_id: dict[int, set[str]]
     latest_active_request_at_by_key: dict[tuple[MediaType, int], datetime]
+    requester_ids_by_series_season: dict[tuple[int, int], set[int]] = field(
+        default_factory=dict
+    )
+    latest_request_at_by_series_season_user: dict[
+        tuple[int, int], dict[int, datetime]
+    ] = field(default_factory=dict)
+    latest_active_request_at_by_series_season: dict[tuple[int, int], datetime] = field(
+        default_factory=dict
+    )
 
 
 class SeerrSnapshotCache:
@@ -114,6 +123,26 @@ class SeerrSnapshotCache:
                 return False, self._request_last_error
             try:
                 requests = await service_manager.seerr.get_all_requests(filter="all")
+                directory_identities: dict[int, set[str]] = {}
+                try:
+                    users = await service_manager.seerr.get_all_users()
+                    for user in users:
+                        keys = {
+                            normalized
+                            for candidate in (
+                                user.username,
+                                user.display_name,
+                                user.email,
+                            )
+                            if (normalized := self._normalize_identity_key(candidate))
+                        }
+                        if keys:
+                            directory_identities.setdefault(user.id, set()).update(keys)
+                except Exception as exc:
+                    LOG.debug(
+                        "Could not enrich Seerr requester identities from the user "
+                        f"directory; request payload identities will be used: {exc}"
+                    )
                 requester_ids_by_key: dict[tuple[MediaType, int], set[int]] = {}
                 latest_request_at_by_key_user: dict[
                     tuple[MediaType, int], dict[int, datetime]
@@ -121,8 +150,44 @@ class SeerrSnapshotCache:
                 latest_active_request_at_by_key: dict[
                     tuple[MediaType, int], datetime
                 ] = {}
-                requester_identity_keys_by_user_id: dict[int, set[str]] = {}
+                requester_ids_by_series_season: dict[tuple[int, int], set[int]] = {}
+                latest_request_at_by_series_season_user: dict[
+                    tuple[int, int], dict[int, datetime]
+                ] = {}
+                latest_active_request_at_by_series_season: dict[
+                    tuple[int, int], datetime
+                ] = {}
+                requester_identity_keys_by_user_id = directory_identities
                 for req in requests:
+                    raw_requested_by = (
+                        req.raw.get("requestedBy", {})
+                        if isinstance(req.raw, dict)
+                        else {}
+                    )
+                    identity_bucket = requester_identity_keys_by_user_id.get(
+                        req.requested_by_id
+                    )
+                    if identity_bucket is None:
+                        identity_bucket = set()
+                        requester_identity_keys_by_user_id[req.requested_by_id] = (
+                            identity_bucket
+                        )
+                    for candidate in (
+                        raw_requested_by.get("username"),
+                        raw_requested_by.get("displayName"),
+                        raw_requested_by.get("email"),
+                    ):
+                        normalized = self._normalize_identity_key(candidate)
+                        if normalized:
+                            identity_bucket.add(normalized)
+
+                    if req.status not in {
+                        SeerrRequestStatus.PENDING,
+                        SeerrRequestStatus.APPROVED,
+                        SeerrRequestStatus.COMPLETED,
+                    }:
+                        continue
+
                     key = (req.media_type, req.tmdb_id)
                     bucket = requester_ids_by_key.get(key)
                     if bucket is None:
@@ -146,27 +211,36 @@ class SeerrSnapshotCache:
                         if latest_active is None or req.created_at > latest_active:
                             latest_active_request_at_by_key[key] = req.created_at
 
-                    raw_requested_by = (
-                        req.raw.get("requestedBy", {})
-                        if isinstance(req.raw, dict)
-                        else {}
-                    )
-                    identity_bucket = requester_identity_keys_by_user_id.get(
-                        req.requested_by_id
-                    )
-                    if identity_bucket is None:
-                        identity_bucket = set()
-                        requester_identity_keys_by_user_id[req.requested_by_id] = (
-                            identity_bucket
+                    for requested_season in req.requested_seasons:
+                        season_key = (req.tmdb_id, requested_season.season_number)
+                        requester_ids_by_series_season.setdefault(
+                            season_key, set()
+                        ).add(req.requested_by_id)
+                        by_user = latest_request_at_by_series_season_user.setdefault(
+                            season_key, {}
                         )
-                    for candidate in (
-                        raw_requested_by.get("username"),
-                        raw_requested_by.get("displayName"),
-                        raw_requested_by.get("email"),
-                    ):
-                        normalized = self._normalize_identity_key(candidate)
-                        if normalized:
-                            identity_bucket.add(normalized)
+                        season_existing = by_user.get(req.requested_by_id)
+                        if (
+                            season_existing is None
+                            or requested_season.created_at > season_existing
+                        ):
+                            by_user[req.requested_by_id] = requested_season.created_at
+                        if req.status in {
+                            SeerrRequestStatus.PENDING,
+                            SeerrRequestStatus.APPROVED,
+                        }:
+                            active_existing = (
+                                latest_active_request_at_by_series_season.get(
+                                    season_key
+                                )
+                            )
+                            if (
+                                active_existing is None
+                                or requested_season.created_at > active_existing
+                            ):
+                                latest_active_request_at_by_series_season[
+                                    season_key
+                                ] = requested_season.created_at
 
                 now = datetime.now(UTC)
                 self._request_snapshot = SeerrRequestSnapshot(
@@ -174,6 +248,13 @@ class SeerrSnapshotCache:
                     latest_request_at_by_key_user=latest_request_at_by_key_user,
                     requester_identity_keys_by_user_id=requester_identity_keys_by_user_id,
                     latest_active_request_at_by_key=(latest_active_request_at_by_key),
+                    requester_ids_by_series_season=requester_ids_by_series_season,
+                    latest_request_at_by_series_season_user=(
+                        latest_request_at_by_series_season_user
+                    ),
+                    latest_active_request_at_by_series_season=(
+                        latest_active_request_at_by_series_season
+                    ),
                 )
                 self._request_expires_at = (
                     now.replace(microsecond=0) + self._request_ttl

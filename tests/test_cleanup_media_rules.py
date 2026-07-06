@@ -44,6 +44,7 @@ from backend.services.seerr_cache import SeerrRequestSnapshot
 from backend.tasks import cleanup as cleanup_tasks
 from backend.tasks.cleanup import (
     _compute_requester_has_watched_for_key,
+    _compute_requester_tv_watch_targets_for_key,
     _evaluate_movie_rule,
     _evaluate_movie_version_rule,
     _evaluate_rule_for_episode,
@@ -2288,6 +2289,148 @@ class CleanupMediaRuleTests(unittest.TestCase):
                 mappings=[],
             )
         )
+
+    def test_requester_tv_watch_targets_require_complete_rollups(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        expected = {(1, episode) for episode in range(1, 7)}
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {"alice": {(1, 1): watched_at, (1, 2): watched_at}}
+            },
+            mappings=[],
+            expected_episodes=expected,
+        )
+
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 2)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 1, 3)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_complete_and_ignore_specials(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        regular = {(1, episode) for episode in range(1, 7)}
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {coordinate: watched_at for coordinate in regular}
+                }
+            },
+            mappings=[],
+            expected_episodes=regular | {(0, 1)},
+        )
+
+        self.assertTrue(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 0, None)])
+        self.assertTrue(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_ignore_pre_request_plays(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {"alice": {(1, 1): datetime(2026, 7, 1, tzinfo=UTC)}}
+            },
+            mappings=[],
+            expected_episodes={(1, 1)},
+        )
+
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_do_not_union_different_requesters(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101, 202}},
+            latest_request_at_by_key_user={
+                media_key: {101: requested_at, 202: requested_at}
+            },
+            requester_identity_keys_by_user_id={101: {"alice"}, 202: {"bob"}},
+            latest_active_request_at_by_key={},
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {(1, 1): watched_at},
+                    "bob": {(1, 2): watched_at},
+                }
+            },
+            mappings=[],
+            expected_episodes={(1, 1), (1, 2)},
+        )
+
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_use_each_season_request_time(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        season_one_request = datetime(2026, 1, 1, tzinfo=UTC)
+        season_two_request = datetime(2026, 7, 1, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: season_two_request}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+            latest_request_at_by_series_season_user={
+                (5920, 1): {101: season_one_request},
+                (5920, 2): {101: season_two_request},
+            },
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {
+                        (1, 1): datetime(2026, 2, 1, tzinfo=UTC),
+                        (2, 1): datetime(2026, 6, 1, tzinfo=UTC),
+                    }
+                }
+            },
+            mappings=[],
+            expected_episodes={(1, 1), (2, 1), (3, 1)},
+        )
+
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 2, 1)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 3, 1)])
+        self.assertTrue(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 2, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 3, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
 
 
 if __name__ == "__main__":
