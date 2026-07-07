@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.api.candidate_views import build_rule_preview_items
 from backend.core.rule_engine import (
+    RULE_VALUE_UNAVAILABLE,
     TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
     TARGET_SERIES,
     SeerrRequestResolver,
+    SonarrRuleDataResolver,
     evaluate_advanced_rule,
 )
 from backend.database import Base
@@ -45,6 +47,7 @@ from backend.services.seerr_cache import SeerrRequestSnapshot
 from backend.tasks import cleanup as cleanup_tasks
 from backend.tasks.cleanup import (
     _activate_seerr_request_resolver_for_rules,
+    _aggregate_sonarr_status,
     _compute_requester_has_watched_for_key,
     _compute_requester_tv_watch_targets_for_key,
     _evaluate_movie_rule,
@@ -55,6 +58,7 @@ from backend.tasks.cleanup import (
     _process_series_seasons,
     _reconcile_rule_managed_protections,
     _scan_with_db,
+    _SonarrRefRuleState,
     collect_rule_preview_matches,
     collect_rule_preview_matches_with_metadata,
 )
@@ -1634,6 +1638,48 @@ class CleanupMediaRuleTests(unittest.TestCase):
         self.assertTrue(_evaluate_movie_rule(series, pass_rule, {}, []))
         self.assertFalse(_evaluate_movie_rule(series, fail_rule, {}, []))
 
+    def test_sonarr_series_status_is_inherited_by_all_tv_targets(self) -> None:
+        series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
+        series.id = 42
+        season = Season(series_id=42, season_number=1, size=4 * 1024**3)
+        episode = Episode(season_id=1, episode_number=1, size=1024)
+        SonarrRuleDataResolver({42: {"sonarr.series_status": "ended"}}).activate()
+
+        rules = [
+            _make_single_condition_rule(
+                name=f"ended-{scope}",
+                media_type=MediaType.SERIES,
+                target_scope=scope,
+                field="sonarr.series_status",
+                operator="equals",
+                value="ended",
+            )
+            for scope in (TARGET_SERIES, TARGET_SEASON, TARGET_EPISODE)
+        ]
+
+        self.assertTrue(_evaluate_movie_rule(series, rules[0], {}, []))
+        self.assertTrue(_evaluate_rule_for_season(series, season, rules[1], {}, []))
+        self.assertTrue(
+            _evaluate_rule_for_episode(series, season, episode, rules[2], {}, [])
+        )
+
+    def test_sonarr_series_status_requires_consistent_refs(self) -> None:
+        ended_states = [
+            _SonarrRefRuleState(1, 101, series_status="ended"),
+            _SonarrRefRuleState(2, 202, series_status="ENDED"),
+        ]
+        conflicting_states = [
+            _SonarrRefRuleState(1, 101, series_status="ended"),
+            _SonarrRefRuleState(2, 202, series_status="continuing"),
+        ]
+        missing_state = [_SonarrRefRuleState(1, 101)]
+
+        self.assertEqual(_aggregate_sonarr_status(ended_states), "ended")
+        self.assertIs(
+            _aggregate_sonarr_status(conflicting_states), RULE_VALUE_UNAVAILABLE
+        )
+        self.assertIs(_aggregate_sonarr_status(missing_state), RULE_VALUE_UNAVAILABLE)
+
     def test_evaluate_series_rule_arr_tags_legacy_not_equals_is_list_aware(
         self,
     ) -> None:
@@ -2287,7 +2333,7 @@ class CleanupMediaRuleTests(unittest.TestCase):
             _compute_requester_has_watched_for_key(
                 media_key=media_key,
                 snapshot=snapshot,
-                watch_by_service_and_user=watch_by_service_and_user,
+                watch_by_service_and_user=watch_by_service_and_user,  # pyright: ignore[reportArgumentType]
                 mappings=[],
             )
         )
@@ -2642,7 +2688,7 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 cleanup_tasks,
-                "_activate_sonarr_episode_state_for_rules",
+                "_activate_sonarr_rule_data_for_rules",
                 new=AsyncMock(
                     return_value=cleanup_tasks._SonarrRuleDataResult(set(), set())
                 ),
@@ -3006,6 +3052,119 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.episode_calls, [(501, 2)])
         self.assertEqual([match.series_id for match in result.matches], [series_id])
         self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+
+    async def test_sonarr_status_rule_uses_bulk_series_without_episode_fetch(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-status",
+                api_key="x",
+                name="sonarr-status",
+                enabled=True,
+            )
+            rule = _make_single_condition_rule(
+                name="ended-series",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.series_status",
+                operator="equals",
+                value="ended",
+            )
+            series = Series(title="Ended Series", tmdb_id=11101, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=601,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+            series_id = series.id
+
+        fake_client = _SonarrEpisodeStateClientFake(
+            series=[SimpleNamespace(id=601, status="ended", seasons=[])]
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {config_id: fake_client}  # pyright: ignore[reportAttributeAccessIssue]
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual([match.series_id for match in result.matches], [series_id])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+        self.assertEqual(fake_client.series_calls, 1)
+        self.assertEqual(fake_client.episode_calls, [])
+
+    async def test_sonarr_status_conflict_fails_closed(self) -> None:
+        async with self._sessionmaker() as db:
+            configs = [
+                ServiceConfig(
+                    service_type=Service.SONARR,
+                    base_url=f"http://sonarr-status-{index}",
+                    api_key="x",
+                    name=f"sonarr-status-{index}",
+                    enabled=True,
+                )
+                for index in (1, 2)
+            ]
+            rule = _make_single_condition_rule(
+                name="status-conflict",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.series_status",
+                operator="not_equals",
+                value="deleted",
+            )
+            series = Series(title="Conflicting Series", tmdb_id=11102, size=1024)
+            db.add_all([*configs, rule, series])
+            await db.flush()
+            for config, arr_series_id in zip(configs, (602, 603), strict=True):
+                db.add(
+                    SeriesArrRef(
+                        series_id=series.id,
+                        service_config_id=config.id,
+                        arr_series_id=arr_series_id,
+                        tmdb_id=series.tmdb_id,
+                    )
+                )
+            await db.commit()
+            config_ids = [config.id for config in configs]
+
+        clients = {
+            config_ids[0]: _SonarrEpisodeStateClientFake(
+                series=[SimpleNamespace(id=602, status="ended", seasons=[])]
+            ),
+            config_ids[1]: _SonarrEpisodeStateClientFake(
+                series=[SimpleNamespace(id=603, status="continuing", seasons=[])]
+            ),
+        }
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = clients  # pyright: ignore[reportAttributeAccessIssue]
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(result.matches, [])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 1)
+        self.assertTrue(all(client.episode_calls == [] for client in clients.values()))
 
     async def test_sonarr_next_airing_proves_unaired_without_episode_fetch(
         self,

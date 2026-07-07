@@ -99,6 +99,11 @@ def build_sonarr_series_from_dict(data: Mapping[str, object]) -> SonarrSeries:
         year=as_int(data.get("year")),
         path=_as_optional_str(data.get("path")) or "",
         monitored=_as_bool(data.get("monitored")),
+        status=(
+            raw_status.lower()
+            if (raw_status := _as_optional_str(data.get("status")))
+            else None
+        ),
         season_count=len(seasons),
         seasons=seasons,
         tags=_as_int_list(data.get("tags")),

@@ -81,6 +81,9 @@ class RuleDefinitionValidationTests(unittest.TestCase):
                 "is_false",
                 None,
             ),
+            (TARGET_SERIES, "sonarr.series_status", "equals", "ended"),
+            (TARGET_SEASON, "sonarr.series_status", "equals", "continuing"),
+            (TARGET_EPISODE, "sonarr.series_status", "equals", "upcoming"),
             (TARGET_SEASON, "series.library_season_count", "greater_than", 2),
             (TARGET_EPISODE, "tmdb.original_language", "contains_any", ["jpn"]),
             (TARGET_MOVIE_VERSION, "playback.has_activity", "is_true", None),
@@ -198,6 +201,16 @@ class RuleDefinitionValidationTests(unittest.TestCase):
                     "is_true",
                 ),
                 target_scope=TARGET_SEASON,
+            )
+
+    def test_rejects_sonarr_series_status_for_movie_scope(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Rule field\\(s\\) not available for target_scope 'movie_version'",
+        ):
+            validate_rule_definition(
+                _definition("sonarr.series_status", "equals", "ended"),
+                target_scope=TARGET_MOVIE_VERSION,
             )
 
     def test_accepts_nested_and_or_groups(self) -> None:

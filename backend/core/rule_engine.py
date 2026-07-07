@@ -33,6 +33,7 @@ VALID_TARGET_SCOPES = {
 RULE_OUTCOME_CANDIDATE = "candidate"
 RULE_OUTCOME_PROTECT = "protect"
 SONARR_RULE_FIELDS = {
+    "sonarr.series_status",
     "sonarr.latest_season_has_unaired_episodes",
     "sonarr.latest_season_has_finale",
 }
@@ -58,7 +59,7 @@ class UnavailableRuleValue:
 
 
 RULE_VALUE_UNAVAILABLE: Final[UnavailableRuleValue] = UnavailableRuleValue()
-SonarrRuleValue: TypeAlias = bool | UnavailableRuleValue
+SonarrRuleValue: TypeAlias = bool | str | UnavailableRuleValue
 
 
 def normalize_rule_outcome(rule: ReclaimRule) -> str:
@@ -166,6 +167,7 @@ FIELD_LABELS: dict[str, str] = {
         "Sonarr latest season has unaired episodes"
     ),
     "sonarr.latest_season_has_finale": "Sonarr latest season has finale",
+    "sonarr.series_status": "Sonarr series status",
     "seerr.requested": "Seerr requested",
     "seerr.requested_by_user_ids": "Seerr requested by user IDs",
     "seerr.requester_has_watched": "Seerr requester has watched",
@@ -277,6 +279,7 @@ TEXT_FIELDS = {
     "media_server.collections",
     "media.container",
     "series.status",
+    "sonarr.series_status",
     "video.codec_family",
     "audio.codec_family",
     "video.resolution",
@@ -531,6 +534,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "series.tmdb_season_count",
         "sonarr.latest_season_has_unaired_episodes",
         "sonarr.latest_season_has_finale",
+        "sonarr.series_status",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
@@ -600,6 +604,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "rottentomatoes.tomato_meter",
         "rottentomatoes.tomato_vote_count",
         "series.status",
+        "sonarr.series_status",
         "series.library_season_count",
         "series.tmdb_season_count",
         "subtitle.languages",
@@ -672,6 +677,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "rottentomatoes.tomato_meter",
         "rottentomatoes.tomato_vote_count",
         "series.status",
+        "sonarr.series_status",
         "series.library_season_count",
         "series.tmdb_season_count",
         "tmdb.days_since_first_air_date",
@@ -946,11 +952,11 @@ class SeerrRequestResolver:
         return self._latest_active_request_at_by_key.get((media_type, tmdb_id))
 
 
-class SonarrEpisodeStateResolver:
-    """Holds Sonarr latest-season episode state for one rule evaluation run."""
+class SonarrRuleDataResolver:
+    """Holds Sonarr-derived values for one rule evaluation run."""
 
-    _ctx: ContextVar[SonarrEpisodeStateResolver | None] = ContextVar(
-        "sonarr_episode_state_resolver", default=None
+    _ctx: ContextVar[SonarrRuleDataResolver | None] = ContextVar(
+        "sonarr_rule_data_resolver", default=None
     )
 
     __slots__ = ("_values_by_series_id",)
@@ -966,10 +972,10 @@ class SonarrEpisodeStateResolver:
 
     def activate(self) -> None:
         """Install this resolver for the current async context."""
-        SonarrEpisodeStateResolver._ctx.set(self)
+        SonarrRuleDataResolver._ctx.set(self)
 
     @classmethod
-    def current(cls) -> SonarrEpisodeStateResolver | None:
+    def current(cls) -> SonarrRuleDataResolver | None:
         """Return the resolver active in the current async context, or None."""
         return cls._ctx.get()
 
@@ -1380,7 +1386,7 @@ def _build_context(
     now = datetime.now(UTC)
     _resolver = DiskStatsResolver.current() if compute_disk else None
     _seerr_resolver = SeerrRequestResolver.current()
-    _sonarr_resolver = SonarrEpisodeStateResolver.current()
+    _sonarr_resolver = SonarrRuleDataResolver.current()
     _playback_resolver = PlaybackHistoryResolver.current()
     if target_scope == TARGET_MOVIE_VERSION and movie and version:
         size = version.size if version.size and version.size > 0 else movie.size
@@ -1591,6 +1597,11 @@ def _build_context(
                 if _sonarr_resolver
                 else RULE_VALUE_UNAVAILABLE
             ),
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
                 _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
                 if _seerr_resolver
@@ -1722,6 +1733,11 @@ def _build_context(
             "subtitle.languages": season.subtitle_languages,
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
                 _seerr_resolver.resolve(
                     MediaType.SERIES,
@@ -1872,6 +1888,11 @@ def _build_context(
             "series.library_season_count": _library_season_count(series),
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
                 _seerr_resolver.resolve(
                     MediaType.SERIES,

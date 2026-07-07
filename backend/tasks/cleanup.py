@@ -26,7 +26,7 @@ from backend.core.rule_engine import (
     DiskStatsResolver,
     PlaybackHistoryResolver,
     SeerrRequestResolver,
-    SonarrEpisodeStateResolver,
+    SonarrRuleDataResolver,
     SonarrRuleValue,
     collect_rule_conditions,
     evaluate_advanced_rule,
@@ -128,6 +128,7 @@ SonarrProtectionPreserveKey: TypeAlias = tuple[int, int]
 
 SONARR_UNAIRED_FIELD = "sonarr.latest_season_has_unaired_episodes"
 SONARR_FINALE_FIELD = "sonarr.latest_season_has_finale"
+SONARR_STATUS_FIELD = "sonarr.series_status"
 SONARR_EPISODE_FETCH_CONCURRENCY = 8
 
 
@@ -146,12 +147,13 @@ class _PlaybackRuleDataResult:
 
 
 @dataclass(slots=True)
-class _SonarrRefEpisodeState:
+class _SonarrRefRuleState:
     config_id: int
     arr_series_id: int
     latest_season_number: int | None = None
     has_unaired_episodes: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
     has_finale: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
+    series_status: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
 
 
 class _SonarrSeriesSnapshot:
@@ -691,7 +693,7 @@ async def collect_rule_preview_matches_with_metadata(
     )
 
     metadata = RulePreviewMatchMetadata()
-    sonarr_result = await _activate_sonarr_episode_state_for_rules(
+    sonarr_result = await _activate_sonarr_rule_data_for_rules(
         db,
         list(rules),
         sonarr_series_snapshot=sonarr_series_snapshot,
@@ -1173,7 +1175,7 @@ def _rules_use_field(rules: list[ReclaimRule], field: str) -> bool:
     return any(collect_rule_conditions(rule.definition, field=field) for rule in rules)
 
 
-def _rule_uses_sonarr_episode_fields(rule: ReclaimRule) -> bool:
+def _rule_uses_sonarr_fields(rule: ReclaimRule) -> bool:
     return any(
         collect_rule_conditions(rule.definition, field=field)
         for field in SONARR_RULE_FIELDS
@@ -1246,7 +1248,7 @@ def _sonarr_episode_season_number(episode: Mapping[str, object]) -> int | None:
 
 
 def _aggregate_sonarr_ref_field(
-    states: Sequence[_SonarrRefEpisodeState],
+    states: Sequence[_SonarrRefRuleState],
     field: str,
 ) -> SonarrRuleValue:
     values = [getattr(state, field) for state in states]
@@ -1257,9 +1259,23 @@ def _aggregate_sonarr_ref_field(
     return RULE_VALUE_UNAVAILABLE
 
 
+def _aggregate_sonarr_status(
+    states: Sequence[_SonarrRefRuleState],
+) -> SonarrRuleValue:
+    if not states:
+        return RULE_VALUE_UNAVAILABLE
+    statuses = [state.series_status for state in states]
+    if any(status is RULE_VALUE_UNAVAILABLE for status in statuses):
+        return RULE_VALUE_UNAVAILABLE
+    normalized = {str(status).strip().lower() for status in statuses if status}
+    if len(normalized) != 1:
+        return RULE_VALUE_UNAVAILABLE
+    return normalized.pop()
+
+
 def _sonarr_values_by_series(
     series_ids: Iterable[int],
-    states_by_series_id: Mapping[int, Sequence[_SonarrRefEpisodeState]],
+    states_by_series_id: Mapping[int, Sequence[_SonarrRefRuleState]],
 ) -> dict[int, dict[str, SonarrRuleValue]]:
     return {
         series_id: {
@@ -1271,27 +1287,45 @@ def _sonarr_values_by_series(
                 states_by_series_id.get(series_id, []),
                 "has_finale",
             ),
+            SONARR_STATUS_FIELD: _aggregate_sonarr_status(
+                states_by_series_id.get(series_id, [])
+            ),
         }
         for series_id in series_ids
     }
 
 
-async def _activate_sonarr_episode_state_for_rules(
+async def _activate_sonarr_rule_data_for_rules(
     db: AsyncSession,
     rules: list[ReclaimRule],
     *,
     sonarr_series_snapshot: _SonarrSeriesSnapshot | None = None,
 ) -> _SonarrRuleDataResult:
-    """Load only the latest Sonarr season needed by active series rules."""
+    """Load Sonarr-derived values needed by active TV rules."""
     sonarr_rules = [
         rule
         for rule in rules
-        if normalize_rule_target(rule) == TARGET_SERIES
-        and _rule_uses_sonarr_episode_fields(rule)
+        if normalize_rule_target(rule) in {TARGET_SERIES, TARGET_SEASON, TARGET_EPISODE}
+        and _rule_uses_sonarr_fields(rule)
     ]
     if not sonarr_rules:
-        SonarrEpisodeStateResolver({}).activate()
+        SonarrRuleDataResolver({}).activate()
         return _SonarrRuleDataResult(set(), set())
+
+    episode_state_rules = [
+        rule
+        for rule in sonarr_rules
+        if normalize_rule_target(rule) == TARGET_SERIES
+        and any(
+            collect_rule_conditions(rule.definition, field=field)
+            for field in (SONARR_UNAIRED_FIELD, SONARR_FINALE_FIELD)
+        )
+    ]
+    status_rules = [
+        rule
+        for rule in sonarr_rules
+        if collect_rule_conditions(rule.definition, field=SONARR_STATUS_FIELD)
+    ]
 
     query_options = [selectinload(Series.service_refs)]
     if _rules_use_field(sonarr_rules, "series.library_season_count"):
@@ -1350,11 +1384,11 @@ async def _activate_sonarr_episode_state_for_rules(
     )
 
     now = datetime.now(UTC)
-    states_by_series_id: dict[int, list[_SonarrRefEpisodeState]] = {}
+    states_by_series_id: dict[int, list[_SonarrRefRuleState]] = {}
     for series_id, refs in refs_by_series_id.items():
-        states: list[_SonarrRefEpisodeState] = []
+        states: list[_SonarrRefRuleState] = []
         for config_id, arr_series_id in refs:
-            state = _SonarrRefEpisodeState(
+            state = _SonarrRefRuleState(
                 config_id=config_id,
                 arr_series_id=arr_series_id,
             )
@@ -1364,6 +1398,9 @@ async def _activate_sonarr_episode_state_for_rules(
             )
             if sonarr_series is None:
                 continue
+            raw_status = str(getattr(sonarr_series, "status", "") or "").strip()
+            if raw_status:
+                state.series_status = raw_status.lower()
             regular_seasons = [
                 season
                 for season in getattr(sonarr_series, "seasons", [])
@@ -1387,7 +1424,7 @@ async def _activate_sonarr_episode_state_for_rules(
         states_by_series_id[series_id] = states
 
     partial_values = _sonarr_values_by_series(series_ids, states_by_series_id)
-    SonarrEpisodeStateResolver(partial_values).activate()
+    SonarrRuleDataResolver(partial_values).activate()
 
     needed_series_ids: set[int] = set()
     for series_id, series in series_by_id.items():
@@ -1398,7 +1435,7 @@ async def _activate_sonarr_episode_state_for_rules(
                 series=series,
             )
             is None
-            for rule in sonarr_rules
+            for rule in episode_state_rules
         ):
             needed_series_ids.add(series_id)
 
@@ -1406,7 +1443,7 @@ async def _activate_sonarr_episode_state_for_rules(
 
     async def load_latest_season(
         series_id: int,
-        state: _SonarrRefEpisodeState,
+        state: _SonarrRefRuleState,
     ) -> None:
         if state.latest_season_number is None:
             return
@@ -1457,12 +1494,12 @@ async def _activate_sonarr_episode_state_for_rules(
     )
 
     final_values = _sonarr_values_by_series(series_ids, states_by_series_id)
-    SonarrEpisodeStateResolver(final_values).activate()
+    SonarrRuleDataResolver(final_values).activate()
 
     unavailable_series_ids: set[int] = set()
     preserve_protection_keys: set[SonarrProtectionPreserveKey] = set()
     for series_id, series in series_by_id.items():
-        for rule in sonarr_rules:
+        for rule in episode_state_rules:
             if (
                 evaluate_advanced_rule_state(
                     rule,
@@ -1478,6 +1515,17 @@ async def _activate_sonarr_episode_state_for_rules(
             ):
                 preserve_protection_keys.add((rule.id, series_id))
 
+        if (
+            status_rules
+            and final_values[series_id][SONARR_STATUS_FIELD] is RULE_VALUE_UNAVAILABLE
+        ):
+            unavailable_series_ids.add(series_id)
+            for rule in status_rules:
+                if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT and isinstance(
+                    rule.id, int
+                ):
+                    preserve_protection_keys.add((rule.id, series_id))
+
     error: str | None = None
     if unavailable_series_ids:
         if errors:
@@ -1488,16 +1536,16 @@ async def _activate_sonarr_episode_state_for_rules(
             error = "Sonarr is not configured"
         else:
             error = (
-                "Sonarr returned no usable latest-season episode data for "
+                "Sonarr returned no usable or consistent rule data for "
                 f"{len(unavailable_series_ids)} series"
             )
         LOG.warning(
-            "Sonarr episode-state rules have unavailable data for "
+            "Sonarr rules have unavailable data for "
             f"{len(unavailable_series_ids)} series: {error}"
         )
     else:
         LOG.debug(
-            "Activated Sonarr latest-season rule data for "
+            "Activated Sonarr rule data for "
             f"{len(series_ids)} series; fetched episodes for "
             f"{len(needed_series_ids)} series"
         )
@@ -2833,7 +2881,7 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                     f"this run: {seerr_skip_reason}"
                 )
 
-        sonarr_rule_result = await _activate_sonarr_episode_state_for_rules(
+        sonarr_rule_result = await _activate_sonarr_rule_data_for_rules(
             db,
             list(rules),
             sonarr_series_snapshot=sonarr_series_snapshot,

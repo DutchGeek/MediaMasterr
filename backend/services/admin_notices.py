@@ -306,7 +306,7 @@ async def set_sonarr_rule_data_notice(
         severity="warning",
         title="Sonarr rule data is unavailable",
         message=(
-            f"The latest cleanup scan could not evaluate Sonarr episode-state "
+            f"The latest cleanup scan could not evaluate Sonarr-dependent "
             f"rules for {unavailable_series} series: {reason}."
         ),
         action_label="Go to Settings",

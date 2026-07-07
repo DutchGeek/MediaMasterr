@@ -907,6 +907,13 @@
       defaultOperator: "is_true",
     },
     {
+      value: "sonarr.series_status",
+      label: "Sonarr series status",
+      kind: "text",
+      operators: textOperators,
+      defaultOperator: "equals",
+    },
+    {
       value: "sonarr.latest_season_has_unaired_episodes",
       label: "Latest season has unaired episodes",
       kind: "boolean",
@@ -1097,6 +1104,7 @@
       "series.tmdb_season_count",
       "sonarr.latest_season_has_unaired_episodes",
       "sonarr.latest_season_has_finale",
+      "sonarr.series_status",
       "subtitle.languages",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
@@ -1168,6 +1176,7 @@
       "series.status",
       "series.library_season_count",
       "series.tmdb_season_count",
+      "sonarr.series_status",
       "subtitle.languages",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
@@ -1240,6 +1249,7 @@
       "series.status",
       "series.library_season_count",
       "series.tmdb_season_count",
+      "sonarr.series_status",
       "tmdb.days_since_first_air_date",
       "tmdb.days_since_last_air_date",
       "tmdb.first_air_date",
@@ -1385,6 +1395,12 @@
     "In Production",
     "Planned",
     "Pilot",
+  ];
+  const SONARR_SERIES_STATUSES = [
+    { value: "continuing", label: "Continuing" },
+    { value: "ended", label: "Ended" },
+    { value: "upcoming", label: "Upcoming" },
+    { value: "deleted", label: "Deleted" },
   ];
 
   // helpers
@@ -1948,7 +1964,7 @@
         <div
           class="col-span-2 row-start-3 flex flex-wrap items-center gap-2 w-full min-w-0 md:col-auto md:row-auto md:flex-1 md:min-w-[18rem]"
         >
-          {#if node.field === "series.status" && !listOperators.has(node.operator)}
+          {#if (node.field === "series.status" || node.field === "sonarr.series_status") && !listOperators.has(node.operator)}
             <Select.Root
               type="single"
               value={typeof node.value === "string" ? node.value : ""}
@@ -1962,11 +1978,19 @@
                   : "Select status…"}
               </Select.Trigger>
               <Select.Content>
-                {#each TMDB_SERIES_STATUSES as status}
-                  <Select.Item value={status} label={status}
-                    >{status}</Select.Item
-                  >
-                {/each}
+                {#if node.field === "series.status"}
+                  {#each TMDB_SERIES_STATUSES as status}
+                    <Select.Item value={status} label={status}
+                      >{status}</Select.Item
+                    >
+                  {/each}
+                {:else}
+                  {#each SONARR_SERIES_STATUSES as status}
+                    <Select.Item value={status.value} label={status.label}
+                      >{status.label}</Select.Item
+                    >
+                  {/each}
+                {/if}
               </Select.Content>
             </Select.Root>
           {:else}

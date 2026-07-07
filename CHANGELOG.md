@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sonarr's canonical series status is available as a rule field for series, season, and episode targets, with fail-closed multi-instance handling
 - ARR action diagnostics (logging)
   - Logs now show
     - Resolved action: delete, unmonitor, or remove_if_empty

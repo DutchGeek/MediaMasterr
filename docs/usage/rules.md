@@ -269,9 +269,19 @@ After configuring Seerr or changing identity mappings, run `Sync Media` before
 previewing the rule. Plex can provide current completed-watch state directly;
 durable completed Plex history requires Tautulli.
 
-### Sonarr Episode State
+### Sonarr Rule Data
 
-These fields are available only to whole-series rules:
+`Sonarr series status` exposes Sonarr's canonical series status independently
+from the TMDB-backed `Series status` field. It is available to series, season,
+and episode rules with the values `continuing`, `ended`, `upcoming`, and
+`deleted`.
+
+Status is loaded from Sonarr's bulk series response and does not require
+episode requests. When a series maps to multiple Sonarr instances, every
+mapped and reachable instance must report the same status. Missing or
+conflicting values are unknown and fail closed.
+
+The latest-season fields are available only to whole-series rules:
 
 | Field                              | Meaning                                                         |
 | ---------------------------------- | --------------------------------------------------------------- |
