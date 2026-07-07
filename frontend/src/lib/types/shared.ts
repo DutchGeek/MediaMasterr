@@ -401,6 +401,8 @@ export type RuleConditionOperator =
   | "not_contains_any"
   | "contains_all"
   | "not_contains_all"
+  | "contains_substring"
+  | "not_contains_substring"
   | "exists"
   | "not_exists"
   | "is_true"

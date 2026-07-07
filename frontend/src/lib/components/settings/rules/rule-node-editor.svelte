@@ -164,6 +164,8 @@
     not_contains_any: "matches none",
     contains_all: "matches all",
     not_contains_all: "does not match all",
+    contains_substring: "contains",
+    not_contains_substring: "does not contain",
     exists: "exists",
     not_exists: "does not exist",
     is_true: "is true",
@@ -178,6 +180,8 @@
     "not_contains_any",
     "contains_all",
     "not_contains_all",
+    "contains_substring",
+    "not_contains_substring",
     "matches_any_regex",
   ]);
 
@@ -219,6 +223,12 @@
     "not_contains_all",
     "exists",
     "not_exists",
+  ];
+
+  const arrTagsOperators: RuleConditionOperator[] = [
+    ...multiValueTextOperators,
+    "contains_substring",
+    "not_contains_substring",
   ];
 
   const libraryOperators: RuleConditionOperator[] = [
@@ -896,7 +906,7 @@
       value: "arr.tags",
       label: "Arr tags",
       kind: "text",
-      operators: multiValueTextOperators,
+      operators: arrTagsOperators,
       defaultOperator: "contains_any",
     },
     {
