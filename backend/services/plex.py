@@ -34,6 +34,7 @@ from backend.models.media import (
     AggregatedSeasonData,
     AggregatedSeriesData,
     ExternalIDs,
+    MediaWatchSnapshot,
     MovieVersionData,
 )
 from backend.models.services.plex import PlexMovie, PlexSeries
@@ -47,6 +48,23 @@ JsonPayload: TypeAlias = JsonDict | JsonList
 _METADATA_BATCH_SIZE = 50
 _EPISODE_METADATA_BATCH_SIZE = 100
 _SECTION_METADATA_PAGE_SIZE = 1000
+
+
+def _history_record_rating_key(record: Mapping[str, object], field: str) -> str:
+    """Extract a Plex rating key from either its scalar or metadata-path form."""
+    direct = str(record.get(field) or "").strip()
+    if direct:
+        return direct
+
+    path_field = {
+        "ratingKey": "key",
+        "parentRatingKey": "parentKey",
+        "grandparentRatingKey": "grandparentKey",
+    }.get(field)
+    path = str(record.get(path_field) or "").strip() if path_field else ""
+    if not path:
+        return ""
+    return PurePosixPath(path.rstrip("/")).name
 
 
 class _HistoryAggregate:
@@ -1481,7 +1499,7 @@ class PlexService:
         # key -> [view_count, max_lva, set(accountIDs)]
         aggregated: dict[str, _HistoryAggregate] = {}
         for record in records:
-            key = str(record.get(key_field, ""))
+            key = _history_record_rating_key(record, key_field)
             if not key:
                 continue
             if rating_keys is not None and key not in rating_keys:
@@ -1713,7 +1731,7 @@ class PlexService:
     async def get_watched_user_snapshots(
         self,
         included_libraries: list[str] | None = None,
-    ) -> list[tuple[MediaType, int, str, datetime, int | None]]:
+    ) -> list[MediaWatchSnapshot]:
         """Return per-user watched snapshots mapped to TMDB IDs."""
         snapshots, _ = await self.get_watched_user_snapshots_with_cursor(
             included_libraries=included_libraries
@@ -1726,7 +1744,7 @@ class PlexService:
         *,
         viewed_at_gte: datetime | None = None,
         use_cache: bool = True,
-    ) -> tuple[list[tuple[MediaType, int, str, datetime, int | None]], datetime | None]:
+    ) -> tuple[list[MediaWatchSnapshot], datetime | None]:
         """Return per-user watched snapshots mapped to TMDB IDs, plus max viewedAt."""
         movies = await self.get_movies(included_libraries=included_libraries)
         series = await self.get_series(included_libraries=included_libraries)
@@ -1755,7 +1773,9 @@ class PlexService:
         )
         plex_users_by_account_id = await self._get_plex_tv_user_map()
 
-        merged: dict[tuple[MediaType, int, str], tuple[datetime, int | None]] = {}
+        merged: dict[
+            tuple[MediaType, int, str, str | None], tuple[datetime, int | None]
+        ] = {}
         max_viewed_at: datetime | None = None
         for record in history_records:
             watched_at = self._fromtimestamp(record.get("viewedAt"))
@@ -1767,25 +1787,38 @@ class PlexService:
             if not watch_user_key:
                 continue
 
-            movie_key = str(record.get("ratingKey", "")).strip()
+            movie_key = _history_record_rating_key(record, "ratingKey")
             tmdb_movie = movie_tmdb_by_rating_key.get(movie_key)
             if tmdb_movie is not None:
-                key = (MediaType.MOVIE, tmdb_movie, watch_user_key)
-                prev = merged.get(key)
+                movie_identity = (MediaType.MOVIE, tmdb_movie, watch_user_key, None)
+                prev = merged.get(movie_identity)
                 if prev is None or watched_at > prev[0]:
-                    merged[key] = (watched_at, None)
+                    merged[movie_identity] = (watched_at, None)
 
-            series_key = str(record.get("grandparentRatingKey", "")).strip()
+            series_key = _history_record_rating_key(record, "grandparentRatingKey")
             tmdb_series = series_tmdb_by_rating_key.get(series_key)
             if tmdb_series is not None:
-                key = (MediaType.SERIES, tmdb_series, watch_user_key)
-                prev = merged.get(key)
+                episode_key = _history_record_rating_key(record, "ratingKey") or None
+                episode_identity = (
+                    MediaType.SERIES,
+                    tmdb_series,
+                    watch_user_key,
+                    episode_key,
+                )
+                prev = merged.get(episode_identity)
                 if prev is None or watched_at > prev[0]:
-                    merged[key] = (watched_at, None)
+                    merged[episode_identity] = (watched_at, None)
 
         snapshots = [
-            (media_type, tmdb_id, user_key, watched_at, play_count)
-            for (media_type, tmdb_id, user_key), (
+            MediaWatchSnapshot(
+                media_type=media_type,
+                tmdb_id=tmdb_id,
+                watch_user_key=user_key,
+                last_watched_at=watched_at,
+                play_count=play_count,
+                source_item_id=source_item_id,
+            )
+            for (media_type, tmdb_id, user_key, source_item_id), (
                 watched_at,
                 play_count,
             ) in merged.items()

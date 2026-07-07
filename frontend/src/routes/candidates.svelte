@@ -127,6 +127,7 @@
 
   const sortByOptions = [
     { value: "created_at", label: "Flagged" },
+    { value: "auto_delete_eligible_at", label: "Deletion date" },
     { value: "media_title", label: "Title" },
     { value: "estimated_space_bytes", label: "Size" },
   ];

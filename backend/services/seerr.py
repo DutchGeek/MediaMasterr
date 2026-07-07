@@ -15,7 +15,12 @@ from tenacity import (
 
 from backend.core.utils.request import format_http_failure, should_retry_on_status
 from backend.enums import MediaType, SeerrRequestStatus
-from backend.models.services.seerr import SeerrPageInfo, SeerrRequest, SeerrUser
+from backend.models.services.seerr import (
+    SeerrPageInfo,
+    SeerrRequest,
+    SeerrRequestedSeason,
+    SeerrUser,
+)
 
 SeerrResponseData: TypeAlias = dict[str, Any] | list[dict[str, Any]]
 
@@ -35,6 +40,11 @@ class SeerrRequestedByData(TypedDict):
     id: int
 
 
+class SeerrRequestedSeasonData(TypedDict):
+    seasonNumber: int
+    createdAt: str
+
+
 class SeerrRequestData(TypedDict):
     id: int
     status: int
@@ -43,6 +53,7 @@ class SeerrRequestData(TypedDict):
     createdAt: str
     requestedBy: SeerrRequestedByData
     is4k: NotRequired[bool]
+    seasons: NotRequired[list[SeerrRequestedSeasonData]]
 
 
 class SeerrUserData(TypedDict):
@@ -127,6 +138,24 @@ def _request_data_from_dict(data: dict[str, Any]) -> SeerrRequestData | None:
     }
     if "is4k" in data:
         request["is4k"] = bool(data.get("is4k"))
+    raw_seasons = data.get("seasons")
+    if isinstance(raw_seasons, list):
+        seasons: list[SeerrRequestedSeasonData] = []
+        for raw_season in raw_seasons:
+            if not isinstance(raw_season, dict):
+                continue
+            season_number = _as_int_or_none(raw_season.get("seasonNumber"))
+            season_created_at = raw_season.get("createdAt") or created_at
+            if season_number is None or not isinstance(season_created_at, str):
+                continue
+            seasons.append(
+                {
+                    "seasonNumber": season_number,
+                    "createdAt": season_created_at,
+                }
+            )
+        if seasons:
+            request["seasons"] = seasons
     return request
 
 
@@ -232,6 +261,13 @@ def build_seerr_request_from_dict(data: SeerrRequestData) -> SeerrRequest:
         created_at=datetime.fromisoformat(data["createdAt"]),
         requested_by_id=data["requestedBy"]["id"],
         is_4k=data.get("is4k", False),
+        requested_seasons=tuple(
+            SeerrRequestedSeason(
+                season_number=season["seasonNumber"],
+                created_at=datetime.fromisoformat(season["createdAt"]),
+            )
+            for season in data.get("seasons", [])
+        ),
         raw=data,
     )
 

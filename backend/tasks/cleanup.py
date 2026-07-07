@@ -26,7 +26,7 @@ from backend.core.rule_engine import (
     DiskStatsResolver,
     PlaybackHistoryResolver,
     SeerrRequestResolver,
-    SonarrEpisodeStateResolver,
+    SonarrRuleDataResolver,
     SonarrRuleValue,
     collect_rule_conditions,
     evaluate_advanced_rule,
@@ -57,9 +57,11 @@ from backend.database.models import (
     GeneralSettings,
     MediaFavorite,
     MediaWatchUser,
+    MediaWatchUserEpisode,
     Movie,
     MovieArrRef,
     MovieVersion,
+    PlaybackHistoryEvent,
     ProtectedMedia,
     ProtectionRequest,
     ReclaimCandidate,
@@ -126,6 +128,7 @@ SonarrProtectionPreserveKey: TypeAlias = tuple[int, int]
 
 SONARR_UNAIRED_FIELD = "sonarr.latest_season_has_unaired_episodes"
 SONARR_FINALE_FIELD = "sonarr.latest_season_has_finale"
+SONARR_STATUS_FIELD = "sonarr.series_status"
 SONARR_EPISODE_FETCH_CONCURRENCY = 8
 
 
@@ -144,12 +147,13 @@ class _PlaybackRuleDataResult:
 
 
 @dataclass(slots=True)
-class _SonarrRefEpisodeState:
+class _SonarrRefRuleState:
     config_id: int
     arr_series_id: int
     latest_season_number: int | None = None
     has_unaired_episodes: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
     has_finale: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
+    series_status: SonarrRuleValue = RULE_VALUE_UNAVAILABLE
 
 
 class _SonarrSeriesSnapshot:
@@ -689,7 +693,7 @@ async def collect_rule_preview_matches_with_metadata(
     )
 
     metadata = RulePreviewMatchMetadata()
-    sonarr_result = await _activate_sonarr_episode_state_for_rules(
+    sonarr_result = await _activate_sonarr_rule_data_for_rules(
         db,
         list(rules),
         sonarr_series_snapshot=sonarr_series_snapshot,
@@ -1171,10 +1175,50 @@ def _rules_use_field(rules: list[ReclaimRule], field: str) -> bool:
     return any(collect_rule_conditions(rule.definition, field=field) for rule in rules)
 
 
-def _rule_uses_sonarr_episode_fields(rule: ReclaimRule) -> bool:
+def _rule_uses_sonarr_fields(rule: ReclaimRule) -> bool:
     return any(
         collect_rule_conditions(rule.definition, field=field)
         for field in SONARR_RULE_FIELDS
+    )
+
+
+async def _season_watch_inventory_rule_data(
+    db: AsyncSession,
+    rules: list[ReclaimRule],
+) -> _SonarrRuleDataResult:
+    """Report seasons whose canonical Sonarr episode inventory is unavailable."""
+    watch_rules = [
+        rule for rule in rules if _rule_uses_season_episode_watch_fields(rule)
+    ]
+    if not watch_rules:
+        return _SonarrRuleDataResult(set(), set())
+
+    rows = (
+        await db.execute(
+            select(Series.id, Season.sonarr_episode_numbers)
+            .join(Season, Season.series_id == Series.id)
+            .where(Series.removed_at.is_(None))
+        )
+    ).all()
+    unavailable_series_ids = {
+        series_id for series_id, inventory in rows if not inventory
+    }
+    preserve_protection_keys = {
+        (rule.id, series_id)
+        for rule in watch_rules
+        if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT
+        and isinstance(rule.id, int)
+        for series_id in unavailable_series_ids
+    }
+    error = (
+        "Run Sync Media to refresh Sonarr's season episode inventory"
+        if unavailable_series_ids
+        else None
+    )
+    return _SonarrRuleDataResult(
+        unavailable_series_ids=unavailable_series_ids,
+        preserve_protection_keys=preserve_protection_keys,
+        error=error,
     )
 
 
@@ -1244,7 +1288,7 @@ def _sonarr_episode_season_number(episode: Mapping[str, object]) -> int | None:
 
 
 def _aggregate_sonarr_ref_field(
-    states: Sequence[_SonarrRefEpisodeState],
+    states: Sequence[_SonarrRefRuleState],
     field: str,
 ) -> SonarrRuleValue:
     values = [getattr(state, field) for state in states]
@@ -1255,9 +1299,23 @@ def _aggregate_sonarr_ref_field(
     return RULE_VALUE_UNAVAILABLE
 
 
+def _aggregate_sonarr_status(
+    states: Sequence[_SonarrRefRuleState],
+) -> SonarrRuleValue:
+    if not states:
+        return RULE_VALUE_UNAVAILABLE
+    statuses = [state.series_status for state in states]
+    if any(status is RULE_VALUE_UNAVAILABLE for status in statuses):
+        return RULE_VALUE_UNAVAILABLE
+    normalized = {str(status).strip().lower() for status in statuses if status}
+    if len(normalized) != 1:
+        return RULE_VALUE_UNAVAILABLE
+    return normalized.pop()
+
+
 def _sonarr_values_by_series(
     series_ids: Iterable[int],
-    states_by_series_id: Mapping[int, Sequence[_SonarrRefEpisodeState]],
+    states_by_series_id: Mapping[int, Sequence[_SonarrRefRuleState]],
 ) -> dict[int, dict[str, SonarrRuleValue]]:
     return {
         series_id: {
@@ -1269,27 +1327,46 @@ def _sonarr_values_by_series(
                 states_by_series_id.get(series_id, []),
                 "has_finale",
             ),
+            SONARR_STATUS_FIELD: _aggregate_sonarr_status(
+                states_by_series_id.get(series_id, [])
+            ),
         }
         for series_id in series_ids
     }
 
 
-async def _activate_sonarr_episode_state_for_rules(
+async def _activate_sonarr_rule_data_for_rules(
     db: AsyncSession,
     rules: list[ReclaimRule],
     *,
     sonarr_series_snapshot: _SonarrSeriesSnapshot | None = None,
 ) -> _SonarrRuleDataResult:
-    """Load only the latest Sonarr season needed by active series rules."""
+    """Load Sonarr-derived values needed by active TV rules."""
+    watch_inventory_result = await _season_watch_inventory_rule_data(db, rules)
     sonarr_rules = [
         rule
         for rule in rules
-        if normalize_rule_target(rule) == TARGET_SERIES
-        and _rule_uses_sonarr_episode_fields(rule)
+        if normalize_rule_target(rule) in {TARGET_SERIES, TARGET_SEASON, TARGET_EPISODE}
+        and _rule_uses_sonarr_fields(rule)
     ]
     if not sonarr_rules:
-        SonarrEpisodeStateResolver({}).activate()
-        return _SonarrRuleDataResult(set(), set())
+        SonarrRuleDataResolver({}).activate()
+        return watch_inventory_result
+
+    episode_state_rules = [
+        rule
+        for rule in sonarr_rules
+        if normalize_rule_target(rule) == TARGET_SERIES
+        and any(
+            collect_rule_conditions(rule.definition, field=field)
+            for field in (SONARR_UNAIRED_FIELD, SONARR_FINALE_FIELD)
+        )
+    ]
+    status_rules = [
+        rule
+        for rule in sonarr_rules
+        if collect_rule_conditions(rule.definition, field=SONARR_STATUS_FIELD)
+    ]
 
     query_options = [selectinload(Series.service_refs)]
     if _rules_use_field(sonarr_rules, "series.library_season_count"):
@@ -1348,11 +1425,11 @@ async def _activate_sonarr_episode_state_for_rules(
     )
 
     now = datetime.now(UTC)
-    states_by_series_id: dict[int, list[_SonarrRefEpisodeState]] = {}
+    states_by_series_id: dict[int, list[_SonarrRefRuleState]] = {}
     for series_id, refs in refs_by_series_id.items():
-        states: list[_SonarrRefEpisodeState] = []
+        states: list[_SonarrRefRuleState] = []
         for config_id, arr_series_id in refs:
-            state = _SonarrRefEpisodeState(
+            state = _SonarrRefRuleState(
                 config_id=config_id,
                 arr_series_id=arr_series_id,
             )
@@ -1362,6 +1439,9 @@ async def _activate_sonarr_episode_state_for_rules(
             )
             if sonarr_series is None:
                 continue
+            raw_status = str(getattr(sonarr_series, "status", "") or "").strip()
+            if raw_status:
+                state.series_status = raw_status.lower()
             regular_seasons = [
                 season
                 for season in getattr(sonarr_series, "seasons", [])
@@ -1385,7 +1465,7 @@ async def _activate_sonarr_episode_state_for_rules(
         states_by_series_id[series_id] = states
 
     partial_values = _sonarr_values_by_series(series_ids, states_by_series_id)
-    SonarrEpisodeStateResolver(partial_values).activate()
+    SonarrRuleDataResolver(partial_values).activate()
 
     needed_series_ids: set[int] = set()
     for series_id, series in series_by_id.items():
@@ -1396,7 +1476,7 @@ async def _activate_sonarr_episode_state_for_rules(
                 series=series,
             )
             is None
-            for rule in sonarr_rules
+            for rule in episode_state_rules
         ):
             needed_series_ids.add(series_id)
 
@@ -1404,7 +1484,7 @@ async def _activate_sonarr_episode_state_for_rules(
 
     async def load_latest_season(
         series_id: int,
-        state: _SonarrRefEpisodeState,
+        state: _SonarrRefRuleState,
     ) -> None:
         if state.latest_season_number is None:
             return
@@ -1455,12 +1535,12 @@ async def _activate_sonarr_episode_state_for_rules(
     )
 
     final_values = _sonarr_values_by_series(series_ids, states_by_series_id)
-    SonarrEpisodeStateResolver(final_values).activate()
+    SonarrRuleDataResolver(final_values).activate()
 
     unavailable_series_ids: set[int] = set()
     preserve_protection_keys: set[SonarrProtectionPreserveKey] = set()
     for series_id, series in series_by_id.items():
-        for rule in sonarr_rules:
+        for rule in episode_state_rules:
             if (
                 evaluate_advanced_rule_state(
                     rule,
@@ -1476,6 +1556,17 @@ async def _activate_sonarr_episode_state_for_rules(
             ):
                 preserve_protection_keys.add((rule.id, series_id))
 
+        if (
+            status_rules
+            and final_values[series_id][SONARR_STATUS_FIELD] is RULE_VALUE_UNAVAILABLE
+        ):
+            unavailable_series_ids.add(series_id)
+            for rule in status_rules:
+                if normalize_rule_outcome(rule) == RULE_OUTCOME_PROTECT and isinstance(
+                    rule.id, int
+                ):
+                    preserve_protection_keys.add((rule.id, series_id))
+
     error: str | None = None
     if unavailable_series_ids:
         if errors:
@@ -1486,24 +1577,29 @@ async def _activate_sonarr_episode_state_for_rules(
             error = "Sonarr is not configured"
         else:
             error = (
-                "Sonarr returned no usable latest-season episode data for "
+                "Sonarr returned no usable or consistent rule data for "
                 f"{len(unavailable_series_ids)} series"
             )
         LOG.warning(
-            "Sonarr episode-state rules have unavailable data for "
+            "Sonarr rules have unavailable data for "
             f"{len(unavailable_series_ids)} series: {error}"
         )
     else:
         LOG.debug(
-            "Activated Sonarr latest-season rule data for "
+            "Activated Sonarr rule data for "
             f"{len(series_ids)} series; fetched episodes for "
             f"{len(needed_series_ids)} series"
         )
 
+    unavailable_series_ids.update(watch_inventory_result.unavailable_series_ids)
+    preserve_protection_keys.update(watch_inventory_result.preserve_protection_keys)
+    errors_out = [
+        message for message in (error, watch_inventory_result.error) if message
+    ]
     return _SonarrRuleDataResult(
         unavailable_series_ids=unavailable_series_ids,
         preserve_protection_keys=preserve_protection_keys,
-        error=error,
+        error="; ".join(errors_out) or None,
     )
 
 
@@ -1793,6 +1889,85 @@ def _compute_requester_has_watched_for_key(
     return False
 
 
+def _compute_requester_tv_watch_targets_for_key(
+    *,
+    media_key: tuple[MediaType, int],
+    snapshot: SeerrRequestSnapshot,
+    watch_by_service_and_user: Mapping[
+        Service, Mapping[str, Mapping[tuple[int, int], datetime]]
+    ],
+    mappings: list[dict[str, Any]],
+    expected_episodes: set[tuple[int, int]],
+) -> dict[tuple[str, int, int | None, int | None], bool]:
+    """Compute requester-specific episode and completion state for one series."""
+    tmdb_id = media_key[1]
+    result: dict[tuple[str, int, int | None, int | None], bool] = {
+        (TARGET_EPISODE, tmdb_id, season_number, episode_number): False
+        for season_number, episode_number in expected_episodes
+    }
+    expected_by_season: dict[int, set[tuple[int, int]]] = {}
+    for coordinate in expected_episodes:
+        expected_by_season.setdefault(coordinate[0], set()).add(coordinate)
+    for season_number in expected_by_season:
+        result[(TARGET_SEASON, tmdb_id, season_number, None)] = False
+    result[(TARGET_SERIES, tmdb_id, None, None)] = False
+
+    requester_times = snapshot.latest_request_at_by_key_user.get(media_key, {})
+    for requester_id, series_requested_at in requester_times.items():
+        requested_seasons = {
+            season_number: by_user[requester_id]
+            for (series_tmdb_id, season_number), by_user in (
+                snapshot.latest_request_at_by_series_season_user.items()
+            )
+            if series_tmdb_id == tmdb_id and requester_id in by_user
+        }
+        if not requested_seasons:
+            requested_seasons = {
+                season_number: series_requested_at
+                for season_number in expected_by_season
+            }
+        requester_identity_keys = snapshot.requester_identity_keys_by_user_id.get(
+            requester_id, set()
+        ) or {str(requester_id)}
+        watched_at_by_coordinate: dict[tuple[int, int], datetime] = {}
+        for watch_service, watch_by_user in watch_by_service_and_user.items():
+            candidate_keys = _build_watch_keys_for_requester(
+                requester_id=requester_id,
+                requester_identity_keys=requester_identity_keys,
+                target_service=watch_service,
+                mappings=mappings,
+            )
+            for watch_key in candidate_keys:
+                for coordinate, watched_at in watch_by_user.get(watch_key, {}).items():
+                    watched_at_utc = ensure_utc(watched_at)
+                    existing = watched_at_by_coordinate.get(coordinate)
+                    if existing is None or watched_at_utc > existing:
+                        watched_at_by_coordinate[coordinate] = watched_at_utc
+
+        watched: set[tuple[int, int]] = set()
+        for coordinate, watched_at in watched_at_by_coordinate.items():
+            requested_at = requested_seasons.get(coordinate[0])
+            if requested_at is not None and watched_at > ensure_utc(requested_at):
+                watched.add(coordinate)
+
+        for season_number, episode_number in watched & expected_episodes:
+            result[(TARGET_EPISODE, tmdb_id, season_number, episode_number)] = True
+        for season_number, season_episodes in expected_by_season.items():
+            if season_number not in requested_seasons:
+                continue
+            if season_episodes and season_episodes.issubset(watched):
+                result[(TARGET_SEASON, tmdb_id, season_number, None)] = True
+        regular_episodes = {
+            coordinate
+            for coordinate in expected_episodes
+            if coordinate[0] > 0 and coordinate[0] in requested_seasons
+        }
+        if regular_episodes and regular_episodes.issubset(watched):
+            result[(TARGET_SERIES, tmdb_id, None, None)] = True
+
+    return result
+
+
 async def _activate_seerr_request_resolver_for_rules(
     db: AsyncSession,
     rules: list[ReclaimRule],
@@ -1908,8 +2083,74 @@ async def _activate_seerr_request_resolver_for_rules(
         settings_row.requester_watch_user_mappings if settings_row is not None else []
     )
     mappings = [m for m in raw_mappings if isinstance(m, dict)]
+
+    durable_rows = (
+        await db.execute(
+            select(
+                PlaybackHistoryEvent.source_service,
+                PlaybackHistoryEvent.provider_media_type,
+                PlaybackHistoryEvent.tmdb_id,
+                PlaybackHistoryEvent.season_number,
+                PlaybackHistoryEvent.episode_number,
+                PlaybackHistoryEvent.source_username,
+                PlaybackHistoryEvent.source_user_id,
+                PlaybackHistoryEvent.played_at,
+            ).where(
+                PlaybackHistoryEvent.completed.is_(True),
+                PlaybackHistoryEvent.tmdb_id.is_not(None),
+                PlaybackHistoryEvent.provider_media_type.in_(("movie", "episode")),
+            )
+        )
+    ).all()
+    durable_episode_watches: dict[
+        int, dict[Service, dict[str, dict[tuple[int, int], datetime]]]
+    ] = {}
+    durable_event_count = 0
+    for (
+        source_service,
+        provider_media_type,
+        tmdb_id,
+        season_number,
+        episode_number,
+        source_username,
+        source_user_id,
+        played_at,
+    ) in durable_rows:
+        watch_key = _normalize_watch_key(source_username or source_user_id)
+        if not watch_key or played_at is None or tmdb_id is None:
+            continue
+        watch_service = (
+            Service.PLEX if source_service is Service.TAUTULLI else source_service
+        )
+        watched_at = ensure_utc(played_at)
+        durable_event_count += 1
+        if provider_media_type == "movie":
+            media_key = (MediaType.MOVIE, int(tmdb_id))
+            if media_key not in relevant_keys:
+                continue
+            by_user = watch_by_service_and_user.setdefault(media_key, {}).setdefault(
+                watch_service, {}
+            )
+            existing = by_user.get(watch_key)
+            if existing is None or watched_at > existing:
+                by_user[watch_key] = watched_at
+            continue
+        if season_number is None or episode_number is None:
+            continue
+        coordinate = (int(season_number), int(episode_number))
+        by_coordinate = (
+            durable_episode_watches.setdefault(int(tmdb_id), {})
+            .setdefault(watch_service, {})
+            .setdefault(watch_key, {})
+        )
+        existing = by_coordinate.get(coordinate)
+        if existing is None or watched_at > existing:
+            by_coordinate[coordinate] = watched_at
+
     requester_has_watched_by_key: dict[tuple[MediaType, int], bool] = {}
     for key in relevant_keys:
+        if key[0] is not MediaType.MOVIE:
+            continue
         requester_has_watched_by_key[key] = _compute_requester_has_watched_for_key(
             media_key=key,
             snapshot=snapshot,
@@ -1917,14 +2158,136 @@ async def _activate_seerr_request_resolver_for_rules(
             mappings=mappings,
         )
 
+    expected_episode_rows = (
+        await db.execute(
+            select(
+                Series.tmdb_id,
+                Season.season_number,
+                Episode.episode_number,
+            )
+            .join(Season, Episode.season_id == Season.id)
+            .join(Series, Season.series_id == Series.id)
+            .where(Series.tmdb_id.in_(series_tmdb_ids))
+        )
+    ).all()
+    expected_by_series: dict[int, set[tuple[int, int]]] = {}
+    for tmdb_id, season_number, episode_number in expected_episode_rows:
+        if tmdb_id is not None:
+            expected_by_series.setdefault(int(tmdb_id), set()).add(
+                (int(season_number), int(episode_number))
+            )
+
+    requester_ids_by_target: dict[tuple[str, int, int | None], set[int]] = {}
+    latest_active_request_at_by_target: dict[tuple[str, int, int | None], datetime] = {}
+    for tmdb_id in series_tmdb_ids:
+        season_numbers = {
+            season_number
+            for season_number, _episode_number in expected_by_series.get(tmdb_id, set())
+        }
+        has_season_request_data = any(
+            series_tmdb_id == tmdb_id
+            for series_tmdb_id, _season_number in (
+                snapshot.requester_ids_by_series_season
+            )
+        )
+        for season_number in season_numbers:
+            season_key = (tmdb_id, season_number)
+            user_ids = (
+                snapshot.requester_ids_by_series_season.get(season_key, set())
+                if has_season_request_data
+                else requester_ids_by_key.get((MediaType.SERIES, tmdb_id), set())
+            )
+            for target_scope in (TARGET_SEASON, TARGET_EPISODE):
+                target_key = (target_scope, tmdb_id, season_number)
+                requester_ids_by_target[target_key] = set(user_ids)
+                active_at = snapshot.latest_active_request_at_by_series_season.get(
+                    season_key
+                )
+                if active_at is None and not has_season_request_data:
+                    active_at = latest_active_request_at_by_key.get(
+                        (MediaType.SERIES, tmdb_id)
+                    )
+                if active_at is not None:
+                    latest_active_request_at_by_target[target_key] = active_at
+
+    episode_watch_rows = (
+        await db.execute(
+            select(
+                MediaWatchUserEpisode.series_tmdb_id,
+                MediaWatchUserEpisode.source_service,
+                MediaWatchUserEpisode.watch_user_key_normalized,
+                MediaWatchUserEpisode.season_number,
+                MediaWatchUserEpisode.episode_number,
+                MediaWatchUserEpisode.last_watched_at,
+            ).where(MediaWatchUserEpisode.series_tmdb_id.in_(series_tmdb_ids))
+        )
+    ).all()
+    episode_watches: dict[
+        int, dict[Service, dict[str, dict[tuple[int, int], datetime]]]
+    ] = {}
+    for (
+        tmdb_id,
+        source_service,
+        user_key,
+        season_number,
+        episode_number,
+        watched_at,
+    ) in episode_watch_rows:
+        if watched_at is None:
+            continue
+        coordinate = (int(season_number), int(episode_number))
+        by_coordinate = (
+            episode_watches.setdefault(int(tmdb_id), {})
+            .setdefault(source_service, {})
+            .setdefault(str(user_key), {})
+        )
+        watched_at_utc = ensure_utc(watched_at)
+        existing = by_coordinate.get(coordinate)
+        if existing is None or watched_at_utc > existing:
+            by_coordinate[coordinate] = watched_at_utc
+
+    for tmdb_id, durable_by_service in durable_episode_watches.items():
+        for source_service, durable_by_user in durable_by_service.items():
+            for user_key, by_coordinate in durable_by_user.items():
+                target_coordinates = (
+                    episode_watches.setdefault(tmdb_id, {})
+                    .setdefault(source_service, {})
+                    .setdefault(user_key, {})
+                )
+                for coordinate, watched_at in by_coordinate.items():
+                    existing = target_coordinates.get(coordinate)
+                    if existing is None or watched_at > existing:
+                        target_coordinates[coordinate] = watched_at
+
+    requester_has_watched_by_target: dict[
+        tuple[str, int, int | None, int | None], bool
+    ] = {}
+    for tmdb_id in series_tmdb_ids:
+        requester_has_watched_by_target.update(
+            _compute_requester_tv_watch_targets_for_key(
+                media_key=(MediaType.SERIES, tmdb_id),
+                snapshot=snapshot,
+                watch_by_service_and_user=episode_watches.get(tmdb_id, {}),
+                mappings=mappings,
+                expected_episodes=expected_by_series.get(tmdb_id, set()),
+            )
+        )
+
     SeerrRequestResolver(
         requester_ids_by_key,
         requester_has_watched_by_key=requester_has_watched_by_key,
+        requester_has_watched_by_target=requester_has_watched_by_target,
         latest_active_request_at_by_key=latest_active_request_at_by_key,
+        requester_ids_by_target=requester_ids_by_target,
+        latest_active_request_at_by_target=latest_active_request_at_by_target,
     ).activate()
     LOG.debug(
         f"Activated Seerr request resolver for {len(movie_tmdb_ids)} movie keys and "
         f"{len(series_tmdb_ids)} series keys"
+    )
+    LOG.debug(
+        "Requester-watch resolver merged "
+        f"{durable_event_count} completed durable playback event(s)"
     )
     if snapshot_error:
         LOG.debug(
@@ -2564,7 +2927,7 @@ async def _scan_with_db(db: AsyncSession) -> tuple[int, int, int] | None:
                     f"this run: {seerr_skip_reason}"
                 )
 
-        sonarr_rule_result = await _activate_sonarr_episode_state_for_rules(
+        sonarr_rule_result = await _activate_sonarr_rule_data_for_rules(
             db,
             list(rules),
             sonarr_series_snapshot=sonarr_series_snapshot,
@@ -3840,17 +4203,27 @@ def _get_arr_action(
     ``unmonitor`` we honor that, otherwise any matched rule implies ``delete``.
     Synthetic/no-rule candidates fall back to the global delete behavior.
     """
-    has_matched_rule = False
-    for rule_id in candidate.matched_rule_ids or []:
-        rule = rules.get(rule_id)
-        if not rule:
-            continue
-        has_matched_rule = True
-        if _rule_action(rule).get("arr_action") == "unmonitor":
-            return "unmonitor"
-    if has_matched_rule:
-        return "delete"
-    return default_behavior
+    matched_rules = [
+        (rule_id, rules[rule_id])
+        for rule_id in candidate.matched_rule_ids or []
+        if rule_id in rules
+    ]
+    matched_rule_ids = [rule_id for rule_id, _rule in matched_rules]
+    if any(
+        _rule_action(rule).get("arr_action") == "unmonitor"
+        for _rule_id, rule in matched_rules
+    ):
+        resolved_action: ArrDeleteAction = "unmonitor"
+    else:
+        resolved_action = "delete" if matched_rule_ids else default_behavior
+
+    source = "matched_rule" if matched_rule_ids else "global_fallback"
+    LOG.debug(
+        f"Resolved ARR action for candidate {candidate.id}: {resolved_action} "
+        f"(source={source}, matched_rule_ids={matched_rule_ids}, "
+        f"configured_fallback={default_behavior})"
+    )
+    return resolved_action
 
 
 def _managed_tag_for_rule(rule: ReclaimRule) -> str | None:
@@ -4724,7 +5097,10 @@ async def _delete_movie_version_candidates(
                         )
                         LOG.info(
                             f"Removed '{movie.title}' from Radarr entirely "
-                            f"(no files remaining, config_id={config_id}, arr_id={arr_movie_id})"
+                            f"(no files remaining, config_id={config_id}, "
+                            f"arr_id={arr_movie_id}, resolved_action={cand_arr_action}, "
+                            f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                            f"configured_fallback={default_arr_delete_behavior})"
                         )
                     except Exception as arr_err:
                         LOG.warning(
@@ -6515,7 +6891,10 @@ async def _delete_season_candidates(
                     )
                     LOG.info(
                         f"Removed '{series_obj.title}' from Sonarr entirely "
-                        f"(no files remaining, sonarr_id={sonarr_ref_id})"
+                        f"(no files remaining, sonarr_id={sonarr_ref_id}, "
+                        f"resolved_action={cand_arr_action}, "
+                        f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                        f"configured_fallback={default_arr_delete_behavior})"
                     )
             except Exception as e:
                 LOG.warning(
@@ -6932,7 +7311,10 @@ async def _delete_episode_candidates(
                         )
                         LOG.info(
                             f"Removed '{series_obj.title}' from Sonarr entirely "
-                            f"(no files remaining, sonarr_id={sonarr_ref_id})"
+                            f"(no files remaining, sonarr_id={sonarr_ref_id}, "
+                            f"resolved_action={cand_arr_action}, "
+                            f"matched_rule_ids={candidate.matched_rule_ids or []}, "
+                            f"configured_fallback={default_arr_delete_behavior})"
                         )
                 except Exception as e:
                     LOG.warning(

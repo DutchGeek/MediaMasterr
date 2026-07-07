@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-07-07
+
+### Added
+
+- Sonarr's canonical series status is available as a rule field for series, season, and episode targets, with fail-closed multi-instance handling
+- ARR action diagnostics (logging)
+  - Logs now show
+    - Resolved action: delete, unmonitor, or remove_if_empty
+    - Source: matched rule or global fallback
+    - Matched rule IDs
+    - Configured fallback
+- Implemented the complete request notification lifecycle
+  - Admin notifications for new deletion/protection requests, cancellations, and deletion failures
+  - Requester notifications for successful or failed deletions
+  - Separate settings toggles and compact/standard formatting
+  - Admin-only permission validation centralized
+  - Alembic migration added (existing admin-message subscriptions carry over to new-request notifications)
+  - Added notification mapping, preference, scope, and permission tests
+- Rule field combobox; can now search for the field you want to utilize in your rule
+- Arr tags rule operators **contains_substring** and **does not contain** substring (thanks @code-boar)
+- Added a sort by deletion date for candidates
+
+### Changed
+
+- Dependencies
+  - Updated Apprise to 1.12.0
+  - Updated Granian to 2.7.9
+- Requester watch evaluation now combines completed Plex, Jellyfin, and Emby watch snapshots with completed Tautulli history
+- Jellyfin and Emby Playback Reporting remains available to playback activity rules but no longer treats partial sessions as completed requester watches
+- Seerr request data now preserves the specific seasons and request timestamp for each season
+- Playback snapshots now retain per-user, per-episode watch state instead of only series level activity
+- Duplicate playback evidence is consolidated using the latest qualifying watch timestamp
+- Added a database migration for persisted per-user episode watch snapshots
+- Explicitly state for TMDB rating we use a 0-10 scale instead of a 0-100 in docs/rule node editor
+- Preview for tmdb rating shows **TMDB Rating** instead of **Rating** in the reasons preview
+
+### Fixed
+
+- Season watch-completion rules now use Sonarr's complete known episode inventory, preventing missing or future episodes from being treated as already watched
+- Metacritic count pill not styled the same as the others
+- Plex episode history responses that expose series IDs through `grandparentKey` now populate series, season, and episode requester-watch rules correctly
+- Plex watch history performs a one-time full rebuild after the TV parser upgrade so previously skipped episode plays are backfilled
+- Seerr requester-watch rules now evaluate individual TV episodes, preserve per-season request dates, honor provider-native completion state, and require complete requester progress for season and series targets
+- Partial movie and episode sessions no longer satisfy `Seerr requester has watched`
+- Seerr requester identities are automatically enriched from the Seerr user directory before explicit watch user mappings are applied
+- Seerr `requester has watched` now works correctly for Series, Season, and Episode rule targets
+- Episode targets only match episodes actually watched by the requester after requesting that season
+- Season targets require every local episode in that requested season to be watched
+- Series targets require all regular episodes across the requester’s requested seasons to be watched
+- Multiple requesters playback progress is no longer incorrectly combined
+- Later season requests no longer reset playback progress for previously requested seasons
+- Un-requested seasons and episodes no longer inherit the requested state of the entire series
+- Seerr declined and failed requests are excluded from requested-state evaluation
+- Season 0 specials are excluded from series completion requirements
+- Seerr usernames, display names, and email identities are automatically resolved through Seerr’s user directory (manual mappings remain available as a fallback)
+- Tautulli playback identities are treated as Plex identities for requester matching
+- Plex episode history using grandparentKey is now correctly associated with its series
+- Plex performs a one-time requester watch snapshot rebuild to recover episode history omitted by the previous parser
+
 ## [0.1.9] - 2026-07-02
 
 ### Added

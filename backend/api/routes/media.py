@@ -307,6 +307,7 @@ async def _get_candidate_page_groups(
             ReclaimCandidate.season_id.label("season_id"),
             ReclaimCandidate.episode_id.label("episode_id"),
             ReclaimCandidate.created_at.label("created_at"),
+            ReclaimCandidate.matched_rule_ids.label("matched_rule_ids"),
             _candidate_effective_size_expr().label("effective_size_bytes"),
             Movie.title.label("movie_title"),
             Series.title.label("series_title"),
@@ -319,6 +320,31 @@ async def _get_candidate_page_groups(
     )
     descriptor_query = _apply_candidate_filters(descriptor_query, media_type, search)
     descriptor_rows = (await db.execute(descriptor_query)).all()
+
+    deletion_movie_delay_days = 14
+    deletion_series_delay_days = 7
+    deletion_rule_actions: dict[int, dict[str, Any] | None] = {}
+    if sort_by == "auto_delete_eligible_at":
+        settings = (await db.execute(select(GeneralSettings))).scalars().first()
+        if settings is not None:
+            deletion_movie_delay_days = settings.auto_delete_movie_delay_days
+            deletion_series_delay_days = settings.auto_delete_series_delay_days
+        rule_ids = {
+            rule_id
+            for row in descriptor_rows
+            for rule_id in (row.matched_rule_ids or [])
+        }
+        if rule_ids:
+            deletion_rule_actions = {
+                rule.id: rule.action
+                for rule in (
+                    await db.execute(
+                        select(ReclaimRule).where(ReclaimRule.id.in_(rule_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            }
 
     series_with_nested_scope = {
         row.series_id
@@ -354,6 +380,14 @@ async def _get_candidate_page_groups(
         )
         size_bytes = int(row.effective_size_bytes or 0)
         created_at = row.created_at or datetime.min
+        deletion_at = resolve_auto_delete_policy(
+            media_type=row.media_type,
+            matched_rule_ids=row.matched_rule_ids or [],
+            created_at=created_at,
+            rule_actions_by_id=deletion_rule_actions,
+            movie_delay_days=deletion_movie_delay_days,
+            series_delay_days=deletion_series_delay_days,
+        ).eligible_at
         group = groups_by_key.get(key)
         if group is None:
             groups_by_key[key] = CandidateDisplayGroup(
@@ -361,6 +395,7 @@ async def _get_candidate_page_groups(
                 media_id=media_id,
                 sort_title=title or "",
                 sort_created_at=created_at,
+                sort_deletion_at=deletion_at,
                 sort_size=size_bytes,
                 candidate_ids=[row.candidate_id],
             )
@@ -368,10 +403,20 @@ async def _get_candidate_page_groups(
 
         group.candidate_ids.append(row.candidate_id)
         group.sort_created_at = max(group.sort_created_at, created_at)
+        group.sort_deletion_at = min(group.sort_deletion_at, deletion_at)
         group.sort_size += size_bytes
 
     groups = list(groups_by_key.values())
-    if sort_by == "media_title":
+    if sort_by == "auto_delete_eligible_at":
+        groups.sort(
+            key=lambda group: (
+                group.sort_deletion_at,
+                group.sort_title.lower(),
+                group.media_id or group.candidate_ids[0],
+            ),
+            reverse=sort_order == "desc",
+        )
+    elif sort_by == "media_title":
         groups.sort(
             key=lambda group: (
                 group.sort_title.lower(),
@@ -1262,7 +1307,7 @@ async def get_candidates(
     per_page: int = Query(25, ge=1, le=200),
     sort_by: str = Query(
         "created_at",
-        pattern="^(created_at|media_title|estimated_space_bytes)$",
+        pattern="^(created_at|auto_delete_eligible_at|media_title|estimated_space_bytes)$",
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     search: str | None = Query(None, max_length=200),

@@ -12,8 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.logger import LOG
 from backend.core.service_manager import service_manager
 from backend.database import async_db
-from backend.database.models import MediaWatchUser, ServiceConfig
+from backend.database.models import (
+    Episode,
+    MediaWatchUser,
+    MediaWatchUserEpisode,
+    Season,
+    Series,
+    ServiceConfig,
+)
 from backend.enums import MediaType, Service
+from backend.models.media import MediaWatchSnapshot
 from backend.services.emby import EmbyService
 from backend.services.jellyfin import JellyfinService
 from backend.services.plex import PlexService
@@ -28,6 +36,8 @@ class MediaWatchSnapshotCache:
     _PLEX_SYNC_STATE_KEY = "watch_snapshot_sync"
     _PLEX_LAST_VIEWED_AT_KEY = "plex_last_viewed_at"
     _PLEX_LAST_FULL_SYNC_AT_KEY = "plex_last_full_sync_at"
+    _PLEX_FORMAT_VERSION_KEY = "format_version"
+    _PLEX_FORMAT_VERSION = 3
     _PLEX_OVERLAP_WINDOW = timedelta(days=1)
     _PLEX_FULL_REBUILD_INTERVAL = timedelta(days=7)
 
@@ -84,25 +94,47 @@ class MediaWatchSnapshotCache:
         return value.astimezone(UTC)
 
     @classmethod
+    def _plex_sync_state_requires_full_rebuild(
+        cls, sync_state: dict[str, Any], now: datetime
+    ) -> bool:
+        """Return whether persisted Plex watch state requires a complete rebuild."""
+        last_viewed_at = cls._parse_utc_datetime(
+            sync_state.get(cls._PLEX_LAST_VIEWED_AT_KEY)
+        )
+        last_full_sync_at = cls._parse_utc_datetime(
+            sync_state.get(cls._PLEX_LAST_FULL_SYNC_AT_KEY)
+        )
+        return (
+            sync_state.get(cls._PLEX_FORMAT_VERSION_KEY) != cls._PLEX_FORMAT_VERSION
+            or last_viewed_at is None
+            or last_full_sync_at is None
+            or now >= last_full_sync_at + cls._PLEX_FULL_REBUILD_INTERVAL
+        )
+
+    @classmethod
     def _build_watch_rows(
         cls,
         *,
         source_service: Service,
         source_service_config_id: int,
-        snapshots: list[tuple[MediaType, int, str, datetime, int | None]],
+        snapshots: list[MediaWatchSnapshot],
     ) -> list[MediaWatchUser]:
         merged: dict[tuple[MediaType, int, str], tuple[str, datetime, int | None]] = {}
-        for media_type, tmdb_id, user_key, last_watched_at, play_count in snapshots:
-            watched_at_utc = cls._as_utc_datetime(last_watched_at)
+        for snapshot in snapshots:
+            watched_at_utc = cls._as_utc_datetime(snapshot.last_watched_at)
             if watched_at_utc is None:
                 continue
-            normalized = cls._normalize_user_key(str(user_key or ""))
+            normalized = cls._normalize_user_key(snapshot.watch_user_key)
             if not normalized:
                 continue
-            identity = (media_type, int(tmdb_id), normalized)
+            identity = (snapshot.media_type, int(snapshot.tmdb_id), normalized)
             existing = merged.get(identity)
             if existing is None or watched_at_utc > existing[1]:
-                merged[identity] = (str(user_key).strip(), watched_at_utc, play_count)
+                merged[identity] = (
+                    snapshot.watch_user_key.strip(),
+                    watched_at_utc,
+                    snapshot.play_count,
+                )
 
         return [
             MediaWatchUser(
@@ -121,6 +153,96 @@ class MediaWatchSnapshotCache:
                 play_count,
             ) in merged.items()
         ]
+
+    @classmethod
+    async def _build_episode_watch_rows(
+        cls,
+        *,
+        session: AsyncSession,
+        source_service: Service,
+        source_service_config_id: int,
+        snapshots: list[MediaWatchSnapshot],
+    ) -> tuple[list[MediaWatchUserEpisode], int]:
+        detailed = [
+            snapshot
+            for snapshot in snapshots
+            if snapshot.media_type is MediaType.SERIES and snapshot.source_item_id
+        ]
+        if not detailed:
+            return [], 0
+
+        id_column = {
+            Service.PLEX: Episode.plex_rating_key,
+            Service.JELLYFIN: Episode.jellyfin_episode_id,
+            Service.EMBY: Episode.emby_episode_id,
+        }.get(source_service)
+        if id_column is None:
+            return [], len(detailed)
+
+        source_ids = {str(snapshot.source_item_id) for snapshot in detailed}
+        result = await session.execute(
+            select(
+                id_column,
+                Series.tmdb_id,
+                Season.season_number,
+                Episode.episode_number,
+            )
+            .join(Season, Episode.season_id == Season.id)
+            .join(Series, Season.series_id == Series.id)
+            .where(id_column.in_(source_ids), Series.tmdb_id.is_not(None))
+        )
+        coordinates = {
+            str(source_id): (int(tmdb_id), int(season_number), int(episode_number))
+            for source_id, tmdb_id, season_number, episode_number in result.all()
+            if source_id is not None and tmdb_id is not None
+        }
+
+        merged: dict[tuple[int, int, int, str], tuple[str, datetime, int | None]] = {}
+        unmatched = 0
+        for snapshot in detailed:
+            coordinate = coordinates.get(str(snapshot.source_item_id))
+            watched_at = cls._as_utc_datetime(snapshot.last_watched_at)
+            normalized = cls._normalize_user_key(snapshot.watch_user_key)
+            if coordinate is None:
+                unmatched += 1
+                continue
+            if watched_at is None or not normalized:
+                continue
+            identity = (*coordinate, normalized)
+            existing = merged.get(identity)
+            if existing is None or watched_at > existing[1]:
+                merged[identity] = (
+                    snapshot.watch_user_key.strip(),
+                    watched_at,
+                    snapshot.play_count,
+                )
+
+        return (
+            [
+                MediaWatchUserEpisode(
+                    series_tmdb_id=series_tmdb_id,
+                    season_number=season_number,
+                    episode_number=episode_number,
+                    watch_user_key=watch_user_key,
+                    watch_user_key_normalized=normalized,
+                    source_service=source_service,
+                    source_service_config_id=source_service_config_id,
+                    last_watched_at=last_watched_at,
+                    play_count=play_count,
+                )
+                for (
+                    series_tmdb_id,
+                    season_number,
+                    episode_number,
+                    normalized,
+                ), (
+                    watch_user_key,
+                    last_watched_at,
+                    play_count,
+                ) in merged.items()
+            ],
+            unmatched,
+        )
 
     async def refresh_snapshot(
         self,
@@ -143,6 +265,7 @@ class MediaWatchSnapshotCache:
                     ]
                     if not supported:
                         await session.execute(sql_delete(MediaWatchUser))
+                        await session.execute(sql_delete(MediaWatchUserEpisode))
                         await session.commit()
                         return True, None
 
@@ -180,19 +303,20 @@ class MediaWatchSnapshotCache:
                                 last_viewed_at = self._parse_utc_datetime(
                                     sync_state.get(self._PLEX_LAST_VIEWED_AT_KEY)
                                 )
-                                last_full_sync_at = self._parse_utc_datetime(
-                                    sync_state.get(self._PLEX_LAST_FULL_SYNC_AT_KEY)
-                                )
                                 now = datetime.now(UTC)
                                 needs_full_rebuild = (
-                                    last_viewed_at is None
-                                    or last_full_sync_at is None
-                                    or now
-                                    >= (
-                                        last_full_sync_at
-                                        + self._PLEX_FULL_REBUILD_INTERVAL
+                                    self._plex_sync_state_requires_full_rebuild(
+                                        sync_state, now
                                     )
                                 )
+                                if (
+                                    sync_state.get(self._PLEX_FORMAT_VERSION_KEY)
+                                    != self._PLEX_FORMAT_VERSION
+                                ):
+                                    LOG.info(
+                                        "Rebuilding Plex watch snapshot after history "
+                                        f"format upgrade (config_id={config.id})"
+                                    )
                                 history_cutoff = None
                                 if (
                                     not needs_full_rebuild
@@ -221,6 +345,9 @@ class MediaWatchSnapshotCache:
                                     sync_state[self._PLEX_LAST_FULL_SYNC_AT_KEY] = (
                                         self._to_utc_iso(now)
                                     )
+                                    sync_state[self._PLEX_FORMAT_VERSION_KEY] = (
+                                        self._PLEX_FORMAT_VERSION
+                                    )
                                 extra_settings[self._PLEX_SYNC_STATE_KEY] = sync_state
                                 config.extra_settings = extra_settings
                                 session.add(config)
@@ -236,6 +363,15 @@ class MediaWatchSnapshotCache:
                             continue
 
                         rows = self._build_watch_rows(
+                            source_service=config.service_type,
+                            source_service_config_id=config.id,
+                            snapshots=snapshots,
+                        )
+                        (
+                            episode_rows,
+                            unmatched_episode_count,
+                        ) = await self._build_episode_watch_rows(
+                            session=session,
                             source_service=config.service_type,
                             source_service_config_id=config.id,
                             snapshots=snapshots,
@@ -338,11 +474,115 @@ class MediaWatchSnapshotCache:
                             )
                             if rows:
                                 session.add_all(rows)
+
+                        if (
+                            isinstance(service_instance, PlexService)
+                            and incremental_mode
+                        ):
+                            if episode_rows:
+                                existing_episode_rows = (
+                                    (
+                                        await session.execute(
+                                            select(MediaWatchUserEpisode).where(
+                                                MediaWatchUserEpisode.source_service
+                                                == config.service_type,
+                                                MediaWatchUserEpisode.source_service_config_id
+                                                == config.id,
+                                            )
+                                        )
+                                    )
+                                    .scalars()
+                                    .all()
+                                )
+                                episode_merged: dict[
+                                    tuple[int, int, int, str],
+                                    tuple[str, datetime | None, int | None],
+                                ] = {
+                                    (
+                                        row.series_tmdb_id,
+                                        row.season_number,
+                                        row.episode_number,
+                                        row.watch_user_key_normalized,
+                                    ): (
+                                        row.watch_user_key,
+                                        self._as_utc_datetime(row.last_watched_at),
+                                        row.play_count,
+                                    )
+                                    for row in existing_episode_rows
+                                }
+                                for episode_row in episode_rows:
+                                    episode_key = (
+                                        episode_row.series_tmdb_id,
+                                        episode_row.season_number,
+                                        episode_row.episode_number,
+                                        episode_row.watch_user_key_normalized,
+                                    )
+                                    watched_at = self._as_utc_datetime(
+                                        episode_row.last_watched_at
+                                    )
+                                    episode_current = episode_merged.get(episode_key)
+                                    if watched_at is not None and (
+                                        episode_current is None
+                                        or episode_current[1] is None
+                                        or watched_at > episode_current[1]
+                                    ):
+                                        episode_merged[episode_key] = (
+                                            episode_row.watch_user_key,
+                                            watched_at,
+                                            episode_row.play_count,
+                                        )
+                                await session.execute(
+                                    sql_delete(MediaWatchUserEpisode).where(
+                                        MediaWatchUserEpisode.source_service
+                                        == config.service_type,
+                                        MediaWatchUserEpisode.source_service_config_id
+                                        == config.id,
+                                    )
+                                )
+                                session.add_all(
+                                    [
+                                        MediaWatchUserEpisode(
+                                            series_tmdb_id=series_tmdb_id,
+                                            season_number=season_number,
+                                            episode_number=episode_number,
+                                            watch_user_key=watch_user_key,
+                                            watch_user_key_normalized=normalized,
+                                            source_service=config.service_type,
+                                            source_service_config_id=config.id,
+                                            last_watched_at=watched_at,
+                                            play_count=play_count,
+                                        )
+                                        for (
+                                            series_tmdb_id,
+                                            season_number,
+                                            episode_number,
+                                            normalized,
+                                        ), (
+                                            watch_user_key,
+                                            watched_at,
+                                            play_count,
+                                        ) in episode_merged.items()
+                                        if watched_at is not None
+                                    ]
+                                )
+                        else:
+                            await session.execute(
+                                sql_delete(MediaWatchUserEpisode).where(
+                                    MediaWatchUserEpisode.source_service
+                                    == config.service_type,
+                                    MediaWatchUserEpisode.source_service_config_id
+                                    == config.id,
+                                )
+                            )
+                            if episode_rows:
+                                session.add_all(episode_rows)
                         await session.commit()
                         refreshed_servers += 1
                         LOG.info(
                             f"Refreshed watch snapshot for {config.service_type} "
                             f"(config_id={config.id}): {len(rows)} row(s)"
+                            f", {len(episode_rows)} episode row(s), "
+                            f"{unmatched_episode_count} unmatched episode event(s)"
                         )
 
                     if refreshed_servers == 0:

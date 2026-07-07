@@ -74,6 +74,14 @@ def default_notification_preferences() -> dict[str, dict[str, Any]]:
         NotificationType.REQUEST_DECLINED.value: {"detail": "standard"},
         NotificationType.ADMIN_MESSAGE.value: {"detail": "standard"},
         NotificationType.TASK_FAILURE.value: {"detail": "standard"},
+        NotificationType.ADMIN_NEW_DELETE_REQUEST.value: {"detail": "standard"},
+        NotificationType.ADMIN_NEW_PROTECTION_REQUEST.value: {"detail": "standard"},
+        NotificationType.ADMIN_REQUEST_CANCELLED.value: {"detail": "standard"},
+        NotificationType.ADMIN_DELETE_EXECUTION_FAILED.value: {"detail": "standard"},
+        NotificationType.DELETE_REQUEST_EXECUTION_SUCCEEDED.value: {
+            "detail": "standard"
+        },
+        NotificationType.DELETE_REQUEST_EXECUTION_FAILED.value: {"detail": "standard"},
     }
 
 
@@ -107,6 +115,12 @@ def normalize_notification_preferences(
         NotificationType.REQUEST_DECLINED,
         NotificationType.ADMIN_MESSAGE,
         NotificationType.TASK_FAILURE,
+        NotificationType.ADMIN_NEW_DELETE_REQUEST,
+        NotificationType.ADMIN_NEW_PROTECTION_REQUEST,
+        NotificationType.ADMIN_REQUEST_CANCELLED,
+        NotificationType.ADMIN_DELETE_EXECUTION_FAILED,
+        NotificationType.DELETE_REQUEST_EXECUTION_SUCCEEDED,
+        NotificationType.DELETE_REQUEST_EXECUTION_FAILED,
     ):
         key = notif_type.value
         raw = preferences.get(key)
@@ -135,6 +149,12 @@ class NotificationSettingItem(BaseModel):
     request_declined: bool = False
     admin_message: bool = False
     task_failure: bool = False
+    admin_new_delete_request: bool = False
+    admin_new_protection_request: bool = False
+    admin_request_cancelled: bool = False
+    admin_delete_execution_failed: bool = False
+    delete_request_execution_succeeded: bool = False
+    delete_request_execution_failed: bool = False
     preferences: dict[str, dict[str, Any]] = Field(
         default_factory=default_notification_preferences
     )

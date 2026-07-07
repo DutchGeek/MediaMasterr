@@ -10,7 +10,7 @@ from backend.core.auth import require_page_access
 from backend.core.logger import LOG
 from backend.database import get_db
 from backend.database.models import NotificationSetting, User
-from backend.enums import PageAccess, UserRole
+from backend.enums import NotificationType, PageAccess, UserRole
 from backend.models.settings import (
     NotificationSettingItem,
     NotificationTestRequest,
@@ -45,6 +45,12 @@ async def get_notification_settings(
             request_declined=n.request_declined,
             admin_message=n.admin_message,
             task_failure=n.task_failure,
+            admin_new_delete_request=n.admin_new_delete_request,
+            admin_new_protection_request=n.admin_new_protection_request,
+            admin_request_cancelled=n.admin_request_cancelled,
+            admin_delete_execution_failed=n.admin_delete_execution_failed,
+            delete_request_execution_succeeded=n.delete_request_execution_succeeded,
+            delete_request_execution_failed=n.delete_request_execution_failed,
             preferences=normalize_notification_preferences(n.preferences),
         )
         for n in notifications
@@ -76,15 +82,27 @@ async def create_or_update_notification(
     """Create or update a notification setting."""
     # validate that non-admin users cannot enable admin-only notifications
     if current_user.role is not UserRole.ADMIN:
-        if data.task_failure:
+        enabled_types = (
+            (NotificationType.ADMIN_MESSAGE, data.admin_message),
+            (NotificationType.TASK_FAILURE, data.task_failure),
+            (NotificationType.ADMIN_NEW_DELETE_REQUEST, data.admin_new_delete_request),
+            (
+                NotificationType.ADMIN_NEW_PROTECTION_REQUEST,
+                data.admin_new_protection_request,
+            ),
+            (NotificationType.ADMIN_REQUEST_CANCELLED, data.admin_request_cancelled),
+            (
+                NotificationType.ADMIN_DELETE_EXECUTION_FAILED,
+                data.admin_delete_execution_failed,
+            ),
+        )
+        if any(
+            enabled and notification_type.is_admin_only()
+            for notification_type, enabled in enabled_types
+        ):
             raise HTTPException(
                 status_code=403,
-                detail="Only administrators can enable task failure notifications",
-            )
-        if data.admin_message:
-            raise HTTPException(
-                status_code=403,
-                detail="Only administrators can enable admin message notifications",
+                detail="Only administrators can enable admin-only notifications",
             )
 
     if data.id:
@@ -114,6 +132,16 @@ async def create_or_update_notification(
         notification.request_declined = data.request_declined
         notification.admin_message = data.admin_message
         notification.task_failure = data.task_failure
+        notification.admin_new_delete_request = data.admin_new_delete_request
+        notification.admin_new_protection_request = data.admin_new_protection_request
+        notification.admin_request_cancelled = data.admin_request_cancelled
+        notification.admin_delete_execution_failed = data.admin_delete_execution_failed
+        notification.delete_request_execution_succeeded = (
+            data.delete_request_execution_succeeded
+        )
+        notification.delete_request_execution_failed = (
+            data.delete_request_execution_failed
+        )
         notification.preferences = normalize_notification_preferences(data.preferences)
 
         await db.commit()
@@ -135,6 +163,12 @@ async def create_or_update_notification(
             request_declined=data.request_declined,
             admin_message=data.admin_message,
             task_failure=data.task_failure,
+            admin_new_delete_request=data.admin_new_delete_request,
+            admin_new_protection_request=data.admin_new_protection_request,
+            admin_request_cancelled=data.admin_request_cancelled,
+            admin_delete_execution_failed=data.admin_delete_execution_failed,
+            delete_request_execution_succeeded=data.delete_request_execution_succeeded,
+            delete_request_execution_failed=data.delete_request_execution_failed,
             preferences=normalize_notification_preferences(data.preferences),
         )
         db.add(notification)
@@ -158,6 +192,12 @@ async def create_or_update_notification(
             request_declined=notification.request_declined,
             admin_message=notification.admin_message,
             task_failure=notification.task_failure,
+            admin_new_delete_request=notification.admin_new_delete_request,
+            admin_new_protection_request=notification.admin_new_protection_request,
+            admin_request_cancelled=notification.admin_request_cancelled,
+            admin_delete_execution_failed=notification.admin_delete_execution_failed,
+            delete_request_execution_succeeded=notification.delete_request_execution_succeeded,
+            delete_request_execution_failed=notification.delete_request_execution_failed,
             preferences=normalize_notification_preferences(notification.preferences),
         ),
     }

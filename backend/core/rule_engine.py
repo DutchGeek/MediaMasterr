@@ -33,6 +33,7 @@ VALID_TARGET_SCOPES = {
 RULE_OUTCOME_CANDIDATE = "candidate"
 RULE_OUTCOME_PROTECT = "protect"
 SONARR_RULE_FIELDS = {
+    "sonarr.series_status",
     "sonarr.latest_season_has_unaired_episodes",
     "sonarr.latest_season_has_finale",
 }
@@ -58,7 +59,7 @@ class UnavailableRuleValue:
 
 
 RULE_VALUE_UNAVAILABLE: Final[UnavailableRuleValue] = UnavailableRuleValue()
-SonarrRuleValue: TypeAlias = bool | UnavailableRuleValue
+SonarrRuleValue: TypeAlias = bool | str | UnavailableRuleValue
 
 
 def normalize_rule_outcome(rule: ReclaimRule) -> str:
@@ -116,7 +117,7 @@ FIELD_LABELS: dict[str, str] = {
     "playback.last_activity_at": "Last playback activity",
     "playback.days_since_last_activity": "Days since playback activity",
     "tmdb.popularity": "Popularity",
-    "tmdb.vote_average": "Rating",
+    "tmdb.vote_average": "TMDB rating",
     "tmdb.vote_count": "Vote count",
     "imdb.rating": "IMDb rating",
     "imdb.vote_count": "IMDb vote count",
@@ -166,6 +167,7 @@ FIELD_LABELS: dict[str, str] = {
         "Sonarr latest season has unaired episodes"
     ),
     "sonarr.latest_season_has_finale": "Sonarr latest season has finale",
+    "sonarr.series_status": "Sonarr series status",
     "seerr.requested": "Seerr requested",
     "seerr.requested_by_user_ids": "Seerr requested by user IDs",
     "seerr.requester_has_watched": "Seerr requester has watched",
@@ -192,6 +194,8 @@ OPERATOR_LABELS: dict[str, str] = {
     "not_contains_any": "matches none",
     "contains_all": "matches all",
     "not_contains_all": "does not match all",
+    "contains_substring": "contains",
+    "not_contains_substring": "does not contain",
     "exists": "exists",
     "not_exists": "missing",
     "is_true": "is true",
@@ -277,6 +281,7 @@ TEXT_FIELDS = {
     "media_server.collections",
     "media.container",
     "series.status",
+    "sonarr.series_status",
     "video.codec_family",
     "audio.codec_family",
     "video.resolution",
@@ -385,6 +390,10 @@ MULTI_VALUE_TEXT_OPERATORS = {
     "exists",
     "not_exists",
 }
+TAG_SUBSTRING_OPERATORS = {
+    "contains_substring",
+    "not_contains_substring",
+}
 TEMPORAL_OPERATORS = {
     "exists",
     "not_exists",
@@ -414,6 +423,7 @@ FIELD_ALLOWED_OPERATORS: dict[str, set[str]] = {
     "media_server.collections": set(MULTI_VALUE_TEXT_OPERATORS),
     "playback.usernames": set(MULTI_VALUE_TEXT_OPERATORS),
     "seerr.requested_by_user_ids": set(SEERR_REQUESTER_ID_OPERATORS),
+    "arr.tags": set(TEXT_OPERATORS) | TAG_SUBSTRING_OPERATORS,
 }
 
 TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
@@ -531,6 +541,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "series.tmdb_season_count",
         "sonarr.latest_season_has_unaired_episodes",
         "sonarr.latest_season_has_finale",
+        "sonarr.series_status",
         "subtitle.languages",
         "tmdb.days_since_first_air_date",
         "tmdb.days_since_last_air_date",
@@ -600,6 +611,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "rottentomatoes.tomato_meter",
         "rottentomatoes.tomato_vote_count",
         "series.status",
+        "sonarr.series_status",
         "series.library_season_count",
         "series.tmdb_season_count",
         "subtitle.languages",
@@ -672,6 +684,7 @@ TARGET_SCOPE_ALLOWED_FIELDS: dict[str, set[str]] = {
         "rottentomatoes.tomato_meter",
         "rottentomatoes.tomato_vote_count",
         "series.status",
+        "sonarr.series_status",
         "series.library_season_count",
         "series.tmdb_season_count",
         "tmdb.days_since_first_air_date",
@@ -801,8 +814,11 @@ class SeerrRequestResolver:
 
     __slots__ = (
         "_latest_active_request_at_by_key",
+        "_latest_active_request_at_by_target",
         "_requester_ids_by_key",
+        "_requester_ids_by_target",
         "_requester_has_watched_by_key",
+        "_requester_has_watched_by_target",
     )
 
     def __init__(
@@ -811,18 +827,38 @@ class SeerrRequestResolver:
         | None = None,
         requester_has_watched_by_key: Mapping[tuple[MediaType, int], bool]
         | None = None,
+        requester_has_watched_by_target: Mapping[
+            tuple[str, int, int | None, int | None], bool
+        ]
+        | None = None,
         latest_active_request_at_by_key: Mapping[tuple[MediaType, int], datetime]
+        | None = None,
+        requester_ids_by_target: Mapping[tuple[str, int, int | None], Iterable[int]]
+        | None = None,
+        latest_active_request_at_by_target: Mapping[
+            tuple[str, int, int | None], datetime
+        ]
         | None = None,
     ):
         self._requester_ids_by_key: dict[tuple[MediaType, int], set[int]] = {}
         for key, user_ids in (requester_ids_by_key or {}).items():
             self._requester_ids_by_key[key] = {int(v) for v in user_ids}
+        self._requester_ids_by_target = {
+            key: {int(value) for value in values}
+            for key, values in (requester_ids_by_target or {}).items()
+        }
         self._requester_has_watched_by_key: dict[tuple[MediaType, int], bool] = {
             key: bool(value)
             for key, value in (requester_has_watched_by_key or {}).items()
         }
+        self._requester_has_watched_by_target = dict(
+            requester_has_watched_by_target or {}
+        )
         self._latest_active_request_at_by_key = dict(
             latest_active_request_at_by_key or {}
+        )
+        self._latest_active_request_at_by_target = dict(
+            latest_active_request_at_by_target or {}
         )
 
     def activate(self) -> None:
@@ -835,48 +871,99 @@ class SeerrRequestResolver:
         return cls._ctx.get()
 
     def resolve_requester_ids(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
     ) -> list[int] | None:
         """Return Seerr requester IDs for the given media key if known."""
         if tmdb_id is None:
             return None
-        ids = self._requester_ids_by_key.get((media_type, tmdb_id))
+        ids: set[int] | None
+        if media_type is MediaType.SERIES and target_scope in {
+            TARGET_SEASON,
+            TARGET_EPISODE,
+        }:
+            target_key = (target_scope, tmdb_id, season_number)
+            if target_key in self._requester_ids_by_target:
+                ids = self._requester_ids_by_target[target_key]
+            else:
+                ids = self._requester_ids_by_key.get((media_type, tmdb_id))
+        else:
+            ids = self._requester_ids_by_key.get((media_type, tmdb_id))
         if ids is None:
             return None
         return sorted(ids)
 
-    def resolve(self, media_type: MediaType, tmdb_id: int | None) -> bool | None:
+    def resolve(
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
+    ) -> bool | None:
         """Return Seerr requested state for the given media key if known."""
-        requester_ids = self.resolve_requester_ids(media_type, tmdb_id)
+        requester_ids = self.resolve_requester_ids(
+            media_type,
+            tmdb_id,
+            target_scope=target_scope,
+            season_number=season_number,
+        )
         if requester_ids is None:
             return None
         return bool(requester_ids)
 
     def resolve_requester_has_watched(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
+        episode_number: int | None = None,
     ) -> bool | None:
         """Return requester watched state for the given media key if known."""
         if tmdb_id is None:
             return None
-        value = self._requester_has_watched_by_key.get((media_type, tmdb_id))
+        if media_type is MediaType.SERIES and target_scope is not None:
+            value = self._requester_has_watched_by_target.get(
+                (target_scope, tmdb_id, season_number, episode_number)
+            )
+        else:
+            value = self._requester_has_watched_by_key.get((media_type, tmdb_id))
         if value is None:
             return None
         return bool(value)
 
     def resolve_latest_active_request_at(
-        self, media_type: MediaType, tmdb_id: int | None
+        self,
+        media_type: MediaType,
+        tmdb_id: int | None,
+        *,
+        target_scope: str | None = None,
+        season_number: int | None = None,
     ) -> datetime | None:
         """Return the newest pending or approved Seerr request timestamp."""
         if tmdb_id is None:
             return None
+        if media_type is MediaType.SERIES and target_scope in {
+            TARGET_SEASON,
+            TARGET_EPISODE,
+        }:
+            target_key = (target_scope, tmdb_id, season_number)
+            if target_key in self._requester_ids_by_target:
+                return self._latest_active_request_at_by_target.get(target_key)
         return self._latest_active_request_at_by_key.get((media_type, tmdb_id))
 
 
-class SonarrEpisodeStateResolver:
-    """Holds Sonarr latest-season episode state for one rule evaluation run."""
+class SonarrRuleDataResolver:
+    """Holds Sonarr-derived values for one rule evaluation run."""
 
-    _ctx: ContextVar[SonarrEpisodeStateResolver | None] = ContextVar(
-        "sonarr_episode_state_resolver", default=None
+    _ctx: ContextVar[SonarrRuleDataResolver | None] = ContextVar(
+        "sonarr_rule_data_resolver", default=None
     )
 
     __slots__ = ("_values_by_series_id",)
@@ -892,10 +979,10 @@ class SonarrEpisodeStateResolver:
 
     def activate(self) -> None:
         """Install this resolver for the current async context."""
-        SonarrEpisodeStateResolver._ctx.set(self)
+        SonarrRuleDataResolver._ctx.set(self)
 
     @classmethod
-    def current(cls) -> SonarrEpisodeStateResolver | None:
+    def current(cls) -> SonarrRuleDataResolver | None:
         """Return the resolver active in the current async context, or None."""
         return cls._ctx.get()
 
@@ -1306,7 +1393,7 @@ def _build_context(
     now = datetime.now(UTC)
     _resolver = DiskStatsResolver.current() if compute_disk else None
     _seerr_resolver = SeerrRequestResolver.current()
-    _sonarr_resolver = SonarrEpisodeStateResolver.current()
+    _sonarr_resolver = SonarrRuleDataResolver.current()
     _playback_resolver = PlaybackHistoryResolver.current()
     if target_scope == TARGET_MOVIE_VERSION and movie and version:
         size = version.size if version.size and version.size > 0 else movie.size
@@ -1517,6 +1604,11 @@ def _build_context(
                 if _sonarr_resolver
                 else RULE_VALUE_UNAVAILABLE
             ),
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
                 _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
                 if _seerr_resolver
@@ -1546,7 +1638,9 @@ def _build_context(
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SERIES,
                 )
                 if _seerr_resolver
                 else None
@@ -1646,14 +1740,27 @@ def _build_context(
             "subtitle.languages": season.subtitle_languages,
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
-                _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.last_requested_at": (
                 _seerr_resolver.resolve_latest_active_request_at(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1661,7 +1768,10 @@ def _build_context(
             "seerr.days_since_last_requested": (
                 _days_between(
                     _seerr_resolver.resolve_latest_active_request_at(
-                        MediaType.SERIES, series.tmdb_id
+                        MediaType.SERIES,
+                        series.tmdb_id,
+                        target_scope=TARGET_SEASON,
+                        season_number=season.season_number,
                     ),
                     now,
                 )
@@ -1669,13 +1779,21 @@ def _build_context(
                 else None
             ),
             "seerr.requested_by_user_ids": (
-                _seerr_resolver.resolve_requester_ids(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve_requester_ids(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_SEASON,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1777,14 +1895,27 @@ def _build_context(
             "series.library_season_count": _library_season_count(series),
             "arr.tags": series.arr_tags or [],
             "arr.monitored": season.is_monitored,
+            "sonarr.series_status": (
+                _sonarr_resolver.resolve(series.id, "sonarr.series_status")
+                if _sonarr_resolver
+                else RULE_VALUE_UNAVAILABLE
+            ),
             "seerr.requested": (
-                _seerr_resolver.resolve(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.last_requested_at": (
                 _seerr_resolver.resolve_latest_active_request_at(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1792,7 +1923,10 @@ def _build_context(
             "seerr.days_since_last_requested": (
                 _days_between(
                     _seerr_resolver.resolve_latest_active_request_at(
-                        MediaType.SERIES, series.tmdb_id
+                        MediaType.SERIES,
+                        series.tmdb_id,
+                        target_scope=TARGET_EPISODE,
+                        season_number=season.season_number,
                     ),
                     now,
                 )
@@ -1800,13 +1934,22 @@ def _build_context(
                 else None
             ),
             "seerr.requested_by_user_ids": (
-                _seerr_resolver.resolve_requester_ids(MediaType.SERIES, series.tmdb_id)
+                _seerr_resolver.resolve_requester_ids(
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                )
                 if _seerr_resolver
                 else None
             ),
             "seerr.requester_has_watched": (
                 _seerr_resolver.resolve_requester_has_watched(
-                    MediaType.SERIES, series.tmdb_id
+                    MediaType.SERIES,
+                    series.tmdb_id,
+                    target_scope=TARGET_EPISODE,
+                    season_number=season.season_number,
+                    episode_number=episode.episode_number,
                 )
                 if _seerr_resolver
                 else None
@@ -1903,6 +2046,13 @@ def _matches_operator(
         return _matches_any_regex(_as_list(actual), _as_list(expected))
     if operator in LIST_OPERATORS:
         return _matches_list_operator(actual, operator, expected, field=field)
+    if operator in TAG_SUBSTRING_OPERATORS:
+        needles = [_normalize(item) for item in _as_list(expected) if _exists(item)]
+        if not needles:
+            return False
+        haystacks = [_normalize(item) for item in _as_list(actual) if _exists(item)]
+        found = any(needle in haystack for haystack in haystacks for needle in needles)
+        return found if operator == "contains_substring" else not found
     if field in MULTI_VALUE_TEXT_FIELDS and operator in {"equals", "not_equals"}:
         list_operator = "contains_any" if operator == "equals" else "not_contains_any"
         return _matches_list_operator(actual, list_operator, expected, field=field)
@@ -2117,27 +2267,33 @@ def _effective_last_viewed(
 def _season_watch_progress(season: Season) -> tuple[bool | None, float | None]:
     """Return season watch completion as (fully_watched, watched_percent).
 
-    Uses episode level watch state when episode rows are present. If no episodes are
-    available in the loaded season relationship, both values are treated as unknown.
+    Sonarr's canonical episode inventory is the denominator. This prevents a season
+    with every downloaded episode watched from appearing complete while Sonarr knows
+    about missing or future episodes.
     """
-    episodes = season.episodes or []
-    total_episodes = len(episodes)
-    if total_episodes == 0:
+    expected_episode_numbers = set(season.sonarr_episode_numbers or [])
+    if not expected_episode_numbers:
         return None, None
 
-    watched_episodes = 0
+    episodes = season.episodes or []
+    watched_episode_numbers: set[int] = set()
     for episode in episodes:
+        if episode.episode_number not in expected_episode_numbers:
+            continue
         effective_last_viewed = _effective_last_viewed(
             episode.last_viewed_at, season.added_at
         )
         if effective_last_viewed is not None:
-            watched_episodes += 1
+            watched_episode_numbers.add(episode.episode_number)
             continue
         if episode.last_viewed_at is None and (episode.view_count or 0) > 0:
-            watched_episodes += 1
+            watched_episode_numbers.add(episode.episode_number)
 
-    watched_percent = round((watched_episodes / total_episodes) * 100, 2)
-    return watched_episodes == total_episodes, watched_percent
+    watched_percent = round(
+        (len(watched_episode_numbers) / len(expected_episode_numbers)) * 100,
+        2,
+    )
+    return expected_episode_numbers.issubset(watched_episode_numbers), watched_percent
 
 
 def _days_between(value: datetime | None, now: datetime) -> int | None:

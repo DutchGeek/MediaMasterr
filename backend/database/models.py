@@ -154,8 +154,18 @@ class NotificationSetting(Base):
     request_approved: Mapped[bool] = mapped_column(Boolean, default=False)
     request_declined: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_message: Mapped[bool] = mapped_column(Boolean, default=False)
+    delete_request_execution_succeeded: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
+    delete_request_execution_failed: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
     # admin notification types
     task_failure: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_new_delete_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_new_protection_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_request_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_delete_execution_failed: Mapped[bool] = mapped_column(Boolean, default=False)
     # per notification content preferences (formatting/detail controls)
     preferences: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
@@ -911,6 +921,41 @@ class MediaWatchUser(Base):
     )
 
 
+class MediaWatchUserEpisode(Base):
+    """Per-user watched episodes mapped to stable series and episode coordinates."""
+
+    __tablename__ = "media_watch_user_episodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "series_tmdb_id",
+            "season_number",
+            "episode_number",
+            "watch_user_key_normalized",
+            "source_service",
+            "source_service_config_id",
+            name="uq_media_watch_user_episode_identity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    series_tmdb_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_number: Mapped[int] = mapped_column(SmallInteger, index=True)
+    episode_number: Mapped[int] = mapped_column(Integer, index=True)
+    watch_user_key: Mapped[str] = mapped_column(String(255))
+    watch_user_key_normalized: Mapped[str] = mapped_column(String(255), index=True)
+    source_service: Mapped[Service] = mapped_column(Enum(Service), index=True)
+    source_service_config_id: Mapped[int] = mapped_column(
+        ForeignKey("service_configs.id", ondelete="CASCADE"), index=True
+    )
+    last_watched_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    play_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
 class PlaybackHistoryEvent(Base):
     """Compact provider playback event retained for durable rule evaluation."""
 
@@ -936,6 +981,7 @@ class PlaybackHistoryEvent(Base):
     provider_media_type: Mapped[str] = mapped_column(String(16))
     played_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     duration_seconds: Mapped[int] = mapped_column(Integer)
+    completed: Mapped[bool | None] = mapped_column(Boolean, default=None, index=True)
     source_user_id: Mapped[str | None] = mapped_column(
         String(255), default=None, index=True
     )
@@ -1179,6 +1225,7 @@ class Season(Base):
     # aggregate stats
     size: Mapped[int | None] = mapped_column(Integer, default=None)
     episode_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    sonarr_episode_numbers: Mapped[list[int] | None] = mapped_column(JSON, default=None)
     view_count: Mapped[int | None] = mapped_column(Integer, default=None)
     last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     air_date: Mapped[datetime | None] = mapped_column(DateTime, default=None)

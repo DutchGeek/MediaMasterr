@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.api.candidate_views import build_rule_preview_items
 from backend.core.rule_engine import (
+    RULE_VALUE_UNAVAILABLE,
     TARGET_EPISODE,
     TARGET_MOVIE_VERSION,
     TARGET_SEASON,
     TARGET_SERIES,
     SeerrRequestResolver,
+    SonarrRuleDataResolver,
     evaluate_advanced_rule,
 )
 from backend.database import Base
@@ -29,6 +31,7 @@ from backend.database.models import (
     Movie,
     MovieArrRef,
     MovieVersion,
+    PlaybackHistoryEvent,
     ProtectedMedia,
     ReclaimCandidate,
     ReclaimRule,
@@ -43,7 +46,10 @@ from backend.enums import MediaType, Service
 from backend.services.seerr_cache import SeerrRequestSnapshot
 from backend.tasks import cleanup as cleanup_tasks
 from backend.tasks.cleanup import (
+    _activate_seerr_request_resolver_for_rules,
+    _aggregate_sonarr_status,
     _compute_requester_has_watched_for_key,
+    _compute_requester_tv_watch_targets_for_key,
     _evaluate_movie_rule,
     _evaluate_movie_version_rule,
     _evaluate_rule_for_episode,
@@ -52,6 +58,7 @@ from backend.tasks.cleanup import (
     _process_series_seasons,
     _reconcile_rule_managed_protections,
     _scan_with_db,
+    _SonarrRefRuleState,
     collect_rule_preview_matches,
     collect_rule_preview_matches_with_metadata,
 )
@@ -441,6 +448,36 @@ class _RadarrTagRefreshClientFake:
 
 
 class CleanupMediaRuleTests(unittest.TestCase):
+    def test_arr_action_resolution_logs_rule_and_fallback_sources(self) -> None:
+        rule_candidate = cast(Any, SimpleNamespace(id=41, matched_rule_ids=[7, 8]))
+        rules = {
+            7: cast(Any, SimpleNamespace(action={"arr_action": "delete"})),
+            8: cast(Any, SimpleNamespace(action={"arr_action": "unmonitor"})),
+        }
+        with patch.object(cleanup_tasks.LOG, "debug") as debug:
+            action = cleanup_tasks._get_arr_action(
+                rule_candidate, rules, default_behavior="remove_if_empty"
+            )
+
+        self.assertEqual(action, "unmonitor")
+        message = debug.call_args.args[0]
+        self.assertIn("candidate 41: unmonitor", message)
+        self.assertIn("source=matched_rule", message)
+        self.assertIn("matched_rule_ids=[7, 8]", message)
+        self.assertIn("configured_fallback=remove_if_empty", message)
+
+        fallback_candidate = cast(Any, SimpleNamespace(id=42, matched_rule_ids=[]))
+        with patch.object(cleanup_tasks.LOG, "debug") as debug:
+            action = cleanup_tasks._get_arr_action(
+                fallback_candidate, {}, default_behavior="unmonitor"
+            )
+
+        self.assertEqual(action, "unmonitor")
+        message = debug.call_args.args[0]
+        self.assertIn("candidate 42: unmonitor", message)
+        self.assertIn("source=global_fallback", message)
+        self.assertIn("matched_rule_ids=[]", message)
+
     def test_movie_version_extended_metadata_fields_match(self) -> None:
         movie = Movie(
             title="Movie",
@@ -1601,6 +1638,48 @@ class CleanupMediaRuleTests(unittest.TestCase):
         self.assertTrue(_evaluate_movie_rule(series, pass_rule, {}, []))
         self.assertFalse(_evaluate_movie_rule(series, fail_rule, {}, []))
 
+    def test_sonarr_series_status_is_inherited_by_all_tv_targets(self) -> None:
+        series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
+        series.id = 42
+        season = Season(series_id=42, season_number=1, size=4 * 1024**3)
+        episode = Episode(season_id=1, episode_number=1, size=1024)
+        SonarrRuleDataResolver({42: {"sonarr.series_status": "ended"}}).activate()
+
+        rules = [
+            _make_single_condition_rule(
+                name=f"ended-{scope}",
+                media_type=MediaType.SERIES,
+                target_scope=scope,
+                field="sonarr.series_status",
+                operator="equals",
+                value="ended",
+            )
+            for scope in (TARGET_SERIES, TARGET_SEASON, TARGET_EPISODE)
+        ]
+
+        self.assertTrue(_evaluate_movie_rule(series, rules[0], {}, []))
+        self.assertTrue(_evaluate_rule_for_season(series, season, rules[1], {}, []))
+        self.assertTrue(
+            _evaluate_rule_for_episode(series, season, episode, rules[2], {}, [])
+        )
+
+    def test_sonarr_series_status_requires_consistent_refs(self) -> None:
+        ended_states = [
+            _SonarrRefRuleState(1, 101, series_status="ended"),
+            _SonarrRefRuleState(2, 202, series_status="ENDED"),
+        ]
+        conflicting_states = [
+            _SonarrRefRuleState(1, 101, series_status="ended"),
+            _SonarrRefRuleState(2, 202, series_status="continuing"),
+        ]
+        missing_state = [_SonarrRefRuleState(1, 101)]
+
+        self.assertEqual(_aggregate_sonarr_status(ended_states), "ended")
+        self.assertIs(
+            _aggregate_sonarr_status(conflicting_states), RULE_VALUE_UNAVAILABLE
+        )
+        self.assertIs(_aggregate_sonarr_status(missing_state), RULE_VALUE_UNAVAILABLE)
+
     def test_evaluate_series_rule_arr_tags_legacy_not_equals_is_list_aware(
         self,
     ) -> None:
@@ -1789,6 +1868,7 @@ class CleanupMediaRuleTests(unittest.TestCase):
         series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
         series.service_refs = [_make_series_ref(service_id="sr-1")]
         season = Season(series_id=1, season_number=1, size=4 * 1024**3)
+        season.sonarr_episode_numbers = [1, 2]
         season.added_at = now - timedelta(days=10)
         season.episodes = [
             Episode(season_id=1, episode_number=1, view_count=1),
@@ -1827,6 +1907,7 @@ class CleanupMediaRuleTests(unittest.TestCase):
         series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
         series.service_refs = [_make_series_ref(service_id="sr-1")]
         season = Season(series_id=1, season_number=1, size=4 * 1024**3)
+        season.sonarr_episode_numbers = [1, 2]
         season.episodes = [
             Episode(season_id=1, episode_number=1, view_count=1),
             Episode(season_id=1, episode_number=2, view_count=0),
@@ -1886,6 +1967,7 @@ class CleanupMediaRuleTests(unittest.TestCase):
         series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
         series.service_refs = [_make_series_ref(service_id="sr-1")]
         season = Season(series_id=1, season_number=1, size=4 * 1024**3)
+        season.sonarr_episode_numbers = [1]
         season.added_at = now
         season.episodes = [
             Episode(
@@ -1944,6 +2026,66 @@ class CleanupMediaRuleTests(unittest.TestCase):
         )
         self.assertTrue(
             _evaluate_rule_for_season(series, season, watched_percent_zero_rule, {}, [])
+        )
+
+    def test_season_watch_progress_includes_missing_sonarr_episodes(self) -> None:
+        series = Series(title="Series", tmdb_id=2, size=20 * 1024**3)
+        series.service_refs = [_make_series_ref(service_id="sr-1")]
+        season = Season(series_id=1, season_number=1, size=4 * 1024**3)
+        season.sonarr_episode_numbers = [1, 2, 3, 4, 5, 6, 7]
+        season.episodes = [
+            Episode(season_id=1, episode_number=number, view_count=1)
+            for number in range(1, 7)
+        ]
+        fully_watched_rule = ReclaimRule(
+            name="season-canonical-progress",
+            media_type=MediaType.SERIES,
+            enabled=True,
+            target_scope="season",
+            definition={
+                "version": 1,
+                "root": {
+                    "type": "group",
+                    "op": "and",
+                    "children": [
+                        {
+                            "type": "condition",
+                            "field": "season.fully_watched",
+                            "operator": "is_true",
+                        }
+                    ],
+                },
+            },
+            action={"candidate": True, "media_server_action": "delete"},
+        )
+        watched_percent_rule = ReclaimRule(
+            name="season-canonical-percent",
+            media_type=MediaType.SERIES,
+            enabled=True,
+            target_scope="season",
+            definition={
+                "version": 1,
+                "root": {
+                    "type": "group",
+                    "op": "and",
+                    "children": [
+                        {
+                            "type": "condition",
+                            "field": "season.watched_percent",
+                            "operator": "equals",
+                            "value": 85.71,
+                        }
+                    ],
+                },
+            },
+            action={"candidate": True, "media_server_action": "delete"},
+        )
+
+        self.assertFalse(
+            _evaluate_rule_for_season(series, season, fully_watched_rule, {}, [])
+        )
+        self.assertTrue(
+            _evaluate_rule_for_season(series, season, watched_percent_rule, {}, [])
         )
 
     def test_evaluate_rule_for_season_watched_progress_unknown_without_episodes(
@@ -2235,6 +2377,172 @@ class CleanupMediaRuleTests(unittest.TestCase):
             )
         )
 
+    def test_compute_requester_has_watched_supports_series_keys(self) -> None:
+        media_key: tuple[MediaType, int] = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        watch_by_service_and_user = {
+            media_key: {
+                Service.PLEX: {"alice": datetime(2026, 1, 2, 12, 0, tzinfo=UTC)}
+            }
+        }
+
+        self.assertTrue(
+            _compute_requester_has_watched_for_key(
+                media_key=media_key,
+                snapshot=snapshot,
+                watch_by_service_and_user=watch_by_service_and_user,  # pyright: ignore[reportArgumentType]
+                mappings=[],
+            )
+        )
+
+    def test_requester_tv_watch_targets_require_complete_rollups(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        expected = {(1, episode) for episode in range(1, 7)}
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {"alice": {(1, 1): watched_at, (1, 2): watched_at}}
+            },
+            mappings=[],
+            expected_episodes=expected,
+        )
+
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 2)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 1, 3)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_complete_and_ignore_specials(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        regular = {(1, episode) for episode in range(1, 7)}
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {coordinate: watched_at for coordinate in regular}
+                }
+            },
+            mappings=[],
+            expected_episodes=regular | {(0, 1)},
+        )
+
+        self.assertTrue(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 0, None)])
+        self.assertTrue(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_ignore_pre_request_plays(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: requested_at}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {"alice": {(1, 1): datetime(2026, 7, 1, tzinfo=UTC)}}
+            },
+            mappings=[],
+            expected_episodes={(1, 1)},
+        )
+
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_do_not_union_different_requesters(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        watched_at = datetime(2026, 7, 2, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101, 202}},
+            latest_request_at_by_key_user={
+                media_key: {101: requested_at, 202: requested_at}
+            },
+            requester_identity_keys_by_user_id={101: {"alice"}, 202: {"bob"}},
+            latest_active_request_at_by_key={},
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {(1, 1): watched_at},
+                    "bob": {(1, 2): watched_at},
+                }
+            },
+            mappings=[],
+            expected_episodes={(1, 1), (1, 2)},
+        )
+
+        self.assertFalse(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
+    def test_requester_tv_watch_targets_use_each_season_request_time(self) -> None:
+        media_key = (MediaType.SERIES, 5920)
+        season_one_request = datetime(2026, 1, 1, tzinfo=UTC)
+        season_two_request = datetime(2026, 7, 1, tzinfo=UTC)
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={media_key: {101}},
+            latest_request_at_by_key_user={media_key: {101: season_two_request}},
+            requester_identity_keys_by_user_id={101: {"alice"}},
+            latest_active_request_at_by_key={},
+            latest_request_at_by_series_season_user={
+                (5920, 1): {101: season_one_request},
+                (5920, 2): {101: season_two_request},
+            },
+        )
+        result = _compute_requester_tv_watch_targets_for_key(
+            media_key=media_key,
+            snapshot=snapshot,
+            watch_by_service_and_user={
+                Service.PLEX: {
+                    "alice": {
+                        (1, 1): datetime(2026, 2, 1, tzinfo=UTC),
+                        (2, 1): datetime(2026, 6, 1, tzinfo=UTC),
+                    }
+                }
+            },
+            mappings=[],
+            expected_episodes={(1, 1), (2, 1), (3, 1)},
+        )
+
+        self.assertTrue(result[(TARGET_EPISODE, 5920, 1, 1)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 2, 1)])
+        self.assertFalse(result[(TARGET_EPISODE, 5920, 3, 1)])
+        self.assertTrue(result[(TARGET_SEASON, 5920, 1, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 2, None)])
+        self.assertFalse(result[(TARGET_SEASON, 5920, 3, None)])
+        self.assertFalse(result[(TARGET_SERIES, 5920, None, None)])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -2266,6 +2574,130 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self._engine.dispose()
         if self._db_path.exists():
             self._db_path.unlink()
+
+    async def test_requester_watch_ignores_partial_durable_movie_sessions(
+        self,
+    ) -> None:
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        rule = ReclaimRule(
+            name="Requester completed movie",
+            media_type=MediaType.MOVIE,
+            enabled=True,
+            target_scope=TARGET_MOVIE_VERSION,
+            definition={
+                "version": 1,
+                "root": {
+                    "type": "group",
+                    "op": "and",
+                    "children": [
+                        {
+                            "type": "condition",
+                            "field": "seerr.requester_has_watched",
+                            "operator": "is_true",
+                        }
+                    ],
+                },
+            },
+            action={"candidate": True, "media_server_action": "delete"},
+        )
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={(MediaType.MOVIE, 123): {7}},
+            latest_request_at_by_key_user={(MediaType.MOVIE, 123): {7: requested_at}},
+            requester_identity_keys_by_user_id={7: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.TAUTULLI,
+                base_url="http://tautulli",
+                api_key="key",
+                enabled=True,
+            )
+            db.add_all([rule, Movie(title="Movie", tmdb_id=123), config])
+            await db.flush()
+            db.add(
+                PlaybackHistoryEvent(
+                    source_service=Service.TAUTULLI,
+                    source_service_config_id=config.id,
+                    source_event_key="partial",
+                    source_item_id="movie-123",
+                    provider_media_type="movie",
+                    played_at=datetime(2026, 7, 2),
+                    duration_seconds=3600,
+                    completed=False,
+                    source_user_id="7",
+                    source_username="alice",
+                    tmdb_id=123,
+                )
+            )
+            await db.commit()
+
+        with (
+            patch.object(cleanup_tasks.service_manager, "_seerr", SimpleNamespace()),
+            patch.object(
+                type(cleanup_tasks.seerr_snapshot_cache),
+                "get_request_snapshot",
+                new=AsyncMock(return_value=(snapshot, None)),
+            ),
+        ):
+            async with self._sessionmaker() as db:
+                ready, error = await _activate_seerr_request_resolver_for_rules(
+                    db,
+                    [rule],
+                    require_fresh=False,
+                    allow_stale_on_failure=True,
+                )
+
+        self.assertTrue(ready)
+        self.assertIsNone(error)
+        resolver = SeerrRequestResolver.current()
+        self.assertIsNotNone(resolver)
+        assert resolver is not None
+        self.assertFalse(resolver.resolve_requester_has_watched(MediaType.MOVIE, 123))
+
+        async with self._sessionmaker() as db:
+            config_id = await db.scalar(
+                select(ServiceConfig.id).where(
+                    ServiceConfig.service_type == Service.TAUTULLI
+                )
+            )
+            assert config_id is not None
+            db.add(
+                PlaybackHistoryEvent(
+                    source_service=Service.TAUTULLI,
+                    source_service_config_id=config_id,
+                    source_event_key="complete",
+                    source_item_id="movie-123",
+                    provider_media_type="movie",
+                    played_at=datetime(2026, 7, 3),
+                    duration_seconds=3600,
+                    completed=True,
+                    source_user_id="7",
+                    source_username="alice",
+                    tmdb_id=123,
+                )
+            )
+            await db.commit()
+
+        with (
+            patch.object(cleanup_tasks.service_manager, "_seerr", SimpleNamespace()),
+            patch.object(
+                type(cleanup_tasks.seerr_snapshot_cache),
+                "get_request_snapshot",
+                new=AsyncMock(return_value=(snapshot, None)),
+            ),
+        ):
+            async with self._sessionmaker() as db:
+                await _activate_seerr_request_resolver_for_rules(
+                    db,
+                    [rule],
+                    require_fresh=False,
+                    allow_stale_on_failure=True,
+                )
+
+        resolver = SeerrRequestResolver.current()
+        assert resolver is not None
+        self.assertTrue(resolver.resolve_requester_has_watched(MediaType.MOVIE, 123))
 
     async def test_scan_ends_notice_transaction_before_nested_provider_write(
         self,
@@ -2319,7 +2751,7 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 cleanup_tasks,
-                "_activate_sonarr_episode_state_for_rules",
+                "_activate_sonarr_rule_data_for_rules",
                 new=AsyncMock(
                     return_value=cleanup_tasks._SonarrRuleDataResult(set(), set())
                 ),
@@ -2683,6 +3115,119 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.episode_calls, [(501, 2)])
         self.assertEqual([match.series_id for match in result.matches], [series_id])
         self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+
+    async def test_sonarr_status_rule_uses_bulk_series_without_episode_fetch(
+        self,
+    ) -> None:
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.SONARR,
+                base_url="http://sonarr-status",
+                api_key="x",
+                name="sonarr-status",
+                enabled=True,
+            )
+            rule = _make_single_condition_rule(
+                name="ended-series",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.series_status",
+                operator="equals",
+                value="ended",
+            )
+            series = Series(title="Ended Series", tmdb_id=11101, size=1024)
+            db.add_all([config, rule, series])
+            await db.flush()
+            db.add(
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=config.id,
+                    arr_series_id=601,
+                    tmdb_id=series.tmdb_id,
+                )
+            )
+            await db.commit()
+            config_id = config.id
+            series_id = series.id
+
+        fake_client = _SonarrEpisodeStateClientFake(
+            series=[SimpleNamespace(id=601, status="ended", seasons=[])]
+        )
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = {config_id: fake_client}  # pyright: ignore[reportAttributeAccessIssue]
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual([match.series_id for match in result.matches], [series_id])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 0)
+        self.assertEqual(fake_client.series_calls, 1)
+        self.assertEqual(fake_client.episode_calls, [])
+
+    async def test_sonarr_status_conflict_fails_closed(self) -> None:
+        async with self._sessionmaker() as db:
+            configs = [
+                ServiceConfig(
+                    service_type=Service.SONARR,
+                    base_url=f"http://sonarr-status-{index}",
+                    api_key="x",
+                    name=f"sonarr-status-{index}",
+                    enabled=True,
+                )
+                for index in (1, 2)
+            ]
+            rule = _make_single_condition_rule(
+                name="status-conflict",
+                media_type=MediaType.SERIES,
+                target_scope="series",
+                field="sonarr.series_status",
+                operator="not_equals",
+                value="deleted",
+            )
+            series = Series(title="Conflicting Series", tmdb_id=11102, size=1024)
+            db.add_all([*configs, rule, series])
+            await db.flush()
+            for config, arr_series_id in zip(configs, (602, 603), strict=True):
+                db.add(
+                    SeriesArrRef(
+                        series_id=series.id,
+                        service_config_id=config.id,
+                        arr_series_id=arr_series_id,
+                        tmdb_id=series.tmdb_id,
+                    )
+                )
+            await db.commit()
+            config_ids = [config.id for config in configs]
+
+        clients = {
+            config_ids[0]: _SonarrEpisodeStateClientFake(
+                series=[SimpleNamespace(id=602, status="ended", seasons=[])]
+            ),
+            config_ids[1]: _SonarrEpisodeStateClientFake(
+                series=[SimpleNamespace(id=603, status="continuing", seasons=[])]
+            ),
+        }
+        previous_clients = cleanup_tasks.service_manager._sonarr_clients
+        previous_sonarr = cleanup_tasks.service_manager._sonarr
+        cleanup_tasks.service_manager._sonarr_clients = clients  # pyright: ignore[reportAttributeAccessIssue]
+        cleanup_tasks.service_manager._sonarr = None
+        try:
+            async with self._sessionmaker() as db:
+                rule = (await db.execute(select(ReclaimRule))).scalar_one()
+                result = await collect_rule_preview_matches_with_metadata(db, [rule])
+        finally:
+            cleanup_tasks.service_manager._sonarr_clients = previous_clients
+            cleanup_tasks.service_manager._sonarr = previous_sonarr
+
+        self.assertEqual(result.matches, [])
+        self.assertEqual(result.metadata.sonarr_unavailable_count, 1)
+        self.assertTrue(all(client.episode_calls == [] for client in clients.values()))
 
     async def test_sonarr_next_airing_proves_unaired_without_episode_fetch(
         self,

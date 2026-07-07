@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from backend.enums import MediaType
 from backend.user_types import AudioCodecFamily, MediaServerType, VideoCodecFamily
 
 
@@ -112,6 +113,18 @@ class AggregatedEpisodeData:
     plex_rating_key: str | None = None
     jellyfin_episode_id: str | None = None
     emby_episode_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class MediaWatchSnapshot:
+    """Latest per-user watch state for a movie or individual TV episode."""
+
+    media_type: MediaType
+    tmdb_id: int
+    watch_user_key: str
+    last_watched_at: datetime
+    play_count: int | None = None
+    source_item_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -480,6 +493,7 @@ class CandidateDisplayGroup:
     media_id: int | None
     sort_title: str
     sort_created_at: datetime
+    sort_deletion_at: datetime
     sort_size: int
     candidate_ids: list[int]
 

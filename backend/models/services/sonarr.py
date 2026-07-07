@@ -26,6 +26,7 @@ class SonarrSeries:
     year: int | None
     path: str
     monitored: bool
+    status: str | None
     season_count: int
     seasons: list[SonarrSeason]
     tags: list[int]

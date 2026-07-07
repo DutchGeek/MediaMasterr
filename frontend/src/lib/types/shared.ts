@@ -142,6 +142,12 @@ export interface NotificationSetting {
   requestDeclined: boolean;
   adminMessage: boolean;
   taskFailure: boolean;
+  adminNewDeleteRequest: boolean;
+  adminNewProtectionRequest: boolean;
+  adminRequestCancelled: boolean;
+  adminDeleteExecutionFailed: boolean;
+  deleteRequestExecutionSucceeded: boolean;
+  deleteRequestExecutionFailed: boolean;
   preferences: NotificationPreferences;
 }
 
@@ -161,6 +167,12 @@ export enum NotificationType {
   RequestDeclined = "request_declined",
   AdminMessage = "admin_message",
   TaskFailure = "task_failure",
+  AdminNewDeleteRequest = "admin_new_delete_request",
+  AdminNewProtectionRequest = "admin_new_protection_request",
+  AdminRequestCancelled = "admin_request_cancelled",
+  AdminDeleteExecutionFailed = "admin_delete_execution_failed",
+  DeleteRequestExecutionSucceeded = "delete_request_execution_succeeded",
+  DeleteRequestExecutionFailed = "delete_request_execution_failed",
 }
 
 export interface PathMapping {
@@ -389,6 +401,8 @@ export type RuleConditionOperator =
   | "not_contains_any"
   | "contains_all"
   | "not_contains_all"
+  | "contains_substring"
+  | "not_contains_substring"
   | "exists"
   | "not_exists"
   | "is_true"

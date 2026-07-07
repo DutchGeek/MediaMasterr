@@ -33,6 +33,7 @@ from backend.models.media import (
     AggregatedSeasonData,
     AggregatedSeriesData,
     ExternalIDs,
+    MediaWatchSnapshot,
     MovieVersionData,
 )
 from backend.models.services.emby_base import (
@@ -1408,6 +1409,21 @@ class EmbyServiceBase:
         This is much more efficient than querying each series individually.
         """
         series_watch_dates: dict[str, datetime] = {}
+        for (
+            series_id,
+            _episode_id,
+            watch_date,
+        ) in await self.get_watched_episode_snapshots_for_user(user_id):
+            existing = series_watch_dates.get(series_id)
+            if existing is None or watch_date > existing:
+                series_watch_dates[series_id] = watch_date
+        return series_watch_dates
+
+    async def get_watched_episode_snapshots_for_user(
+        self, user_id: str
+    ) -> list[tuple[str, str, datetime]]:
+        """Return watched series ID, episode ID, and latest play date for a user."""
+        snapshots: list[tuple[str, str, datetime]] = []
 
         try:
             # fetch in paginated batches to avoid timeout on large libraries
@@ -1437,19 +1453,14 @@ class EmbyServiceBase:
                 if not items_data:
                     break
 
-                # group by series and keep the most recent watch date
                 for item in items_data:
                     series_id = item.get("SeriesId")
+                    episode_id = item.get("Id")
                     last_played = item.get("UserData", {}).get("LastPlayedDate")
 
-                    if series_id and last_played:
+                    if series_id and episode_id and last_played:
                         watch_date = datetime.fromisoformat(last_played)
-
-                        # keep the most recent date (items are already sorted by DatePlayed descending)
-                        if series_id not in series_watch_dates:
-                            series_watch_dates[series_id] = watch_date
-                        elif watch_date > series_watch_dates[series_id]:
-                            series_watch_dates[series_id] = watch_date
+                        snapshots.append((str(series_id), str(episode_id), watch_date))
 
                 # check if we've fetched all episodes
                 total_record_count = int(get_data.get("TotalRecordCount", 0) or 0)
@@ -1457,9 +1468,9 @@ class EmbyServiceBase:
                 if start_index >= total_record_count:
                     break
 
-            return series_watch_dates
+            return snapshots
         except Exception:
-            return {}
+            return []
 
     @staticmethod
     def _normalized_user_key(user_name: str | None) -> str | None:
@@ -1520,13 +1531,15 @@ class EmbyServiceBase:
 
     async def get_watched_user_snapshots(
         self,
-    ) -> list[tuple[MediaType, int, str, datetime, int | None]]:
+    ) -> list[MediaWatchSnapshot]:
         """Return per-user watched snapshots mapped to TMDB IDs."""
         users = await self.get_users()
         if not users:
             return []
 
-        results: dict[tuple[MediaType, int, str], tuple[datetime, int | None]] = {}
+        results: dict[
+            tuple[MediaType, int, str, str | None], tuple[datetime, int | None]
+        ] = {}
         for user in users:
             watch_user_key = self._normalized_user_key(user.name)
             if not watch_user_key:
@@ -1570,10 +1583,15 @@ class EmbyServiceBase:
                         if str(play_count_raw).isdigit()
                         else None
                     )
-                    key = (MediaType.MOVIE, tmdb_id, watch_user_key)
-                    prev = results.get(key)
+                    movie_identity = (
+                        MediaType.MOVIE,
+                        tmdb_id,
+                        watch_user_key,
+                        None,
+                    )
+                    prev = results.get(movie_identity)
                     if prev is None or last_played > prev[0]:
-                        results[key] = (last_played, play_count)
+                        results[movie_identity] = (last_played, play_count)
                 movie_total = int(movie_data.get("TotalRecordCount", 0) or 0)
                 movie_start += len(movie_items)
                 if len(movie_items) < movie_limit or (
@@ -1582,19 +1600,33 @@ class EmbyServiceBase:
                     break
 
             series_tmdb_map = await self._get_series_tmdb_map_for_user(user.id)
-            watched_series = await self.get_all_watched_episodes_for_user(user.id)
-            for series_id, last_watched_at in watched_series.items():
+            watched_episodes = await self.get_watched_episode_snapshots_for_user(
+                user.id
+            )
+            for series_id, episode_id, last_watched_at in watched_episodes:
                 tmdb_id = series_tmdb_map.get(series_id)
                 if tmdb_id is None:
                     continue
-                key = (MediaType.SERIES, tmdb_id, watch_user_key)
-                prev = results.get(key)
+                episode_identity = (
+                    MediaType.SERIES,
+                    tmdb_id,
+                    watch_user_key,
+                    episode_id,
+                )
+                prev = results.get(episode_identity)
                 if prev is None or last_watched_at > prev[0]:
-                    results[key] = (last_watched_at, None)
+                    results[episode_identity] = (last_watched_at, None)
 
         return [
-            (media_type, tmdb_id, user_key, last_watched_at, play_count)
-            for (media_type, tmdb_id, user_key), (
+            MediaWatchSnapshot(
+                media_type=media_type,
+                tmdb_id=tmdb_id,
+                watch_user_key=user_key,
+                last_watched_at=last_watched_at,
+                play_count=play_count,
+                source_item_id=source_item_id,
+            )
+            for (media_type, tmdb_id, user_key, source_item_id), (
                 last_watched_at,
                 play_count,
             ) in results.items()

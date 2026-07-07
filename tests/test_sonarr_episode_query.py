@@ -3,7 +3,21 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from backend.services.sonarr import SonarrClient
+from backend.services.sonarr import SonarrClient, build_sonarr_series_from_dict
+
+
+def test_sonarr_series_status_is_normalized() -> None:
+    for raw, expected in (
+        ("Continuing", "continuing"),
+        ("ended", "ended"),
+        ("UPCOMING", "upcoming"),
+        ("deleted", "deleted"),
+        (None, None),
+    ):
+        series = build_sonarr_series_from_dict(
+            {"id": 1, "title": "Series", "status": raw}
+        )
+        assert series.status == expected
 
 
 def test_get_episodes_filters_by_season_when_requested() -> None:

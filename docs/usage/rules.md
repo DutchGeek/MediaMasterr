@@ -85,6 +85,23 @@ size field.
 Text and list comparisons are case-insensitive unless a field documents
 additional normalization.
 
+### Substring Operators (Arr tags)
+
+The Arr tags field matches whole tag names with the list operators above. It
+also supports substring matching, which matches a tag by a fragment of its
+name. Each operator takes comma-separated terms with the same any/none
+behavior as `matches any` and `matches none`.
+
+| Internal operator        | UI label         | Meaning                            |
+| ------------------------ | ---------------- | ---------------------------------- |
+| `contains_substring`     | contains         | Some tag contains one of the terms |
+| `not_contains_substring` | does not contain | No tag contains any of the terms   |
+
+For example, `contains chart` matches a tag such as `weekly-chart-2024`, and
+`contains chart, -best` matches a tag containing either fragment. To require
+several fragments at once, combine `contains` conditions with an AND group. A
+blank term matches nothing.
+
 ### Missing Values
 
 `exists` matches populated metadata. `does not exist` matches missing or empty
@@ -119,15 +136,15 @@ existing media-server added date is not replaced or backfilled.
 
 ### TMDB Metadata
 
-| Field                       | Scope                   | Value                                              |
-| --------------------------- | ----------------------- | -------------------------------------------------- |
-| Original language           | All scopes              | Canonical ISO 639-3 language code                  |
-| Origin country              | All scopes              | Case-insensitive country code such as `US` or `JP` |
-| Runtime                     | Movie version           | TMDB movie runtime in minutes                      |
-| Genres                      | All scopes              | TMDB genre names                                   |
-| Rating / Votes / Popularity | All scopes              | Current stored TMDB metadata                       |
-| Release date                | Movie version           | Movie release date                                 |
-| First / last air date       | Series, season, episode | Dates inherited from the parent series             |
+| Field                       | Scope                   | Value                                                                                                     |
+| --------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| Original language           | All scopes              | Canonical ISO 639-3 language code                                                                         |
+| Origin country              | All scopes              | Case-insensitive country code such as `US` or `JP`                                                        |
+| Runtime                     | Movie version           | TMDB movie runtime in minutes                                                                             |
+| Genres                      | All scopes              | TMDB genre names                                                                                          |
+| Rating / Votes / Popularity | All scopes              | TMDB rating uses the raw 0-10 `vote_average` scale; votes and popularity use current stored TMDB metadata |
+| Release date                | Movie version           | Movie release date                                                                                        |
+| First / last air date       | Series, season, episode | Dates inherited from the parent series                                                                    |
 
 Original-language values are normalized before comparison. For example, `en`,
 `eng`, and `English` all compare as `eng`. The picker displays languages found
@@ -135,6 +152,9 @@ in the local database, but manual entry remains available.
 
 Origin-country comparisons are case-insensitive. The country picker displays
 codes currently found in local TMDB metadata.
+
+TMDB rating comparisons use the raw `vote_average` value from TMDB on a 0-10
+scale. That is different from percentage-style ratings elsewhere in the app.
 
 ### External Ratings
 
@@ -225,13 +245,74 @@ rules:
 | Seerr latest active request            | Newest pending or approved request timestamp |
 | Days since latest active Seerr request | Whole days since that request                |
 
-Declined requests are excluded. TV scopes currently inherit the latest active
-request for the whole series, matching the existing Seerr request fields. If
-Seerr is unavailable, these values are unknown and cannot create candidates.
+Declined and failed requests are excluded. Series rules use the latest request
+for the series. Season and episode rules use the request for their specific
+season, so requesting a later season does not reset the request age of an
+earlier season. Older Seerr responses that do not identify requested seasons
+fall back to the series request date. If Seerr is unavailable, these values are
+unknown and cannot create candidates.
 
-### Sonarr Episode State
+### Seerr Requester Watch State
 
-These fields are available only to whole-series rules:
+`Seerr requester has watched` compares each requester's playback with the time
+they requested the movie or TV season. Playback at or before the request does
+not count. The meaning depends on the rule target:
+
+| Scope         | `is true` means                                                                 |
+| ------------- | ------------------------------------------------------------------------------- |
+| Movie version | A requester watched the movie after requesting it                               |
+| Episode       | A requester watched that episode after requesting its season                    |
+| Season        | One requester watched every local episode in that requested season              |
+| Series        | One requester watched every regular local episode in the seasons they requested |
+
+Season 0 specials are excluded from series completion. Progress from different
+requesters is never combined to complete a season or series. Seasons that were
+not requested do not inherit another season's requested or watched state.
+
+Reclaimerr first matches Seerr users automatically using usernames, display
+names, and email addresses from Seerr's user directory. Explicit requester
+watch-user mappings are additive fallbacks for users whose identities differ
+between Seerr and the playback provider. Username comparisons are
+case-insensitive. Tautulli identities are treated as Plex identities when
+applying provider-scoped mappings.
+
+Requester watch state combines completed per-user playback snapshots from
+Plex, Jellyfin, and Emby with Tautulli events whose provider-native watched
+status is complete. Each provider's configured watched threshold remains the
+source of truth. Jellyfin and Emby Playback Reporting events describe activity
+but do not expose a reliable completion signal, so they do not independently
+satisfy this field. They remain available to the general `playback.*` fields.
+When the same completed play is available from multiple sources, Reclaimerr
+keeps the latest qualifying timestamp.
+
+After configuring Seerr or changing identity mappings, run `Sync Media` before
+previewing the rule. Plex can provide current completed-watch state directly;
+durable completed Plex history requires Tautulli.
+
+### Sonarr Rule Data
+
+`Season fully watched` and `Season watched (%)` use Sonarr's complete known
+episode inventory as their denominator. Episodes Sonarr knows about still count
+when they are unaired or do not have files, so six watched episodes out of seven
+known episodes is 85.71%, not complete. Run `Sync Media` after upgrading or
+after Sonarr discovers new episodes.
+
+If a season has no successfully synchronized Sonarr episode inventory, its
+watch completion is unknown. Boolean and numeric completion conditions do not
+match that season; Reclaimerr does not fall back to treating the currently
+downloaded episodes as the complete season.
+
+`Sonarr series status` exposes Sonarr's canonical series status independently
+from the TMDB-backed `Series status` field. It is available to series, season,
+and episode rules with the values `continuing`, `ended`, `upcoming`, and
+`deleted`.
+
+Status is loaded from Sonarr's bulk series response and does not require
+episode requests. When a series maps to multiple Sonarr instances, every
+mapped and reachable instance must report the same status. Missing or
+conflicting values are unknown and fail closed.
+
+The latest-season fields are available only to whole-series rules:
 
 | Field                              | Meaning                                                         |
 | ---------------------------------- | --------------------------------------------------------------- |

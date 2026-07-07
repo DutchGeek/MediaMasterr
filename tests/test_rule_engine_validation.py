@@ -81,6 +81,9 @@ class RuleDefinitionValidationTests(unittest.TestCase):
                 "is_false",
                 None,
             ),
+            (TARGET_SERIES, "sonarr.series_status", "equals", "ended"),
+            (TARGET_SEASON, "sonarr.series_status", "equals", "continuing"),
+            (TARGET_EPISODE, "sonarr.series_status", "equals", "upcoming"),
             (TARGET_SEASON, "series.library_season_count", "greater_than", 2),
             (TARGET_EPISODE, "tmdb.original_language", "contains_any", ["jpn"]),
             (TARGET_MOVIE_VERSION, "playback.has_activity", "is_true", None),
@@ -198,6 +201,16 @@ class RuleDefinitionValidationTests(unittest.TestCase):
                     "is_true",
                 ),
                 target_scope=TARGET_SEASON,
+            )
+
+    def test_rejects_sonarr_series_status_for_movie_scope(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Rule field\\(s\\) not available for target_scope 'movie_version'",
+        ):
+            validate_rule_definition(
+                _definition("sonarr.series_status", "equals", "ended"),
+                target_scope=TARGET_MOVIE_VERSION,
             )
 
     def test_accepts_nested_and_or_groups(self) -> None:
@@ -630,6 +643,102 @@ class RuleDefinitionValidationTests(unittest.TestCase):
             validate_rule_definition(
                 _definition("media.size", "greater_than", 1),
                 target_scope="movies",
+            )
+
+
+class ArrTagSubstringOperatorTests(unittest.TestCase):
+    def test_contains_substring_matches_partial_tag(self) -> None:
+        tags = ["weekly-chart-2024", "drama"]
+        self.assertTrue(
+            _matches_operator(tags, "contains_substring", "chart", field="arr.tags")
+        )
+
+    def test_contains_substring_is_case_insensitive(self) -> None:
+        tags = ["Weekly-Chart-2024"]
+        self.assertTrue(
+            _matches_operator(tags, "contains_substring", "CHART", field="arr.tags")
+        )
+
+    def test_contains_substring_no_match(self) -> None:
+        tags = ["drama", "comedy"]
+        self.assertFalse(
+            _matches_operator(tags, "contains_substring", "chart", field="arr.tags")
+        )
+
+    def test_contains_substring_blank_term_fails_closed(self) -> None:
+        self.assertFalse(
+            _matches_operator(["drama"], "contains_substring", "   ", field="arr.tags")
+        )
+
+    def test_not_contains_substring_matches_when_absent(self) -> None:
+        tags = ["drama", "comedy"]
+        self.assertTrue(
+            _matches_operator(
+                tags, "not_contains_substring", "chart", field="arr.tags"
+            )
+        )
+
+    def test_not_contains_substring_no_match_when_present(self) -> None:
+        self.assertFalse(
+            _matches_operator(
+                ["weekly-chart-2024"],
+                "not_contains_substring",
+                "chart",
+                field="arr.tags",
+            )
+        )
+
+    def test_not_contains_substring_blank_term_fails_closed(self) -> None:
+        self.assertFalse(
+            _matches_operator(["drama"], "not_contains_substring", "", field="arr.tags")
+        )
+
+    def test_contains_substring_matches_any_of_multiple_terms(self) -> None:
+        tags = ["weekly-chart-2024", "drama"]
+        self.assertTrue(
+            _matches_operator(
+                tags, "contains_substring", ["xyz", "chart"], field="arr.tags"
+            )
+        )
+
+    def test_contains_substring_list_no_match_when_none_present(self) -> None:
+        tags = ["drama", "comedy"]
+        self.assertFalse(
+            _matches_operator(
+                tags, "contains_substring", ["chart", "-best"], field="arr.tags"
+            )
+        )
+
+    def test_not_contains_substring_list_matches_when_none_present(self) -> None:
+        tags = ["drama", "comedy"]
+        self.assertTrue(
+            _matches_operator(
+                tags, "not_contains_substring", ["chart", "-best"], field="arr.tags"
+            )
+        )
+
+    def test_not_contains_substring_list_no_match_when_one_present(self) -> None:
+        tags = ["top-best", "drama"]
+        self.assertFalse(
+            _matches_operator(
+                tags, "not_contains_substring", ["chart", "-best"], field="arr.tags"
+            )
+        )
+
+    def test_validation_accepts_substring_operator_on_arr_tags(self) -> None:
+        validate_rule_definition(
+            _definition("arr.tags", "contains_substring", "chart"),
+            target_scope=TARGET_MOVIE_VERSION,
+        )
+
+    def test_validation_rejects_substring_operator_on_non_tag_field(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Unsupported rule operator 'contains_substring' for field 'tmdb.genres'",
+        ):
+            validate_rule_definition(
+                _definition("tmdb.genres", "contains_substring", "chart"),
+                target_scope=TARGET_MOVIE_VERSION,
             )
 
 

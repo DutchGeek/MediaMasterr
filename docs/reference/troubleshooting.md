@@ -5,6 +5,24 @@
 - Be sure you have all your services configured.
 - Be sure you have ran a full scan (especially after making changes to any services).
 
+### Seerr Requester Watch Rules Do Not Match
+
+- Run `Sync Media` after adding Seerr, changing a requester mapping, or updating
+  a playback service.
+- Confirm the playback happened after the movie or relevant TV season was
+  requested. Earlier playback intentionally does not count.
+- For season and series targets, one requester must have watched every required
+  local episode; progress from multiple requesters is not combined.
+- Check that the season was actually included in the Seerr request. An
+  un-requested season does not inherit another season's state.
+- Automatic matching uses the Seerr username, display name, and email. Add an
+  explicit requester mapping when the playback-provider identity differs.
+- Partial playback does not count, regardless of session length. The media
+  server's watched state or Tautulli's completed status must confirm completion.
+- Plex durable history requires Tautulli. Tautulli usernames are matched as
+  Plex identities.
+- Declined and failed Seerr requests are ignored.
+
 ## The UI Does Not Load
 
 - Confirm the backend is running.
