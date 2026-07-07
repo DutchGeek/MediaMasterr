@@ -307,6 +307,35 @@ def test_get_candidates_movies_filter_keeps_version_group_together() -> None:
     asyncio.run(run())
 
 
+def test_get_candidates_sorts_groups_by_auto_delete_date() -> None:
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+        async with session_maker() as db_session:
+            ids = await _seed_candidates(db_session)
+            response = await get_candidates(
+                _admin_user(),
+                db_session,
+                page=1,
+                per_page=1,
+                sort_by="auto_delete_eligible_at",
+                sort_order="asc",
+                search=None,
+                media_type=None,
+            )
+
+            assert {item.id for item in response.items} == set(
+                ids["charlie_candidate_ids"]
+            )
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_get_candidates_search_keeps_series_group_intact() -> None:
     async def run() -> None:
         engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)

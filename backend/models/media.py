@@ -493,6 +493,7 @@ class CandidateDisplayGroup:
     media_id: int | None
     sort_title: str
     sort_created_at: datetime
+    sort_deletion_at: datetime
     sort_size: int
     candidate_ids: list[int]
 
