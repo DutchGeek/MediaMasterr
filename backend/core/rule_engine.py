@@ -2051,9 +2051,7 @@ def _matches_operator(
         if not needles:
             return False
         haystacks = [_normalize(item) for item in _as_list(actual) if _exists(item)]
-        found = any(
-            needle in haystack for haystack in haystacks for needle in needles
-        )
+        found = any(needle in haystack for haystack in haystacks for needle in needles)
         return found if operator == "contains_substring" else not found
     if field in MULTI_VALUE_TEXT_FIELDS and operator in {"equals", "not_equals"}:
         list_operator = "contains_any" if operator == "equals" else "not_contains_any"
