@@ -1736,7 +1736,7 @@ def _build_context(
                 _seerr_resolver.resolve_latest_active_request_at(
                     MediaType.SERIES,
                     series.tmdb_id,
-                    target_scope=TARGET_EPISODE,
+                    target_scope=TARGET_SEASON,
                     season_number=season.season_number,
                 )
                 if _seerr_resolver
@@ -1747,7 +1747,7 @@ def _build_context(
                     _seerr_resolver.resolve_latest_active_request_at(
                         MediaType.SERIES,
                         series.tmdb_id,
-                        target_scope=TARGET_EPISODE,
+                        target_scope=TARGET_SEASON,
                         season_number=season.season_number,
                     ),
                     now,
@@ -1759,7 +1759,7 @@ def _build_context(
                 _seerr_resolver.resolve_requester_ids(
                     MediaType.SERIES,
                     series.tmdb_id,
-                    target_scope=TARGET_EPISODE,
+                    target_scope=TARGET_SEASON,
                     season_number=season.season_number,
                 )
                 if _seerr_resolver
@@ -1886,7 +1886,7 @@ def _build_context(
                 _seerr_resolver.resolve_latest_active_request_at(
                     MediaType.SERIES,
                     series.tmdb_id,
-                    target_scope=TARGET_SEASON,
+                    target_scope=TARGET_EPISODE,
                     season_number=season.season_number,
                 )
                 if _seerr_resolver
@@ -1897,7 +1897,7 @@ def _build_context(
                     _seerr_resolver.resolve_latest_active_request_at(
                         MediaType.SERIES,
                         series.tmdb_id,
-                        target_scope=TARGET_SEASON,
+                        target_scope=TARGET_EPISODE,
                         season_number=season.season_number,
                     ),
                     now,
@@ -1909,7 +1909,7 @@ def _build_context(
                 _seerr_resolver.resolve_requester_ids(
                     MediaType.SERIES,
                     series.tmdb_id,
-                    target_scope=TARGET_SEASON,
+                    target_scope=TARGET_EPISODE,
                     season_number=season.season_number,
                 )
                 if _seerr_resolver

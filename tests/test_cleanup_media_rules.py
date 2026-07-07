@@ -29,6 +29,7 @@ from backend.database.models import (
     Movie,
     MovieArrRef,
     MovieVersion,
+    PlaybackHistoryEvent,
     ProtectedMedia,
     ReclaimCandidate,
     ReclaimRule,
@@ -43,6 +44,7 @@ from backend.enums import MediaType, Service
 from backend.services.seerr_cache import SeerrRequestSnapshot
 from backend.tasks import cleanup as cleanup_tasks
 from backend.tasks.cleanup import (
+    _activate_seerr_request_resolver_for_rules,
     _compute_requester_has_watched_for_key,
     _compute_requester_tv_watch_targets_for_key,
     _evaluate_movie_rule,
@@ -2463,6 +2465,130 @@ class CleanupScanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self._engine.dispose()
         if self._db_path.exists():
             self._db_path.unlink()
+
+    async def test_requester_watch_ignores_partial_durable_movie_sessions(
+        self,
+    ) -> None:
+        requested_at = datetime(2026, 7, 1, tzinfo=UTC)
+        rule = ReclaimRule(
+            name="Requester completed movie",
+            media_type=MediaType.MOVIE,
+            enabled=True,
+            target_scope=TARGET_MOVIE_VERSION,
+            definition={
+                "version": 1,
+                "root": {
+                    "type": "group",
+                    "op": "and",
+                    "children": [
+                        {
+                            "type": "condition",
+                            "field": "seerr.requester_has_watched",
+                            "operator": "is_true",
+                        }
+                    ],
+                },
+            },
+            action={"candidate": True, "media_server_action": "delete"},
+        )
+        snapshot = SeerrRequestSnapshot(
+            requester_ids_by_key={(MediaType.MOVIE, 123): {7}},
+            latest_request_at_by_key_user={(MediaType.MOVIE, 123): {7: requested_at}},
+            requester_identity_keys_by_user_id={7: {"alice"}},
+            latest_active_request_at_by_key={},
+        )
+        async with self._sessionmaker() as db:
+            config = ServiceConfig(
+                service_type=Service.TAUTULLI,
+                base_url="http://tautulli",
+                api_key="key",
+                enabled=True,
+            )
+            db.add_all([rule, Movie(title="Movie", tmdb_id=123), config])
+            await db.flush()
+            db.add(
+                PlaybackHistoryEvent(
+                    source_service=Service.TAUTULLI,
+                    source_service_config_id=config.id,
+                    source_event_key="partial",
+                    source_item_id="movie-123",
+                    provider_media_type="movie",
+                    played_at=datetime(2026, 7, 2),
+                    duration_seconds=3600,
+                    completed=False,
+                    source_user_id="7",
+                    source_username="alice",
+                    tmdb_id=123,
+                )
+            )
+            await db.commit()
+
+        with (
+            patch.object(cleanup_tasks.service_manager, "_seerr", SimpleNamespace()),
+            patch.object(
+                type(cleanup_tasks.seerr_snapshot_cache),
+                "get_request_snapshot",
+                new=AsyncMock(return_value=(snapshot, None)),
+            ),
+        ):
+            async with self._sessionmaker() as db:
+                ready, error = await _activate_seerr_request_resolver_for_rules(
+                    db,
+                    [rule],
+                    require_fresh=False,
+                    allow_stale_on_failure=True,
+                )
+
+        self.assertTrue(ready)
+        self.assertIsNone(error)
+        resolver = SeerrRequestResolver.current()
+        self.assertIsNotNone(resolver)
+        assert resolver is not None
+        self.assertFalse(resolver.resolve_requester_has_watched(MediaType.MOVIE, 123))
+
+        async with self._sessionmaker() as db:
+            config_id = await db.scalar(
+                select(ServiceConfig.id).where(
+                    ServiceConfig.service_type == Service.TAUTULLI
+                )
+            )
+            assert config_id is not None
+            db.add(
+                PlaybackHistoryEvent(
+                    source_service=Service.TAUTULLI,
+                    source_service_config_id=config_id,
+                    source_event_key="complete",
+                    source_item_id="movie-123",
+                    provider_media_type="movie",
+                    played_at=datetime(2026, 7, 3),
+                    duration_seconds=3600,
+                    completed=True,
+                    source_user_id="7",
+                    source_username="alice",
+                    tmdb_id=123,
+                )
+            )
+            await db.commit()
+
+        with (
+            patch.object(cleanup_tasks.service_manager, "_seerr", SimpleNamespace()),
+            patch.object(
+                type(cleanup_tasks.seerr_snapshot_cache),
+                "get_request_snapshot",
+                new=AsyncMock(return_value=(snapshot, None)),
+            ),
+        ):
+            async with self._sessionmaker() as db:
+                await _activate_seerr_request_resolver_for_rules(
+                    db,
+                    [rule],
+                    require_fresh=False,
+                    allow_stale_on_failure=True,
+                )
+
+        resolver = SeerrRequestResolver.current()
+        assert resolver is not None
+        self.assertTrue(resolver.resolve_requester_has_watched(MediaType.MOVIE, 123))
 
     async def test_scan_ends_notice_transaction_before_nested_provider_write(
         self,

@@ -256,16 +256,18 @@ between Seerr and the playback provider. Username comparisons are
 case-insensitive. Tautulli identities are treated as Plex identities when
 applying provider-scoped mappings.
 
-Requester watch state combines current per-user playback snapshots from Plex,
-Jellyfin, and Emby with durable Playback Reporting and Tautulli events. Only
-durable events lasting at least 10 minutes count for this field; this threshold
-is separate from the shorter minimums used by the general `playback.*` fields.
-When the same play is available from multiple sources, Reclaimerr keeps the
-latest qualifying timestamp.
+Requester watch state combines completed per-user playback snapshots from
+Plex, Jellyfin, and Emby with Tautulli events whose provider-native watched
+status is complete. Each provider's configured watched threshold remains the
+source of truth. Jellyfin and Emby Playback Reporting events describe activity
+but do not expose a reliable completion signal, so they do not independently
+satisfy this field. They remain available to the general `playback.*` fields.
+When the same completed play is available from multiple sources, Reclaimerr
+keeps the latest qualifying timestamp.
 
 After configuring Seerr or changing identity mappings, run `Sync Media` before
-previewing the rule. Plex can provide current episode watch state directly,
-but durable Plex history requires Tautulli.
+previewing the rule. Plex can provide current completed-watch state directly;
+durable completed Plex history requires Tautulli.
 
 ### Sonarr Episode State
 

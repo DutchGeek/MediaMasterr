@@ -2002,7 +2002,7 @@ async def _activate_seerr_request_resolver_for_rules(
                 PlaybackHistoryEvent.source_user_id,
                 PlaybackHistoryEvent.played_at,
             ).where(
-                PlaybackHistoryEvent.duration_seconds >= 600,
+                PlaybackHistoryEvent.completed.is_(True),
                 PlaybackHistoryEvent.tmdb_id.is_not(None),
                 PlaybackHistoryEvent.provider_media_type.in_(("movie", "episode")),
             )
@@ -2193,7 +2193,7 @@ async def _activate_seerr_request_resolver_for_rules(
     )
     LOG.debug(
         "Requester-watch resolver merged "
-        f"{durable_event_count} qualifying durable playback event(s)"
+        f"{durable_event_count} completed durable playback event(s)"
     )
     if snapshot_error:
         LOG.debug(

@@ -17,7 +17,8 @@
   un-requested season does not inherit another season's state.
 - Automatic matching uses the Seerr username, display name, and email. Add an
   explicit requester mapping when the playback-provider identity differs.
-- Durable requester-watch events shorter than 10 minutes are ignored.
+- Partial playback does not count, regardless of session length. The media
+  server's watched state or Tautulli's completed status must confirm completion.
 - Plex durable history requires Tautulli. Tautulli usernames are matched as
   Plex identities.
 - Declined and failed Seerr requests are ignored.

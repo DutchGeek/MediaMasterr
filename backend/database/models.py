@@ -981,6 +981,7 @@ class PlaybackHistoryEvent(Base):
     provider_media_type: Mapped[str] = mapped_column(String(16))
     played_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     duration_seconds: Mapped[int] = mapped_column(Integer)
+    completed: Mapped[bool | None] = mapped_column(Boolean, default=None, index=True)
     source_user_id: Mapped[str | None] = mapped_column(
         String(255), default=None, index=True
     )

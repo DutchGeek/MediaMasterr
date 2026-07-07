@@ -40,6 +40,7 @@ PLAYBACK_EPISODE_MIN_SECONDS = 7
 PLAYBACK_TARGET_SCOPES = ("movie_version", "series", "season", "episode")
 PLAYBACK_PREVIEW_REFRESH_INTERVAL = timedelta(minutes=5)
 PLAYBACK_EVENT_INSERT_BATCH_SIZE = 50
+PLAYBACK_EVENT_FORMAT_VERSION = 2
 
 _playback_refresh_lock = Lock()
 
@@ -222,6 +223,7 @@ class _NormalizedEvent:
     duration_seconds: int
     source_user_id: str | None
     source_username: str | None
+    completed: bool | None = None
 
 
 @dataclass(slots=True)
@@ -341,14 +343,22 @@ def _provider_error_message(exc: BaseException) -> str:
 
 def _last_success_from(config: ServiceConfig) -> datetime | None:
     """Return the last successful sync time stored on a config."""
-
-    return _parse_datetime(_state_from(config).get("last_success_at"))
+    state = _state_from(config)
+    if config.service_type is Service.TAUTULLI:
+        version = _parse_int(state.get("format_version")) or 0
+        if version < PLAYBACK_EVENT_FORMAT_VERSION:
+            return None
+    return _parse_datetime(state.get("last_success_at"))
 
 
 def _recent_status_from(config: ServiceConfig) -> PlaybackProviderStatus | None:
     """Return cached provider status if the last attempt is still fresh."""
 
     state = _state_from(config)
+    if config.service_type is Service.TAUTULLI:
+        version = _parse_int(state.get("format_version")) or 0
+        if version < PLAYBACK_EVENT_FORMAT_VERSION and bool(state.get("available")):
+            return None
     last_attempt = _parse_datetime(state.get("last_attempt_at"))
     if (
         last_attempt is None
@@ -407,6 +417,11 @@ def _set_state(
         ),
         "last_error": error,
         "imported_events": imported_events,
+        "format_version": (
+            PLAYBACK_EVENT_FORMAT_VERSION
+            if available
+            else previous.get("format_version", 0)
+        ),
     }
     settings[PLAYBACK_HISTORY_STATE_KEY] = state
     config.extra_settings = settings
@@ -453,6 +468,7 @@ def _normalize_reporting_events(
                 duration_seconds=duration,
                 source_user_id=user_id,
                 source_username=username,
+                completed=None,
             )
         )
     return events
@@ -492,6 +508,8 @@ def _normalize_tautulli_events(
         )
         if duration is None or duration < threshold or played_at is None or not item_id:
             continue
+        watched_status = _parse_int(row.get("watched_status"))
+        completed = watched_status == 1 if watched_status is not None else None
         event_key = str(row.get("row_id") or "").strip() or _event_hash(
             row.get("started"),
             row.get("stopped"),
@@ -509,6 +527,7 @@ def _normalize_tautulli_events(
                 duration_seconds=duration,
                 source_user_id=user_id,
                 source_username=username,
+                completed=completed,
             )
         )
     return events
@@ -666,6 +685,7 @@ async def _upsert_events(
                     "provider_media_type": event.provider_media_type,
                     "played_at": event.played_at,
                     "duration_seconds": event.duration_seconds,
+                    "completed": event.completed,
                     "source_user_id": event.source_user_id,
                     "source_username": event.source_username,
                     "tmdb_id": tmdb_id,
@@ -683,6 +703,7 @@ async def _upsert_events(
         existing.provider_media_type = event.provider_media_type
         existing.played_at = event.played_at
         existing.duration_seconds = event.duration_seconds
+        existing.completed = event.completed
         existing.source_user_id = event.source_user_id
         if event.source_username:
             existing.source_username = event.source_username

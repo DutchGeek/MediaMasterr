@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies
   - Updated Apprise to 1.12.0
   - Updated Granian to 2.7.9
-- Requester watch evaluation now combines current Plex, Jellyfin, and Emby watch snapshots with durable Playback Reporting and Tautulli history
-- Durable playback events must be at least 10 minutes long to count toward requester-watch rules
+- Requester watch evaluation now combines completed Plex, Jellyfin, and Emby watch snapshots with completed Tautulli history
+- Jellyfin and Emby Playback Reporting remains available to playback activity rules but no longer treats partial sessions as completed requester watches
 - Seerr request data now preserves the specific seasons and request timestamp for each season
 - Playback snapshots now retain per-user, per-episode watch state instead of only series level activity
 - Duplicate playback evidence is consolidated using the latest qualifying watch timestamp
@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Metacritic count pill not styled the same as the others
 - Plex episode history responses that expose series IDs through `grandparentKey` now populate series, season, and episode requester-watch rules correctly
 - Plex watch history performs a one-time full rebuild after the TV parser upgrade so previously skipped episode plays are backfilled
-- Seerr requester-watch rules now evaluate individual TV episodes, preserve per-season request dates, combine current and durable playback history, and require complete requester progress for season and series targets
+- Seerr requester-watch rules now evaluate individual TV episodes, preserve per-season request dates, honor provider-native completion state, and require complete requester progress for season and series targets
+- Partial movie and episode sessions no longer satisfy `Seerr requester has watched`
 - Seerr requester identities are automatically enriched from the Seerr user directory before explicit watch user mappings are applied
 - Seerr `requester has watched` now works correctly for Series, Season, and Episode rule targets
 - Episode targets only match episodes actually watched by the requester after requesting that season

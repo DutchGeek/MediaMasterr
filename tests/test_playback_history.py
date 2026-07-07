@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -40,6 +40,7 @@ from backend.services.playback_history import (
     _backfill_event_usernames,
     _config_api_key,
     _insert_new_events,
+    _last_success_from,
     _normalize_reporting_events,
     _normalize_tautulli_events,
     _playback_unavailable_reason,
@@ -98,6 +99,7 @@ class PlaybackHistoryNormalizationTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].source_item_id, "movie-1")
         self.assertEqual(events[0].source_username, "Alice")
+        self.assertIsNone(events[0].completed)
 
     def test_tautulli_uses_row_id_and_utc_timestamp(self) -> None:
         events = _normalize_tautulli_events(
@@ -110,6 +112,7 @@ class PlaybackHistoryNormalizationTests(unittest.TestCase):
                     "user": "Alice",
                     "play_duration": 120,
                     "stopped": 1_750_000_000,
+                    "watched_status": 1,
                 }
             ]
         )
@@ -117,6 +120,54 @@ class PlaybackHistoryNormalizationTests(unittest.TestCase):
         self.assertEqual(events[0].source_event_key, "42")
         self.assertEqual(events[0].source_username, "Alice")
         self.assertIsNone(events[0].played_at.tzinfo)
+        self.assertTrue(events[0].completed)
+
+    def test_tautulli_completion_fails_closed(self) -> None:
+        base_row = {
+            "media_type": "movie",
+            "rating_key": "100",
+            "user_id": "7",
+            "user": "Alice",
+            "play_duration": 3600,
+            "stopped": 1_750_000_000,
+        }
+        events = _normalize_tautulli_events(
+            [
+                {**base_row, "row_id": 1, "watched_status": 0},
+                {**base_row, "row_id": 2},
+            ]
+        )
+
+        self.assertFalse(events[0].completed)
+        self.assertIsNone(events[1].completed)
+
+    def test_old_tautulli_state_forces_full_completion_backfill(self) -> None:
+        config = ServiceConfig(
+            service_type=Service.TAUTULLI,
+            base_url="http://tautulli",
+            api_key="key",
+            enabled=True,
+            extra_settings={
+                "playback_history_sync": {
+                    "last_success_at": "2026-07-01T12:00:00",
+                    "format_version": 1,
+                    "available": True,
+                }
+            },
+        )
+        self.assertIsNone(_last_success_from(config))
+
+        config.extra_settings = {
+            "playback_history_sync": {
+                "last_success_at": "2026-07-01T12:00:00",
+                "format_version": 2,
+                "available": True,
+            }
+        }
+        self.assertEqual(
+            _last_success_from(config),
+            datetime(2026, 7, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None),
+        )
 
     def test_resolver_returns_unavailable_for_unobserved_target(self) -> None:
         resolver = PlaybackHistoryResolver(
@@ -362,7 +413,10 @@ class PlaybackHistoryAggregateTests(unittest.IsolatedAsyncioTestCase):
 
         debug_messages = [call.args[0] for call in debug.call_args_list]
         self.assertTrue(
-            any("total=2, evaluable=1, unknown=1" in message for message in debug_messages)
+            any(
+                "total=2, evaluable=1, unknown=1" in message
+                for message in debug_messages
+            )
         )
         self.assertIn(
             "media service not covered by an available playback provider: jellyfin=1",
