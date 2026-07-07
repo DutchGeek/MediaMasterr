@@ -117,7 +117,7 @@ FIELD_LABELS: dict[str, str] = {
     "playback.last_activity_at": "Last playback activity",
     "playback.days_since_last_activity": "Days since playback activity",
     "tmdb.popularity": "Popularity",
-    "tmdb.vote_average": "Rating",
+    "tmdb.vote_average": "TMDB rating",
     "tmdb.vote_count": "Vote count",
     "imdb.rating": "IMDb rating",
     "imdb.vote_count": "IMDb vote count",
