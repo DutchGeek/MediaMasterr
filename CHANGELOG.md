@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Alembic migration added (existing admin-message subscriptions carry over to new-request notifications)
   - Added notification mapping, preference, scope, and permission tests
 - Rule field combobox; can now search for the field you want to utilize in your rule
+- Arr tags rule operators **contains_substring** and **does not contain** substring (thanks @code-boar)
 
 ### Changed
 
