@@ -17,6 +17,7 @@
   import Protected from "./routes/protected.svelte";
   import Candidates from "./routes/candidates.svelte";
   import History from "./routes/history.svelte";
+  import Correlation from "./routes/correlation.svelte";
   import QBittorrent from "./routes/qbittorrent.svelte";
   import Rules from "./routes/rules.svelte";
   import Settings from "./routes/settings.svelte";
@@ -48,6 +49,7 @@
     "/requests": route(Requests),
     "/candidates": route(Candidates),
     "/history": route(History),
+    "/correlation": route(Correlation),
     "/qbittorrent": route(QBittorrent),
     "/rules": route(Rules),
     "/settings": route(Settings),

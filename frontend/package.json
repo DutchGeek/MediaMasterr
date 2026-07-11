@@ -10,7 +10,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "format": "prettier --write .",
     "test:rule-dnd": "node --test src/lib/components/settings/rules/rule-tree-dnd.test.js",
-    "test:qbittorrent": "node --test src/lib/qbittorrent/view.test.js"
+    "test:qbittorrent": "node --test src/lib/qbittorrent/view.test.js",
+    "test:correlation": "node --test src/lib/correlation/view.test.js"
   },
   "devDependencies": {
     "@internationalized/date": "^3.12.1",

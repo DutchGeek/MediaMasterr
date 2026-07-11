@@ -21,6 +21,7 @@
   import Filter from "@lucide/svelte/icons/filter";
   import History from "@lucide/svelte/icons/history";
   import Download from "@lucide/svelte/icons/download";
+  import Link2 from "@lucide/svelte/icons/link-2";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Check from "@lucide/svelte/icons/check";
@@ -106,6 +107,14 @@
       adminOnly: false,
       page: PageAccess.History,
       tooltip: "Browse reclaim activity and recent file history",
+    },
+    {
+      path: "/correlation",
+      label: "Relationships",
+      icon: Link2,
+      adminOnly: true,
+      tooltip:
+        "Trace read-only relationships between torrents, media, watches, and protection",
     },
     {
       path: "/qbittorrent",

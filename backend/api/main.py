@@ -18,6 +18,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from backend.api.routes.account import router as account_router
 from backend.api.routes.auth import router as auth_router
 from backend.api.routes.background_jobs import router as background_jobs_router
+from backend.api.routes.correlation import router as correlation_router
 from backend.api.routes.dashboard import router as dashboard_router
 from backend.api.routes.delete_requests import router as delete_requests_router
 from backend.api.routes.info import router as info_router
@@ -181,6 +182,7 @@ fastapi_app.include_router(account_router)
 fastapi_app.include_router(tasks_router)
 fastapi_app.include_router(background_jobs_router)
 fastapi_app.include_router(media_router)
+fastapi_app.include_router(correlation_router)
 fastapi_app.include_router(requests_router)
 fastapi_app.include_router(delete_requests_router)
 fastapi_app.include_router(protected_router)
