@@ -70,9 +70,19 @@
   let currentPage = $state(1);
 
   // poster size control
-  const POSTER_SIZE_KEY = "reclaimerr_poster_size";
+  const POSTER_SIZE_KEY = "mediamasterr_poster_size";
+  const LEGACY_POSTER_SIZE_KEY = "reclaimerr_poster_size";
+  let storedPosterSize = localStorage.getItem(POSTER_SIZE_KEY);
+  if (!storedPosterSize) {
+    const legacyPosterSize = localStorage.getItem(LEGACY_POSTER_SIZE_KEY);
+    if (legacyPosterSize) {
+      localStorage.setItem(POSTER_SIZE_KEY, legacyPosterSize);
+      localStorage.removeItem(LEGACY_POSTER_SIZE_KEY);
+      storedPosterSize = legacyPosterSize;
+    }
+  }
   let posterSize = $state(
-    parseInt(localStorage.getItem(POSTER_SIZE_KEY) ?? "150"),
+    parseInt(storedPosterSize ?? "150"),
   );
   $effect(() => {
     localStorage.setItem(POSTER_SIZE_KEY, posterSize.toString());

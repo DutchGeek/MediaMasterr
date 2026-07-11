@@ -18,13 +18,24 @@ server = ReclaimerServer()
 
 # Single instance enforcement. FileLock uses an OS level exclusive file lock
 # that is automatically released if the process crashes (no stale lock files).
-_lock_path = server.data_dir / "reclaimerr.lock"
+_lock_path = server.data_dir / "mediamasterr.lock"
+_legacy_lock_path = server.data_dir / "reclaimerr.lock"
 _lock_path.parent.mkdir(parents=True, exist_ok=True)
 _instance_lock = FileLock(str(_lock_path), timeout=0)
+_legacy_instance_lock: FileLock | None = None
 try:
     _instance_lock.acquire()
+    # During transition, also honor a legacy lock if one exists.
+    if _legacy_lock_path.exists():
+        _legacy_instance_lock = FileLock(str(_legacy_lock_path), timeout=0)
+        _legacy_instance_lock.acquire()
 except Timeout:
     # another instance is already running so we can just exit silently
+    try:
+        if _instance_lock.is_locked:
+            _instance_lock.release()
+    except Exception:
+        pass
     sys.exit(0)
 
 # set env vars before any backend module is imported.
@@ -39,9 +50,15 @@ _app.state.shutdown_callback = server.stop
 
 # write a PID file so power users can send signals from the CLI
 _pid_path: Path | None = None
+_legacy_pid_path = server.data_dir / "reclaimerr.pid"
 try:
-    pid_path = server.data_dir / "reclaimerr.pid"
+    pid_path = server.data_dir / "mediamasterr.pid"
     pid_path.parent.mkdir(parents=True, exist_ok=True)
+    if not pid_path.exists() and _legacy_pid_path.exists():
+        try:
+            _legacy_pid_path.replace(pid_path)
+        except OSError:
+            pass
     pid_path.write_text(str(os.getpid()))
     _pid_path = pid_path
 except OSError:
@@ -91,3 +108,7 @@ finally:
             _pid_path.unlink(missing_ok=True)
         except OSError:
             pass
+    try:
+        _legacy_pid_path.unlink(missing_ok=True)
+    except OSError:
+        pass

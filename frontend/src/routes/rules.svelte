@@ -328,7 +328,7 @@
     a.download =
       rulesToExport.length === 1
         ? `rule-${rulesToExport[0].name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`
-        : "reclaimerr-rules.json";
+        : "mediamasterr-rules.json";
     a.click();
     URL.revokeObjectURL(url);
   };

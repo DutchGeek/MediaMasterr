@@ -8,6 +8,7 @@ wheels/
 .python-version
 
 # generated PyInstaller spec (produced by build_desktop.py)
+mediamasterr.spec
 reclaimerr.spec
 
 # virtual environments

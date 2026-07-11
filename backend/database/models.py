@@ -40,7 +40,7 @@ from backend.user_types import (
 
 
 class User(Base):
-    """User account for Reclaimerr."""
+    """User account for MediaMasterr."""
 
     __tablename__ = "users"
     __table_args__ = (

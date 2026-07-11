@@ -6,7 +6,7 @@
     MediaAuthProvider,
     MediaAuthProvidersResponse,
   } from "$lib/types/shared";
-  import MediaMasterrSVG from "$lib/components/svgs/reclaimerr-logo-svg.svelte";
+  import MediaMasterrSVG from "$lib/components/svgs/mediamasterr-logo-svg.svelte";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";

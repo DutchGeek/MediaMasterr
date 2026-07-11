@@ -82,8 +82,17 @@
   // helpers
   type SizeUnit = "AUTO" | "MB" | "GB" | "TB";
   const UNIT_CYCLE: SizeUnit[] = ["AUTO", "MB", "GB", "TB"];
-  const SIZE_UNIT_KEY = "reclaimerr_dashboard_size_unit";
-  const storedUnit = localStorage.getItem(SIZE_UNIT_KEY);
+  const SIZE_UNIT_KEY = "mediamasterr_dashboard_size_unit";
+  const LEGACY_SIZE_UNIT_KEY = "reclaimerr_dashboard_size_unit";
+  let storedUnit = localStorage.getItem(SIZE_UNIT_KEY);
+  if (!storedUnit) {
+    const legacyUnit = localStorage.getItem(LEGACY_SIZE_UNIT_KEY);
+    if (legacyUnit) {
+      localStorage.setItem(SIZE_UNIT_KEY, legacyUnit);
+      localStorage.removeItem(LEGACY_SIZE_UNIT_KEY);
+      storedUnit = legacyUnit;
+    }
+  }
   let sizeUnit = $state<SizeUnit>(
     UNIT_CYCLE.includes(storedUnit as SizeUnit)
       ? (storedUnit as SizeUnit)

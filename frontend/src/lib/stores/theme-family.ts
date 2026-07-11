@@ -6,7 +6,8 @@ import {
   type ThemeFamilyId,
 } from "$lib/theme-families";
 
-export const THEME_FAMILY_STORAGE_KEY = "reclaimerr-theme-family";
+export const THEME_FAMILY_STORAGE_KEY = "mediamasterr-theme-family";
+const LEGACY_THEME_FAMILY_STORAGE_KEY = "reclaimerr-theme-family";
 
 const VALID_THEME_FAMILIES = new Set<ThemeFamilyId>(
   THEME_FAMILIES.map((preset) => preset.id as ThemeFamilyId),
@@ -26,7 +27,17 @@ function readThemeFamily(): ThemeFamilyId {
   if (!hasStorage) return DEFAULT_THEME_FAMILY;
 
   try {
-    const storedTheme = window.localStorage.getItem(THEME_FAMILY_STORAGE_KEY);
+    let storedTheme = window.localStorage.getItem(THEME_FAMILY_STORAGE_KEY);
+    if (!storedTheme) {
+      const legacyTheme = window.localStorage.getItem(
+        LEGACY_THEME_FAMILY_STORAGE_KEY,
+      );
+      if (legacyTheme) {
+        window.localStorage.setItem(THEME_FAMILY_STORAGE_KEY, legacyTheme);
+        window.localStorage.removeItem(LEGACY_THEME_FAMILY_STORAGE_KEY);
+        storedTheme = legacyTheme;
+      }
+    }
     return normalizeThemeFamily(storedTheme);
   } catch {
     return DEFAULT_THEME_FAMILY;
