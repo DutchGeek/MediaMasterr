@@ -177,9 +177,11 @@ class ServiceManager:
             return False, "Too many redirects. Please check the server URL."
         except niq_exceptions.InvalidURL:
             return False, "Invalid URL. Please check the address."
+        except ValueError as e:
+            return False, str(e)
         except Exception as e:
             LOG.error(f"Unexpected error testing {service_type}: {e}")
-            return False, "An unknown error occurred while testing the service."
+            return False, f"Unexpected error: {type(e).__name__}: {e}"
 
     async def return_service(
         self, service_type: Service

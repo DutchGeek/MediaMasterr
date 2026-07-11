@@ -1002,7 +1002,7 @@
                 class="cursor-pointer gap-2"
                 size="default"
               >
-                Test
+                Test Connection
               </TestButton>
               <Button
                 onclick={() => saveServiceSettings(activeTab)}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import niquests.exceptions as niq_exceptions
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -15,6 +16,7 @@ from backend.database import Base
 from backend.database.models import User
 from backend.enums import Service, UserRole
 from backend.models.settings import ServiceConfigUpdate
+from backend.services.qbittorrent import QBittorrentClient
 
 
 class _FakeQBClient:
@@ -86,6 +88,30 @@ class _FakeQBClient:
 
 def _admin_user() -> User:
     return User(username="admin", password_hash="x", role=UserRole.ADMIN, permissions=[])
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeSession:
+    def __init__(self, login: _FakeResponse, version: _FakeResponse) -> None:
+        self._login = login
+        self._version = version
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def post(self, _url: str, **_kwargs: object) -> _FakeResponse:
+        return self._login
+
+    async def get(self, _url: str, **_kwargs: object) -> _FakeResponse:
+        return self._version
 
 
 @pytest.mark.anyio
@@ -162,3 +188,68 @@ async def test_qbittorrent_settings_pass_extra_settings_to_connection_test(
             )
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_qbittorrent_test_service_uses_post_login_and_get_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "backend.services.qbittorrent.niquests.AsyncSession",
+        lambda: _FakeSession(
+            login=_FakeResponse(200, "Ok."),
+            version=_FakeResponse(200, "4.6.7"),
+        ),
+    )
+
+    result = await QBittorrentClient.test_service(
+        "localhost:8080",
+        "password",
+        {"username": "qb-user", "use_https": False},
+    )
+
+    assert result is True
+
+
+@pytest.mark.anyio
+async def test_qbittorrent_test_service_reports_authentication_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "backend.services.qbittorrent.niquests.AsyncSession",
+        lambda: _FakeSession(
+            login=_FakeResponse(200, "Fails."),
+            version=_FakeResponse(200, "4.6.7"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Authentication failed"):
+        await QBittorrentClient.test_service(
+            "localhost:8080",
+            "password",
+            {"username": "qb-user", "use_https": False},
+        )
+
+
+@pytest.mark.anyio
+async def test_qbittorrent_test_service_reports_connection_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConnectionRefusedSession(_FakeSession):
+        async def post(self, _url: str, **_kwargs: object) -> _FakeResponse:
+            raise niq_exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(
+        "backend.services.qbittorrent.niquests.AsyncSession",
+        lambda: _ConnectionRefusedSession(
+            login=_FakeResponse(200, "Ok."),
+            version=_FakeResponse(200, "4.6.7"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Connection refused"):
+        await QBittorrentClient.test_service(
+            "localhost:8080",
+            "password",
+            {"username": "qb-user", "use_https": False},
+        )

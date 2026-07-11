@@ -60,6 +60,20 @@ export async function fetchAPI(url: string, options: RequestInit = {}) {
   return response;
 }
 
+function extractErrorMessage(payload: any, fallback: string): string {
+  const detail = payload?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0];
+    if (typeof first === "string" && first.trim()) return first;
+    if (typeof first?.msg === "string" && first.msg.trim()) return first.msg;
+  }
+  if (typeof payload?.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+  return fallback;
+}
+
 /**
  * helper for GET requests
  */
@@ -70,11 +84,12 @@ export async function get_api<T>(
   const response = await fetchAPI(url, { signal });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ detail: "Request failed" }));
+    const error = await response.json().catch(() => ({}));
     throw new Error(
-      error.detail || `Request failed with status ${response.status}`,
+      extractErrorMessage(
+        error,
+        `Request failed with status ${response.status}`,
+      ),
     );
   }
 
@@ -95,11 +110,12 @@ export async function post_api<T>(url: string, data?: any): Promise<T> {
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ detail: "Request failed" }));
+    const error = await response.json().catch(() => ({}));
     throw new Error(
-      error.detail || `Request failed with status ${response.status}`,
+      extractErrorMessage(
+        error,
+        `Request failed with status ${response.status}`,
+      ),
     );
   }
 
@@ -120,11 +136,12 @@ export async function put_api<T>(url: string, data?: any): Promise<T> {
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ detail: "Request failed" }));
+    const error = await response.json().catch(() => ({}));
     throw new Error(
-      error.detail || `Request failed with status ${response.status}`,
+      extractErrorMessage(
+        error,
+        `Request failed with status ${response.status}`,
+      ),
     );
   }
 
@@ -141,11 +158,12 @@ export async function delete_api<T>(url: string): Promise<T> {
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ detail: "Request failed" }));
+    const error = await response.json().catch(() => ({}));
     throw new Error(
-      error.detail || `Request failed with status ${response.status}`,
+      extractErrorMessage(
+        error,
+        `Request failed with status ${response.status}`,
+      ),
     );
   }
 

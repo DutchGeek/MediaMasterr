@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import niquests
+import niquests.exceptions as niq_exceptions
 from niquests.exceptions import ReadTimeout
 from tenacity import (
     retry,
@@ -13,15 +15,12 @@ from tenacity import (
     wait_exponential,
 )
 
+from backend.core.logger import LOG
 from backend.core.utils.request import should_retry_on_status
 
 
 class QBittorrentClient:
-    """Read-only qBittorrent API client.
-
-    This client intentionally performs only GET requests to avoid modifying the
-    qBittorrent server state.
-    """
+    """qBittorrent API client using cookie-based authentication."""
 
     __slots__ = (
         "base_url",
@@ -51,22 +50,82 @@ class QBittorrentClient:
     @staticmethod
     def _normalize_base_url(base_url: str, use_https: bool) -> str:
         normalized = (base_url or "").strip().rstrip("/")
+        if not normalized:
+            raise ValueError("Invalid URL: base URL is empty")
         if normalized.startswith("http://") or normalized.startswith("https://"):
-            return normalized
-        scheme = "https" if use_https else "http"
-        return f"{scheme}://{normalized}"
+            candidate = normalized
+        else:
+            scheme = "https" if use_https else "http"
+            candidate = f"{scheme}://{normalized}"
+        parsed = urlsplit(candidate)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(f"Invalid URL: {candidate}")
+        return candidate
+
+    @staticmethod
+    def _api_url(base_url: str, endpoint: str) -> str:
+        return f"{base_url}/api/v2/{endpoint.lstrip('/')}"
+
+    @staticmethod
+    def _response_body(response: niquests.Response) -> str:
+        try:
+            return response.text.strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _log_http(method: str, url: str, response: niquests.Response) -> None:
+        LOG.debug(
+            f"qBittorrent HTTP {method} {url} -> {response.status_code} | body={QBittorrentClient._response_body(response)!r}"
+        )
+
+    @staticmethod
+    async def _login(
+        session: niquests.AsyncSession,
+        *,
+        base_url: str,
+        username: str,
+        password: str,
+        timeout: int,
+    ) -> None:
+        login_url = QBittorrentClient._api_url(base_url, "auth/login")
+        try:
+            response = await session.post(
+                login_url,
+                data={"username": username, "password": password},
+                timeout=timeout,
+            )
+        except niq_exceptions.InvalidURL as exc:
+            raise ValueError(f"Invalid URL: {base_url}") from exc
+        except (niq_exceptions.ConnectTimeout, niq_exceptions.ReadTimeout, TimeoutError) as exc:
+            raise ValueError("Timeout while connecting to qBittorrent") from exc
+        except niq_exceptions.ConnectionError as exc:
+            raise ValueError("Connection refused or unreachable host") from exc
+
+        QBittorrentClient._log_http("POST", login_url, response)
+
+        if response.status_code >= 400:
+            raise ValueError(
+                "HTTP status code "
+                f"{response.status_code} during login: "
+                f"{QBittorrentClient._response_body(response) or 'empty response'}"
+            )
+
+        body = QBittorrentClient._response_body(response)
+        if body.lower() not in {"ok.", "ok"}:
+            raise ValueError(
+                f"Authentication failed: unexpected login response body {body or '<empty>'}"
+            )
 
     async def _initialize_session(self) -> None:
         if self._session_initialized:
             return
-        # qBittorrent normally expects POST for /auth/login, but this integration
-        # is strictly GET-only by design. We still attempt to establish cookies for
-        # environments that permit GET auth handshakes (for example proxy wrappers).
-        await self.session.get(
-            f"{self.base_url}/api/v2/auth/login",
-            params={"username": self.username, "password": self.password},
+        await self._login(
+            self.session,
+            base_url=self.base_url,
+            username=self.username,
+            password=self.password,
             timeout=self.timeout,
-            auth=(self.username, self.password),
         )
         self._session_initialized = True
 
@@ -85,12 +144,9 @@ class QBittorrentClient:
         params: Mapping[str, Any] | None = None,
     ) -> niquests.Response:
         await self._initialize_session()
-        response = await self.session.get(
-            f"{self.base_url}/api/v2/{endpoint.lstrip('/')}",
-            params=params,
-            timeout=self.timeout,
-            auth=(self.username, self.password),
-        )
+        url = self._api_url(self.base_url, endpoint)
+        response = await self.session.get(url, params=params, timeout=self.timeout)
+        self._log_http("GET", url, response)
         response.raise_for_status()
         return response
 
@@ -140,16 +196,34 @@ class QBittorrentClient:
 
         base_url = QBittorrentClient._normalize_base_url(url, use_https)
         async with niquests.AsyncSession() as session:
-            await session.get(
-                f"{base_url}/api/v2/auth/login",
-                params={"username": username, "password": password},
+            await QBittorrentClient._login(
+                session,
+                base_url=base_url,
+                username=username,
+                password=password,
                 timeout=10,
-                auth=(username, password),
             )
-            response = await session.get(
-                f"{base_url}/api/v2/app/webapiVersion",
-                timeout=10,
-                auth=(username, password),
-            )
-            response.raise_for_status()
-            return bool(response.text.strip())
+
+            version_url = QBittorrentClient._api_url(base_url, "app/version")
+            try:
+                response = await session.get(version_url, timeout=10)
+            except (niq_exceptions.ConnectTimeout, niq_exceptions.ReadTimeout, TimeoutError) as exc:
+                raise ValueError("Timeout while verifying qBittorrent version") from exc
+            except niq_exceptions.ConnectionError as exc:
+                raise ValueError("Connection refused or unreachable host") from exc
+            except niq_exceptions.InvalidURL as exc:
+                raise ValueError(f"Invalid URL: {base_url}") from exc
+
+            QBittorrentClient._log_http("GET", version_url, response)
+
+            if response.status_code >= 400:
+                raise ValueError(
+                    "HTTP status code "
+                    f"{response.status_code} while verifying connection: "
+                    f"{QBittorrentClient._response_body(response) or 'empty response'}"
+                )
+
+            body = QBittorrentClient._response_body(response)
+            if not body:
+                raise ValueError("Unexpected response body from app/version: <empty>")
+            return True
