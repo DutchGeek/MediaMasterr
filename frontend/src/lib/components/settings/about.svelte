@@ -67,6 +67,11 @@
       {/if}
       <span class="align-middle">About {BRANDING.applicationName}</span>
     </h2>
+    {#if currentVersion}
+      <p class="mt-1 text-xs text-muted-foreground">
+        {BRANDING.applicationName} v{currentVersion}
+      </p>
+    {/if}
   </div>
 
   <hr />

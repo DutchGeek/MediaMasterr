@@ -74,7 +74,7 @@
 
   onMount(() => {
     if (typeof document !== "undefined") {
-      document.title = BRANDING.applicationName;
+      document.title = BRANDING.applicationTitle;
     }
     currentHash = window.location.hash;
     const syncHash = () => {

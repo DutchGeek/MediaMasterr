@@ -19,6 +19,7 @@
   import EmbySVG from "$lib/components/svgs/emby-svg.svelte";
   import { get_api } from "$lib/api";
   import { BRANDING } from "$lib/branding";
+  import { VERSION } from "$lib/version";
   import { shuffleArray } from "$lib/utils/array";
   import { TOP_RATED_BACKDROPS } from "$lib/misc/tmdb-images";
 
@@ -633,6 +634,10 @@
             </span>
           </Button>
         {/if}
+      </div>
+
+      <div class="text-center text-xs text-muted-foreground mt-2">
+        {BRANDING.applicationName} v{VERSION}
       </div>
     </div>
   </div>

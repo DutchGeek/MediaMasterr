@@ -1,5 +1,6 @@
 export const BRANDING = {
   applicationName: "MediaMasterr",
+  applicationTitle: "MediaMasterr | Unified Media Management",
   tagline: "Unify • Manage • Optimize",
   primaryColor: "#6366f1",
   accentColor: "#5658f3",
