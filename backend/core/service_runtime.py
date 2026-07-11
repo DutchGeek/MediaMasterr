@@ -106,6 +106,23 @@ async def _apply_service_runtime_state(data: ServiceConfigUpdate) -> None:
         await service_manager.initialize_sonarr(
             data.base_url, data.api_key or "", timeout, data.id
         )
+    elif data.service_type is Service.QBITTORRENT:
+        settings = data.extra_settings or {}
+        username = str(settings.get("username") or "").strip()
+        use_https = bool(settings.get("use_https", False))
+        timeout = int(settings.get("timeout", 30))
+        if not username:
+            LOG.warning(
+                "qBittorrent enabled but username is missing; runtime client not initialized"
+            )
+            return
+        await service_manager.initialize_qbittorrent(
+            data.base_url,
+            username,
+            data.api_key or "",
+            use_https,
+            timeout,
+        )
     elif data.service_type is Service.SEERR:
         await service_manager.initialize_seerr(data.base_url, data.api_key or "")
     elif data.service_type is Service.TAUTULLI:
@@ -126,6 +143,8 @@ async def _clear_service_runtime(service_type: Service, config_id: int | None) -
         await service_manager.clear_radarr(config_id)
     elif service_type is Service.SONARR:
         await service_manager.clear_sonarr(config_id)
+    elif service_type is Service.QBITTORRENT:
+        await service_manager.clear_qbittorrent()
     elif service_type is Service.SEERR:
         await service_manager.clear_seerr()
     elif service_type is Service.TAUTULLI:

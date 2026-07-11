@@ -59,6 +59,8 @@ METADATA_PROVIDER_DEFAULT_REQUEST_DELAYS = {
 
 
 def _default_service_name(service_type: Service) -> str:
+    if service_type is Service.QBITTORRENT:
+        return "qBittorrent"
     if service_type is Service.MDBLIST:
         return "MDBList"
     if service_type is Service.OMDB:
@@ -348,7 +350,10 @@ async def set_service_settings(
     # operation and must remain available while the external service is offline.
     if data.enabled:
         success, error_msg = await service_manager.test_service(
-            data.service_type, data.base_url, resolved_api_key
+            data.service_type,
+            data.base_url,
+            resolved_api_key,
+            data.extra_settings,
         )
         if not success:
             raise HTTPException(status_code=400, detail=error_msg)
@@ -654,7 +659,10 @@ async def test_service_settings(
         resolved_api_key = fer_decrypt(existing_config.api_key)
 
     success, error_msg = await service_manager.test_service(
-        data.service_type, data.base_url, resolved_api_key
+        data.service_type,
+        data.base_url,
+        resolved_api_key,
+        data.extra_settings,
     )
     if not success:
         raise HTTPException(status_code=400, detail=error_msg)

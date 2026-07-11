@@ -144,6 +144,40 @@
 
   <!-- extra settings -->
   {#if Object.keys(extraSettings).length > 0}
+    <!-- username -->
+    {#if "username" in extraSettings}
+      <div>
+        <label
+          for="username"
+          class="block text-sm font-medium text-foreground mb-2">Username</label
+        >
+        <Input
+          type="text"
+          name="username"
+          value={extraSettings.username ?? ""}
+          oninput={(e) =>
+            dispatchChange("extraSettings.username", e.currentTarget.value)}
+          placeholder="Enter username"
+          class="input-hover-el text-foreground placeholder:text-muted-foreground"
+        />
+      </div>
+    {/if}
+
+    <!-- HTTPS toggle -->
+    {#if "use_https" in extraSettings}
+      <div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <Switch
+            class="cursor-pointer"
+            checked={Boolean(extraSettings.use_https)}
+            onCheckedChange={(checked) =>
+              dispatchChange("extraSettings.use_https", checked)}
+          />
+          <span class="text-sm font-medium text-foreground">Use HTTPS</span>
+        </label>
+      </div>
+    {/if}
+
     <!-- timeout -->
     {#if "timeout" in extraSettings}
       <div>

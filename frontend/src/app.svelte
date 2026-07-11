@@ -17,6 +17,7 @@
   import Protected from "./routes/protected.svelte";
   import Candidates from "./routes/candidates.svelte";
   import History from "./routes/history.svelte";
+  import QBittorrent from "./routes/qbittorrent.svelte";
   import Rules from "./routes/rules.svelte";
   import Settings from "./routes/settings.svelte";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
@@ -47,6 +48,7 @@
     "/requests": route(Requests),
     "/candidates": route(Candidates),
     "/history": route(History),
+    "/qbittorrent": route(QBittorrent),
     "/rules": route(Rules),
     "/settings": route(Settings),
     "/setup": route(Setup),

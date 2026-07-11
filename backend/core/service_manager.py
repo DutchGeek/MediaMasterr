@@ -9,6 +9,7 @@ from backend.services.emby import EmbyService
 from backend.services.external_ratings import MDBListClient, OMDbClient
 from backend.services.jellyfin import JellyfinService
 from backend.services.plex import PlexService
+from backend.services.qbittorrent import QBittorrentClient
 from backend.services.radarr import RadarrClient
 from backend.services.seerr import SeerrClient
 from backend.services.sonarr import SonarrClient
@@ -34,6 +35,7 @@ class ServiceManager:
         self._sonarr: SonarrClient | None = None
         self._radarr_clients: dict[int, RadarrClient] = {}
         self._sonarr_clients: dict[int, SonarrClient] = {}
+        self._qbittorrent: QBittorrentClient | None = None
         self._seerr: SeerrClient | None = None
         self._tautulli: TautulliClient | None = None
 
@@ -104,6 +106,11 @@ class ServiceManager:
         return self._seerr
 
     @property
+    def qbittorrent(self) -> QBittorrentClient | None:
+        """Get qBittorrent service (must be initialized first)."""
+        return self._qbittorrent
+
+    @property
     def tautulli(self) -> TautulliClient | None:
         """Get Tautulli service (must be initialized first)."""
         return self._tautulli
@@ -116,12 +123,17 @@ class ServiceManager:
             "plex": self._plex is not None,
             "radarr": self.radarr is not None,
             "sonarr": self.sonarr is not None,
+            "qbittorrent": self._qbittorrent is not None,
             "seerr": self._seerr is not None,
             "tautulli": self._tautulli is not None,
         }
 
     async def test_service(
-        self, service_type: Service, url: str, api_key: str
+        self,
+        service_type: Service,
+        url: str,
+        api_key: str,
+        extra_settings: dict | None = None,
     ) -> tuple[bool, str]:
         """Test if the specified service is initialized."""
         try:
@@ -135,6 +147,13 @@ class ServiceManager:
                 return await RadarrClient.test_service(url, api_key), ""
             elif service_type is Service.SONARR:
                 return await SonarrClient.test_service(url, api_key), ""
+            elif service_type is Service.QBITTORRENT:
+                return (
+                    await QBittorrentClient.test_service(
+                        url, api_key, extra_settings
+                    ),
+                    "",
+                )
             elif service_type is Service.SEERR:
                 return await SeerrClient.test_service(url, api_key), ""
             elif service_type is Service.TAUTULLI:
@@ -170,6 +189,7 @@ class ServiceManager:
         | PlexService
         | RadarrClient
         | SonarrClient
+        | QBittorrentClient
         | SeerrClient
         | TautulliClient
         | None
@@ -185,6 +205,8 @@ class ServiceManager:
             return self._radarr
         elif service_type is Service.SONARR:
             return self._sonarr
+        elif service_type is Service.QBITTORRENT:
+            return self._qbittorrent
         elif service_type is Service.SEERR:
             return self._seerr
         elif service_type is Service.TAUTULLI:
@@ -319,6 +341,34 @@ class ServiceManager:
             LOG.error(f"Failed to initialize Seerr service: {e}")
             return None
 
+    async def initialize_qbittorrent(
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        use_https: bool = False,
+        timeout: int = 30,
+    ) -> QBittorrentClient | None:
+        """Initialize qBittorrent service with provided config."""
+        try:
+            self._qbittorrent = QBittorrentClient(
+                base_url=base_url,
+                username=username,
+                password=password,
+                use_https=use_https,
+                timeout=timeout,
+            )
+            if not await self._qbittorrent.health():
+                LOG.error(f"qBittorrent service health check failed: {base_url}")
+                raise ValueError(
+                    f"qBittorrent service health check failed: {base_url}"
+                )
+            LOG.info(f"qBittorrent service initialized: {base_url}")
+            return self._qbittorrent
+        except Exception as e:
+            LOG.error(f"Failed to initialize qBittorrent service: {e}")
+            return None
+
     async def initialize_tautulli(
         self, base_url: str, api_key: str, timeout: int = 30
     ) -> TautulliClient | None:
@@ -410,6 +460,13 @@ class ServiceManager:
             LOG.info("Seerr service cleared")
         self._seerr = None
 
+    async def clear_qbittorrent(self) -> None:
+        """Clear qBittorrent service (call before reinitializing)."""
+        if self._qbittorrent and self._qbittorrent.session:
+            await self._qbittorrent.session.close()
+            LOG.info("qBittorrent service cleared")
+        self._qbittorrent = None
+
     async def clear_tautulli(self) -> None:
         """Clear Tautulli service (call before reinitializing)."""
         if self._tautulli and self._tautulli.session:
@@ -425,6 +482,7 @@ class ServiceManager:
         await self.clear_plex()
         await self.clear_radarr()
         await self.clear_sonarr()
+        await self.clear_qbittorrent()
         await self.clear_seerr()
         await self.clear_tautulli()
 

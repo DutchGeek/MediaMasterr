@@ -20,6 +20,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Filter from "@lucide/svelte/icons/filter";
   import History from "@lucide/svelte/icons/history";
+  import Download from "@lucide/svelte/icons/download";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Check from "@lucide/svelte/icons/check";
@@ -105,6 +106,13 @@
       adminOnly: false,
       page: PageAccess.History,
       tooltip: "Browse reclaim activity and recent file history",
+    },
+    {
+      path: "/qbittorrent",
+      label: "qBittorrent",
+      icon: Download,
+      adminOnly: true,
+      tooltip: "View qBittorrent transfer and torrent status in read-only mode",
     },
     {
       path: "/rules",

@@ -4,6 +4,7 @@
 class Service(StrEnum):
     SONARR = auto()
     RADARR = auto()
+    QBITTORRENT = auto()
     JELLYFIN = auto()
     EMBY = auto()
     PLEX = auto()

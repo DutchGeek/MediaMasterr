@@ -102,6 +102,7 @@ export enum SettingsTab {
   Plex = "plex",
   Radarr = "radarr",
   Sonarr = "sonarr",
+  QBittorrent = "qbittorrent",
   Seerr = "seerr",
   Tautulli = "tautulli",
   MDBList = "mdblist",

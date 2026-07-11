@@ -28,6 +28,7 @@
   import Server from "@lucide/svelte/icons/server";
   import RadarrSVG from "$lib/components/svgs/radarr-svg.svelte";
   import SonarrSVG from "$lib/components/svgs/sonarr-svg.svelte";
+  import Download from "@lucide/svelte/icons/download";
   import SeerrSVG from "$lib/components/svgs/seerr-svg.svelte";
   import TautulliSVG from "$lib/components/svgs/tautulli-svg.svelte";
   import BookAlert from "@lucide/svelte/icons/book-alert";
@@ -83,6 +84,7 @@
   const serviceTabs = [
     SettingsTab.Radarr,
     SettingsTab.Sonarr,
+    SettingsTab.QBittorrent,
     SettingsTab.Seerr,
     SettingsTab.Tautulli,
     SettingsTab.MDBList,
@@ -115,6 +117,7 @@
   const DEFAULT_EXTRA_SETTINGS: Partial<Record<string, Record<string, any>>> = {
     [SettingsTab.Radarr]: { timeout: 300 },
     [SettingsTab.Sonarr]: { timeout: 300 },
+    [SettingsTab.QBittorrent]: { username: "", use_https: false, timeout: 30 },
     [SettingsTab.MDBList]: {
       request_limit: 950,
       supporter_mode: false,
@@ -150,6 +153,15 @@
           desc: "Enable this to integrate with Sonarr for series management and automated cleanup",
           baseUrlPlaceholder: "e.g. http://localhost:8989",
           adminOnly: true,
+        },
+        {
+          id: SettingsTab.QBittorrent,
+          label: "qBittorrent",
+          icon: Download,
+          desc: "Enable this to view qBittorrent transfer and torrent status in read-only mode",
+          baseUrlPlaceholder: "e.g. http://localhost:8080",
+          adminOnly: true,
+          lockName: true,
         },
         {
           id: SettingsTab.Seerr,
@@ -280,6 +292,7 @@
   let serviceTestStatus = $state<Record<SettingsTab, TestStatus>>({
     [SettingsTab.Radarr]: "idle",
     [SettingsTab.Sonarr]: "idle",
+    [SettingsTab.QBittorrent]: "idle",
     [SettingsTab.Seerr]: "idle",
     [SettingsTab.Tautulli]: "idle",
     [SettingsTab.MDBList]: "idle",
@@ -321,6 +334,7 @@
   let serviceState = $state<Record<string, ServiceState>>({
     [SettingsTab.Radarr]: emptyServiceState(SettingsTab.Radarr),
     [SettingsTab.Sonarr]: emptyServiceState(SettingsTab.Sonarr),
+    [SettingsTab.QBittorrent]: emptyServiceState(SettingsTab.QBittorrent),
     [SettingsTab.Seerr]: emptyServiceState(SettingsTab.Seerr),
     [SettingsTab.Tautulli]: emptyServiceState(SettingsTab.Tautulli),
     [SettingsTab.MDBList]: emptyServiceState(SettingsTab.MDBList),
@@ -948,6 +962,9 @@
               baseUrl={serviceState[activeTab].config.baseUrl}
               apiKey={serviceState[activeTab].config.apiKey}
               apiKeyIsSet={serviceState[activeTab].apiKeyIsSet}
+              apiKeyLabel={activeTab === SettingsTab.QBittorrent
+                ? "Password"
+                : "API Key"}
               baseUrlPlaceholder={tabs.find((t) => t.id === activeTab)
                 ?.baseUrlPlaceholder || "http://localhost:8096"}
               hideBaseUrl={tabs.find((t) => t.id === activeTab)?.hideBaseUrl ??
