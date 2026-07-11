@@ -18,6 +18,7 @@
   import JellyfinSVG from "$lib/components/svgs/jellyfin-svg.svelte";
   import EmbySVG from "$lib/components/svgs/emby-svg.svelte";
   import { get_api } from "$lib/api";
+  import { BRANDING } from "$lib/branding";
   import { shuffleArray } from "$lib/utils/array";
   import { TOP_RATED_BACKDROPS } from "$lib/misc/tmdb-images";
 
@@ -395,14 +396,14 @@
         <div class="text-center mb-4">
           <div class="flex justify-center mb-4">
             <img
-              src="/branding/logo.svg"
-              alt="MediaMasterr logo"
+              src={BRANDING.assets.logo}
+              alt={`${BRANDING.applicationName} logo`}
               class="w-3/4 max-w-[320px] transition-transform duration-300 {loginHovered
                 ? 'scale-[1.02]'
                 : 'scale-100'}"
             />
           </div>
-          <h1 class="text-4xl font-bold text-foreground mb-2">MediaMasterr</h1>
+          <h1 class="text-4xl font-bold text-foreground mb-2">{BRANDING.applicationName}</h1>
         </div>
 
         {#if visibleMethods.length > 1}

@@ -5,6 +5,7 @@
   import { gfmPlugin } from "svelte-exmarkdown/gfm";
 
   import { get_api } from "$lib/api";
+  import { BRANDING } from "$lib/branding";
   import Spinner from "$lib/components/ui/spinner/spinner.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -52,8 +53,8 @@
 <div class="space-y-6">
   <div class="flex justify-center">
     <img
-      src="/branding/logo.svg"
-      alt="MediaMasterr logo"
+      src={BRANDING.assets.logo}
+      alt={`${BRANDING.applicationName} logo`}
       class="w-full max-w-[340px]"
     />
   </div>
@@ -64,7 +65,7 @@
         {@const Icon = svgIcon}
         <Icon class="size-5" aria-hidden="true" />
       {/if}
-      <span class="align-middle">About MediaMasterr</span>
+      <span class="align-middle">About {BRANDING.applicationName}</span>
     </h2>
   </div>
 

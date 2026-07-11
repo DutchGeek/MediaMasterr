@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { onMount } from "svelte";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import { BRANDING } from "$lib/branding";
 
   let { onComplete }: { onComplete?: () => void } = $props();
 
@@ -97,13 +98,13 @@
             <div class="text-center">
               <div class="flex justify-center mb-4">
                 <img
-                  src="/branding/logo.svg"
-                  alt="MediaMasterr logo"
+                  src={BRANDING.assets.logo}
+                  alt={`${BRANDING.applicationName} logo`}
                   class="w-3/4 max-w-[320px]"
                 />
               </div>
               <h1 class="text-4xl font-bold text-foreground mb-1">
-                MediaMasterr
+                {BRANDING.applicationName}
               </h1>
               <p class="text-muted-foreground text-sm">
                 Welcome! Create your admin account to get started.

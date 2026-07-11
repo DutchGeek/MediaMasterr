@@ -1,5 +1,5 @@
 <p align="center">
-    <img height="100px" alt="MediaMasterr's logo with name" src="frontend/static/branding/logo.svg" />
+    <img height="100px" alt="MediaMasterr's logo with name" src="branding/web/logo.svg" />
 </p>
 
 <p align="center">

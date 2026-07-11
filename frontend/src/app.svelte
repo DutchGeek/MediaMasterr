@@ -5,6 +5,7 @@
   import { auth } from "$lib/stores/auth";
   import { ModeWatcher } from "mode-watcher";
   import Sidebar from "$lib/components/sidebar.svelte";
+  import { BRANDING } from "$lib/branding";
   import { DEFAULT_THEME_FAMILY } from "$lib/theme-families";
   import { themeFamily } from "$lib/stores/theme-family";
   import AuthComplete from "./routes/auth-complete.svelte";
@@ -72,6 +73,9 @@
   }
 
   onMount(() => {
+    if (typeof document !== "undefined") {
+      document.title = BRANDING.applicationName;
+    }
     currentHash = window.location.hash;
     const syncHash = () => {
       currentHash = window.location.hash;
@@ -129,8 +133,13 @@
   <!-- loading screen while checking authentication -->
   <div class="dark flex h-screen items-center justify-center bg-background">
     <div class="text-center">
+      <img
+        src={BRANDING.assets.logoIcon}
+        alt={`${BRANDING.applicationName} logo`}
+        class="mx-auto h-14 w-14"
+      />
       <div
-        class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary
+        class="mt-3 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary
         border-r-transparent"
       ></div>
       <p class="mt-4 text-muted-foreground">Loading...</p>
@@ -162,8 +171,8 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <img src="/branding/logo-icon.svg" alt="MediaMasterr logo" class="w-6 h-6" />
-        <h1 class="font-semibold text-lg text-foreground">MediaMasterr</h1>
+        <img src={BRANDING.assets.logoIcon} alt={`${BRANDING.applicationName} logo`} class="w-6 h-6" />
+        <h1 class="font-semibold text-lg text-foreground">{BRANDING.applicationName}</h1>
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]

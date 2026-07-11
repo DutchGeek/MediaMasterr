@@ -32,6 +32,7 @@
   import { createFilterState } from "$lib/utils/pagination";
   import { uiIndicators } from "$lib/stores/ui-indicators";
   import { hasPageAccess } from "$lib/page-access";
+  import { BRANDING } from "$lib/branding";
 
   // optional callback to close sidebar on mobile after navigation
   let { onNavigate = () => {} }: { onNavigate?: () => void } = $props();
@@ -248,10 +249,10 @@
       class="inline-flex items-center gap-3 rounded-lg p-1 -m-1 hover:text-primary"
     >
       <div class="w-12 h-12 flex items-center justify-center">
-        <img src="/branding/logo-icon.svg" alt="MediaMasterr logo" class="w-10 h-10" />
+        <img src={BRANDING.assets.logoIcon} alt={`${BRANDING.applicationName} logo`} class="w-10 h-10" />
       </div>
       <h1 class="text-xl font-bold text-foreground hover:text-inherit">
-        MediaMasterr
+        {BRANDING.applicationName}
       </h1>
     </a>
     <!-- theme toggle -->
