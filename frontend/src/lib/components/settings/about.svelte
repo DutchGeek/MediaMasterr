@@ -50,6 +50,14 @@
 </script>
 
 <div class="space-y-6">
+  <div class="flex justify-center">
+    <img
+      src="/branding/logo.svg"
+      alt="MediaMasterr logo"
+      class="w-full max-w-[340px]"
+    />
+  </div>
+
   <div>
     <h2 class="flex items-center gap-3 text-xl font-semibold text-foreground">
       {#if svgIcon}

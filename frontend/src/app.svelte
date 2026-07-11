@@ -27,7 +27,6 @@
   import Menu from "@lucide/svelte/icons/menu";
   import X from "@lucide/svelte/icons/x";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import logoImage from "$lib/assets/logo.png";
   import {
     firstAccessiblePath,
     hasPageAccess,
@@ -163,7 +162,7 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <img src={logoImage} alt="MediaMasterr logo" class="w-6 h-6" />
+        <img src="/branding/logo-icon.svg" alt="MediaMasterr logo" class="w-6 h-6" />
         <h1 class="font-semibold text-lg text-foreground">MediaMasterr</h1>
         {#if isDevBuild}
           <span

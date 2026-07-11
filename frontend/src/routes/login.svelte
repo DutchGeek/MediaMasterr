@@ -6,7 +6,6 @@
     MediaAuthProvider,
     MediaAuthProvidersResponse,
   } from "$lib/types/shared";
-  import MediaMasterrSVG from "$lib/components/svgs/mediamasterr-logo-svg.svelte";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -395,11 +394,12 @@
 
         <div class="text-center mb-4">
           <div class="flex justify-center mb-4">
-            <MediaMasterrSVG
-              class="w-1/2 stroke-13 stroke-primary-stroke {loginHovered
-                ? 'fill-primary-hover'
-                : 'fill-primary'}
-              duration-400 transition-colors"
+            <img
+              src="/branding/logo.svg"
+              alt="MediaMasterr logo"
+              class="w-3/4 max-w-[320px] transition-transform duration-300 {loginHovered
+                ? 'scale-[1.02]'
+                : 'scale-100'}"
             />
           </div>
           <h1 class="text-4xl font-bold text-foreground mb-2">MediaMasterr</h1>

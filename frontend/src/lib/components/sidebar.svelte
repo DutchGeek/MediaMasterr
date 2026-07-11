@@ -6,7 +6,6 @@
   import SidebarNotices from "./sidebar-notices.svelte";
   import SidebarCandidatesBadge from "./sidebar-candidates-badge.svelte";
   import SidebarRequestsBadge from "./sidebar-requests-badge.svelte";
-  import logoImage from "$lib/assets/logo.png";
   import { VERSION } from "$lib/version";
   import House from "@lucide/svelte/icons/house";
   import ClapperBoard from "@lucide/svelte/icons/clapperboard";
@@ -249,7 +248,7 @@
       class="inline-flex items-center gap-3 rounded-lg p-1 -m-1 hover:text-primary"
     >
       <div class="w-12 h-12 flex items-center justify-center">
-        <img src={logoImage} alt="MediaMasterr logo" class="w-10 h-10" />
+        <img src="/branding/logo-icon.svg" alt="MediaMasterr logo" class="w-10 h-10" />
       </div>
       <h1 class="text-xl font-bold text-foreground hover:text-inherit">
         MediaMasterr

@@ -1,5 +1,7 @@
 # MediaMasterr Docs
 
+![MediaMasterr Logo](../frontend/static/branding/logo.svg)
+
 MediaMasterr scans media libraries for eligible items, tracks protection and
 deletion requests, and routes the final action through the appropriate service.
 

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import MediaMasterrSVG from "$lib/components/svgs/mediamasterr-logo-svg.svelte";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { onMount } from "svelte";
@@ -97,8 +96,10 @@
             <!-- logo / title -->
             <div class="text-center">
               <div class="flex justify-center mb-4">
-                <MediaMasterrSVG
-                  class="w-1/2 stroke-13 stroke-primary-stroke fill-primary"
+                <img
+                  src="/branding/logo.svg"
+                  alt="MediaMasterr logo"
+                  class="w-3/4 max-w-[320px]"
                 />
               </div>
               <h1 class="text-4xl font-bold text-foreground mb-1">
