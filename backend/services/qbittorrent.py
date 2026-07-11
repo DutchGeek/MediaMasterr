@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -17,6 +18,50 @@ from tenacity import (
 
 from backend.core.logger import LOG
 from backend.core.utils.request import should_retry_on_status
+
+
+@dataclass(frozen=True)
+class QBittorrentConnectionConfig:
+    base_url: str
+    username: str
+    password: str
+    use_https: bool
+    timeout: int
+
+
+def parse_qbittorrent_connection_config(
+    *,
+    base_url: str,
+    password: str,
+    extra_settings: dict[str, Any] | None = None,
+) -> QBittorrentConnectionConfig:
+    settings = extra_settings or {}
+    username = str(settings.get("username") or "").strip()
+    if not username:
+        raise ValueError("extra_settings.username is required")
+
+    use_https = bool(settings.get("use_https", False))
+    raw_timeout = settings.get("timeout", 30)
+    try:
+        timeout = int(raw_timeout)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("extra_settings.timeout must be an integer") from exc
+    if timeout < 1:
+        raise ValueError("extra_settings.timeout must be greater than 0")
+
+    normalized_base_url = QBittorrentClient._normalize_base_url(base_url, use_https)
+
+    LOG.info(
+        "qBittorrent config parsed: "
+        f"base_url={normalized_base_url}, username={username}, use_https={use_https}, timeout={timeout}"
+    )
+    return QBittorrentConnectionConfig(
+        base_url=normalized_base_url,
+        username=username,
+        password=password,
+        use_https=use_https,
+        timeout=timeout,
+    )
 
 
 class QBittorrentClient:
@@ -182,48 +227,35 @@ class QBittorrentClient:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    @classmethod
+    def from_connection_config(
+        cls, config: QBittorrentConnectionConfig
+    ) -> "QBittorrentClient":
+        return cls(
+            base_url=config.base_url,
+            username=config.username,
+            password=config.password,
+            use_https=config.use_https,
+            timeout=config.timeout,
+        )
+
     @staticmethod
     async def test_service(
         url: str,
         password: str,
         extra_settings: dict[str, Any] | None = None,
     ) -> bool:
-        settings = extra_settings or {}
-        username = str(settings.get("username") or "").strip()
-        use_https = bool(settings.get("use_https", False))
-        if not username:
-            raise ValueError("Username is required")
-
-        base_url = QBittorrentClient._normalize_base_url(url, use_https)
-        async with niquests.AsyncSession() as session:
-            await QBittorrentClient._login(
-                session,
-                base_url=base_url,
-                username=username,
-                password=password,
-                timeout=10,
-            )
-
-            version_url = QBittorrentClient._api_url(base_url, "app/version")
-            try:
-                response = await session.get(version_url, timeout=10)
-            except (niq_exceptions.ConnectTimeout, niq_exceptions.ReadTimeout, TimeoutError) as exc:
-                raise ValueError("Timeout while verifying qBittorrent version") from exc
-            except niq_exceptions.ConnectionError as exc:
-                raise ValueError("Connection refused or unreachable host") from exc
-            except niq_exceptions.InvalidURL as exc:
-                raise ValueError(f"Invalid URL: {base_url}") from exc
-
-            QBittorrentClient._log_http("GET", version_url, response)
-
-            if response.status_code >= 400:
-                raise ValueError(
-                    "HTTP status code "
-                    f"{response.status_code} while verifying connection: "
-                    f"{QBittorrentClient._response_body(response) or 'empty response'}"
-                )
-
-            body = QBittorrentClient._response_body(response)
-            if not body:
+        config = parse_qbittorrent_connection_config(
+            base_url=url,
+            password=password,
+            extra_settings=extra_settings,
+        )
+        client = QBittorrentClient.from_connection_config(config)
+        try:
+            await client._initialize_session()
+            app_version = await client.get_app_version()
+            if not app_version:
                 raise ValueError("Unexpected response body from app/version: <empty>")
             return True
+        finally:
+            await client.session.close()

@@ -9,7 +9,10 @@ from backend.services.emby import EmbyService
 from backend.services.external_ratings import MDBListClient, OMDbClient
 from backend.services.jellyfin import JellyfinService
 from backend.services.plex import PlexService
-from backend.services.qbittorrent import QBittorrentClient
+from backend.services.qbittorrent import (
+    QBittorrentClient,
+    parse_qbittorrent_connection_config,
+)
 from backend.services.radarr import RadarrClient
 from backend.services.seerr import SeerrClient
 from backend.services.sonarr import SonarrClient
@@ -346,19 +349,23 @@ class ServiceManager:
     async def initialize_qbittorrent(
         self,
         base_url: str,
-        username: str,
         password: str,
-        use_https: bool = False,
-        timeout: int = 30,
+        extra_settings: dict | None = None,
     ) -> QBittorrentClient | None:
         """Initialize qBittorrent service with provided config."""
         try:
-            self._qbittorrent = QBittorrentClient(
+            config = parse_qbittorrent_connection_config(
                 base_url=base_url,
-                username=username,
                 password=password,
-                use_https=use_https,
-                timeout=timeout,
+                extra_settings=extra_settings,
+            )
+            LOG.info(
+                "Initializing qBittorrent runtime client: "
+                f"base_url={config.base_url}, username={config.username}, "
+                f"use_https={config.use_https}, timeout={config.timeout}"
+            )
+            self._qbittorrent = QBittorrentClient.from_connection_config(
+                config
             )
             if not await self._qbittorrent.health():
                 LOG.error(f"qBittorrent service health check failed: {base_url}")

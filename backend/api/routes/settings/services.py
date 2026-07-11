@@ -75,6 +75,18 @@ def _mask_api_key(key: str) -> str:
     return f"{'*' * (len(key) - 4)}{key[-4:]}"
 
 
+def _log_qbittorrent_config(prefix: str, data: ServiceConfigUpdate) -> None:
+    if data.service_type is not Service.QBITTORRENT:
+        return
+    settings = data.extra_settings or {}
+    LOG.info(
+        f"{prefix} qBittorrent config: "
+        f"base_url={data.base_url}, username={settings.get('username')}, "
+        f"use_https={bool(settings.get('use_https', False))}, "
+        f"timeout={settings.get('timeout', 30)}"
+    )
+
+
 def _parse_optional_int(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -336,6 +348,9 @@ async def set_service_settings(
 
     existing_result = await _find_existing_service_config(db, data, service_name)
     existing_config = existing_result.scalar_one_or_none()
+    if data.service_type is Service.QBITTORRENT and not data.extra_settings:
+        data.extra_settings = existing_config.extra_settings if existing_config else None
+    _log_qbittorrent_config("save/service received", data)
     if (
         not data.enabled
         and data.service_type in MEDIA_SERVERS
@@ -648,6 +663,7 @@ async def test_service_settings(
     """Test service settings for a given service."""
     service_name = data.name or _default_service_name(data.service_type)
     resolved_api_key = data.api_key
+    existing_config = None
     if not resolved_api_key:
         existing = await _find_existing_service_config(db, data, service_name)
         existing_config = existing.scalar_one_or_none()
@@ -657,6 +673,13 @@ async def test_service_settings(
                 detail="API key is required to test a service that has not been configured yet",
             )
         resolved_api_key = fer_decrypt(existing_config.api_key)
+    elif data.service_type is Service.QBITTORRENT:
+        existing = await _find_existing_service_config(db, data, service_name)
+        existing_config = existing.scalar_one_or_none()
+
+    if data.service_type is Service.QBITTORRENT and not data.extra_settings:
+        data.extra_settings = existing_config.extra_settings if existing_config else None
+    _log_qbittorrent_config("test/service received", data)
 
     success, error_msg = await service_manager.test_service(
         data.service_type,

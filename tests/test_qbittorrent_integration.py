@@ -95,6 +95,10 @@ class _FakeResponse:
         self.status_code = status_code
         self.text = text
 
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise niq_exceptions.HTTPError(f"status {self.status_code}")
+
 
 class _FakeSession:
     def __init__(self, login: _FakeResponse, version: _FakeResponse) -> None:
@@ -112,6 +116,9 @@ class _FakeSession:
 
     async def get(self, _url: str, **_kwargs: object) -> _FakeResponse:
         return self._version
+
+    async def close(self) -> None:
+        return None
 
 
 @pytest.mark.anyio

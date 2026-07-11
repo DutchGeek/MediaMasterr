@@ -610,6 +610,7 @@
         name: config.name || serviceDisplayName(serviceId),
         enabled: config.enabled,
         base_url: baseUrl,
+        extra_settings: config.extraSettings,
       };
       if (config.apiKey) payload.api_key = config.apiKey;
       const response: boolean = await post_api(

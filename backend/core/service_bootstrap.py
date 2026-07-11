@@ -61,22 +61,11 @@ async def load_enabled_services() -> None:
                 config.base_url, api_key, timeout, config.id
             )
         elif config.service_type is Service.QBITTORRENT:
-            settings = config.extra_settings or {}
-            username = str(settings.get("username") or "").strip()
-            use_https = bool(settings.get("use_https", False))
-            timeout = int(settings.get("timeout", 30))
-            if username:
-                await service_manager.initialize_qbittorrent(
-                    config.base_url,
-                    username,
-                    api_key,
-                    use_https,
-                    timeout,
-                )
-            else:
-                LOG.warning(
-                    "Skipping qBittorrent runtime initialization because username is missing"
-                )
+            await service_manager.initialize_qbittorrent(
+                config.base_url,
+                api_key,
+                config.extra_settings,
+            )
         elif config.service_type is Service.SEERR:
             await service_manager.initialize_seerr(config.base_url, api_key)
         elif config.service_type is Service.TAUTULLI:
