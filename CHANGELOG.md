@@ -298,7 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Unable to disable a no longer active service if Reclaimerr couldn't reach a connection to it
+- Unable to disable a no longer active service if MediaMasterr couldn't reach a connection to it
 
 ## [0.1.4] - 2026-06-19
 
@@ -312,7 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed Leaving Soon deletions and moves leaving stale linked collection items in Jellyfin, Emby, or Plex. Reclaimerr now prunes affected managed collections before destructive actions, blocks the action if pruning fails, and reconciles collection membership afterward.
+- Fixed Leaving Soon deletions and moves leaving stale linked collection items in Jellyfin, Emby, or Plex. MediaMasterr now prunes affected managed collections before destructive actions, blocks the action if pruning fails, and reconciles collection membership afterward.
 
 ## [0.1.2] - 2026-06-16
 
@@ -383,7 +383,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Improve path resolution between arrs and Reclaimerr
+- Improve path resolution between arrs and MediaMasterr
 - Update operator labels for clarity and enhance rule validation tests (existing rules don't need anything adjusted)
   - contains_any -> matches any
   - not_contains_any -> matches none
@@ -403,7 +403,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Plex 'favorite' handling
   - Plex favorites are actually handled via **watchlists**
-  - Plex users **must** authenticate via Plex with Reclaimerr
+  - Plex users **must** authenticate via Plex with MediaMasterr
 - Rule preview now shows the count of active, favorited, and protected media to give the user more information on why their rule might not be showing a specific result
 
 ### Changed
@@ -553,7 +553,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Internally the user IDs from Seerr are utilized but visually you'll be able to see them by name (this was needed in case users names changed on Seerr)
 - New house keeping task to clean up admin notices older than 90 days automatically (read or unread)
 - Option in **Settings -> General** to add exclusion to the **\*arr** that is enabled by default
-  - With this option on Reclaimerr will now add to the exclusion list for the arr automatically to prevent lists/syncs automatically re-grabbing that title
+  - With this option on MediaMasterr will now add to the exclusion list for the arr automatically to prevent lists/syncs automatically re-grabbing that title
 - Support ignore **Jellyfin/Emby** user favorites _(currently this feature isn't supported on Plex)_
   - During preview user favorites are snapshot every 10 minutes to avoid hitting the server over and over again while users are testing rules but they will be up to date always during live candidate scans
   - Added a setting in **Settings -> General** to enable/disable this feature and a box to add the usernames you'd like to automatically ignore their favorites
@@ -568,7 +568,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Side bar light mode text was barely visible for notices panel
-- Radarr deletion logic when media deletion is disabled and the user is deleting a movie version. _(Reclaimerr now checks whether a version-scoped movie candidate actually represents the full Radarr movie entry. If it does, for example the movie only has one known version, Reclaimerr safely promotes it to a normal Radarr delete. If it is truly partial, for example one version selected but another version still exists, Reclaimerr will not use Radarr because that could delete files the user did not select)_
+- Radarr deletion logic when media deletion is disabled and the user is deleting a movie version. _(MediaMasterr now checks whether a version-scoped movie candidate actually represents the full Radarr movie entry. If it does, for example the movie only has one known version, MediaMasterr safely promotes it to a normal Radarr delete. If it is truly partial, for example one version selected but another version still exists, MediaMasterr will not use Radarr because that could delete files the user did not select)_
 
 ### Removed
 
@@ -666,7 +666,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added_at field not being updated/valid during syncs/deletes of media
 - Enhance media server removal logic with fallback checks in candidate deletion for sonarr/series
-- During move the file would be deleted by the **\*arrs** BEFORE Reclaimerr could move it safely - now Reclaimerr moves the file, un-monitors/deletes (if enabled) and refreshes the arr so it has the updated information
+- During move the file would be deleted by the **\*arrs** BEFORE MediaMasterr could move it safely - now MediaMasterr moves the file, un-monitors/deletes (if enabled) and refreshes the arr so it has the updated information
 
 ## [0.1.0-beta.19] - 2026-05-14
 
@@ -740,7 +740,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Days since released
   - Days since first aired
   - Days since last aired
-- Can now click the Reclaimerr logo/name to navigate to Dashboard
+- Can now click the MediaMasterr logo/name to navigate to Dashboard
 - Added a customizable menu (opened via the menu icon) for the side bar to hide unused tabs
 
 ### Changed
@@ -758,7 +758,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Sync issue that could happen in edge cases when a user still had old rules/candidates before the rule engine rework
 - Edge case bug where count assignment would overwrite the version candidates count in very rare cases
-- In some setups it was possible for Radarr to still monitor deleted movies that was a candidate from Reclaimerr
+- In some setups it was possible for Radarr to still monitor deleted movies that was a candidate from MediaMasterr
 - TMDB section not visible in light mode
 - Move button not visible in light mode for bulk select in candidates view
 - Fixed candidates not showing the properly calculated resolution in some cases
@@ -822,8 +822,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Now supports **Tautulli** to supplement **Plex's** playback data
   - Added support in frontend to add it as service. If it's enabled it will automatically be used during all sync processes
 - Desktop
-  - Added a **Shutdown** button that will work for desktop mode in the **Settings -> General**. This allows users to easily shut Reclaimerr down if they lack a system tray _(This will not be functional for anything other than desktop)_
-  - Now writes a **process ID** file _(reclaimerr.pid)_ in the **data** directory so users can kill this easily via scripting/terminal if needed
+  - Added a **Shutdown** button that will work for desktop mode in the **Settings -> General**. This allows users to easily shut MediaMasterr down if they lack a system tray _(This will not be functional for anything other than desktop)_
+  - Now writes a **process ID** file _(mediamasterr.pid)_ in the **data** directory so users can kill this easily via scripting/terminal if needed
 - Added useful information for each movie version/season that is requested to be protected in **Protected** requests for users such as filename, resolution, video codec, hdr flags, and file size
 - Can now choose which version of files you'd like to protect for movies with multiple versions
 - Added api/frontend controls for delete requests for users
@@ -836,7 +836,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- When using Docker, see the compose example at `docker\compose.example.yml`. Add the media bind mount so Reclaimerr can remove extra files when items are deleted via your media server. Map the bind mount to the same path(s) your main media server uses to read media files; if you have multiple mounts, add them all and update the mappings in General Settings.
+- When using Docker, see the compose example at `docker\compose.example.yml`. Add the media bind mount so MediaMasterr can remove extra files when items are deleted via your media server. Map the bind mount to the same path(s) your main media server uses to read media files; if you have multiple mounts, add them all and update the mappings in General Settings.
 - Greatly improved resolution detection for ingested movies
 - Upgraded niquests to 3.18.7
 - Auto tagging configuration/tag suffix in general settings is now moved to per rule

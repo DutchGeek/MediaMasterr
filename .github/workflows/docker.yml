@@ -30,7 +30,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/reclaimerr
+  IMAGE_NAME: ${{ github.repository_owner }}/mediamasterr
 
 jobs:
   build-and-push:

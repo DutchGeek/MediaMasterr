@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         LOG.set_log_level(settings.log_level_enum)
-        LOG.info("Starting reclaimerr API server")
+        LOG.info("Starting MediaMasterr API server")
         LOG.info(f"Log level: {settings.log_level_enum}")
 
         if settings.cors_origins == "*":
@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ),
         ]
 
-        LOG.info("reclaimerr API ready")
+        LOG.info("MediaMasterr API ready")
 
         yield
 
@@ -129,7 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         LOG.exception(f"Error in API lifespan: {e}")
         raise
     finally:
-        LOG.info("Shutting down reclaimerr API")
+        LOG.info("Shutting down MediaMasterr API")
 
         for worker_task in worker_tasks:
             worker_task.cancel()
@@ -145,12 +145,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await service_manager.clear_all()
         await close_db()
 
-        LOG.info("reclaimerr API shutdown complete")
+        LOG.info("MediaMasterr API shutdown complete")
         LOG.stop()  # flush and join the logging background thread
 
 
 fastapi_app = FastAPI(
-    title="reclaimerr API",
+    title="MediaMasterr API",
     description="Media server cleanup and deletion management tool",
     version="0.1.11",
     lifespan=lifespan,

@@ -1,6 +1,6 @@
 # Tasks
 
-Tasks are scheduled jobs that keep Reclaimerr running on its own.
+Tasks are scheduled jobs that keep MediaMasterr running on its own.
 
 ## Common Tasks
 
@@ -40,7 +40,7 @@ time is calculated from when the candidate was first created, so changing the
 current delay recalculates existing candidates without resetting their clock.
 The task deletes an eligible candidate on its next run.
 
-Reclaimerr skips anything with:
+MediaMasterr skips anything with:
 
 - active protection
 - pending protection requests

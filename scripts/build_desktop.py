@@ -1,17 +1,17 @@
 """
-Build script for the Reclaimerr desktop app. Supports Windows, macOS, and Linux.
+Build script for the MediaMasterr desktop app. Supports Windows, macOS, and Linux.
 
 Usage (from repo root):
     uv run python scripts/build_desktop.py
 
 Output (onedir mode):
-    Windows : dist/Reclaimerr/Reclaimerr.exe
-    macOS   : dist/Reclaimerr/Reclaimerr
-    Linux   : dist/Reclaimerr/Reclaimerr
+    Windows : dist/MediaMasterr/MediaMasterr.exe
+    macOS   : dist/MediaMasterr/MediaMasterr
+    Linux   : dist/MediaMasterr/MediaMasterr
 
 User data (DB, logs, avatars) is stored in the platform data dir at runtime
-(%%LOCALAPPDATA%%/reclaimerr on Windows, ~/Library/Application Support/reclaimerr
-on macOS, ~/.local/share/reclaimerr on Linux).
+(%%LOCALAPPDATA%%/mediamasterr on Windows, ~/Library/Application Support/mediamasterr
+on macOS, ~/.local/share/mediamasterr on Linux).
 """
 
 import os
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
 DESKTOP_DIR = REPO_ROOT / "desktop"
-OUTPUT_NAME = "reclaimerr"
+OUTPUT_NAME = "mediamasterr"
 SPEC_FILE = REPO_ROOT / f"{OUTPUT_NAME}.spec"
 
 PLATFORM = platform.system()

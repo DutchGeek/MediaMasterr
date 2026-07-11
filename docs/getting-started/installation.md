@@ -22,8 +22,8 @@ start the UI locally.
 For development or local testing:
 
 ```bash
-git clone https://github.com/jessielw/Reclaimerr.git
-cd Reclaimerr
+git clone https://github.com/jessielw/MediaMasterr.git
+cd MediaMasterr
 uv sync
 cd frontend
 npm install

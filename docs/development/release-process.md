@@ -1,6 +1,6 @@
 # Release Process
 
-Reclaimerr does not have a fully automated release pipeline in-repo. Treat
+MediaMasterr does not have a fully automated release pipeline in-repo. Treat
 releases as a deliberate maintainer action with a short checklist.
 
 ## Before a Release

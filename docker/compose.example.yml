@@ -1,7 +1,7 @@
 services:
-  reclaimerr:
-    image: ghcr.io/jessielw/reclaimerr:latest
-    container_name: reclaimerr
+  mediamasterr:
+    image: ghcr.io/jessielw/mediamasterr:latest
+    container_name: mediamasterr
     restart: unless-stopped
     env_file: ".env"
     volumes:
@@ -9,7 +9,7 @@ services:
       - ./data:/app/data
 
       # bind mount for media files (adjust the host path as needed) - this is needed for
-      # Reclaimerr to clean up additional files on delete when deleting via the main media server
+      # MediaMasterr to clean up additional files on delete when deleting via the main media server
       # directly
       - /media:/media
 

@@ -1,6 +1,6 @@
 # Quick Start
 
-This page covers the steps from a fresh checkout to a working Reclaimerr
+This page covers the steps from a fresh checkout to a working MediaMasterr
 instance.
 
 ## Runtime Options
@@ -11,7 +11,7 @@ instance.
 
 ## Setup Steps
 
-1. Install Reclaimerr using one of the guides in this section.
+1. Install MediaMasterr using one of the guides in this section.
 2. Connect at least one media server.
 3. Set one server as the main server when multiple servers are configured.
 4. Confirm your libraries sync correctly.

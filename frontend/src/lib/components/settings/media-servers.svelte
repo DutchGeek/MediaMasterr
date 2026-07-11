@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from "svelte";
   import { delete_api, get_api, post_api } from "$lib/api";
   import ServiceConfigForm from "$lib/components/settings/service-config-form.svelte";
@@ -455,7 +455,7 @@
           applications,
           <strong>Seerr</strong>, and <strong>Tautulli</strong>
           <i>(if desired)</i> before running your first sync. This helps
-          Reclaimerr build a complete view of your media, requests, and playback
+          MediaMasterr build a complete view of your media, requests, and playback
           history.
           <br />
           <br />

@@ -1,11 +1,11 @@
 # Backups
 
 Back up the full `DATA_DIR`. That directory contains the app state you need to
-recover a Reclaimerr instance.
+recover a MediaMasterr instance.
 
 ## Backup Contents
 
-- `database/reclaimerr.db`
+- `database/mediamasterr.db`
 - `secrets.env`
 - `logs/` if you need local audit history
 - any custom static assets stored under the app data tree
@@ -25,7 +25,7 @@ recover a Reclaimerr instance.
 
 ## Restore Steps
 
-1. Stop Reclaimerr.
+1. Stop MediaMasterr.
 2. Restore the saved `DATA_DIR` contents.
 3. Make sure ownership and permissions match the runtime user.
 4. Start the app and verify `/api/version` and the UI load correctly.

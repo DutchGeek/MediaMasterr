@@ -1,6 +1,6 @@
 # How It Works
 
-Reclaimerr uses the following flow:
+MediaMasterr uses the following flow:
 
 1. Sync media and metadata from connected services.
 2. Scan for reclaim candidates based on your rules.
@@ -12,7 +12,7 @@ Operator reference: [Rules](rules.md).
 
 ## Candidate Scopes
 
-Reclaimerr tracks candidates at several scopes:
+MediaMasterr tracks candidates at several scopes:
 
 - movie version
 - whole movie

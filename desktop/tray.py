@@ -30,8 +30,8 @@ def create_icon(server: "ReclaimerServer") -> PystrayIcon:
 
     icon_image = Image.open(_resource("frontend/static/favicon.ico"))
     menu = pystray.Menu(
-        pystray.MenuItem("Open Reclaimerr", open_browser, default=True),
+        pystray.MenuItem("Open MediaMasterr", open_browser, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_app),
     )
-    return pystray.Icon("Reclaimerr", icon_image, "Reclaimerr", menu)
+    return pystray.Icon("MediaMasterr", icon_image, "MediaMasterr", menu)

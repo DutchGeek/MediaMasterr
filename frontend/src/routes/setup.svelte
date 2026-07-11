@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ReclaimerrSVG from "$lib/components/svgs/reclaimerr-logo-svg.svelte";
+  import MediaMasterrSVG from "$lib/components/svgs/reclaimerr-logo-svg.svelte";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { onMount } from "svelte";
@@ -97,12 +97,12 @@
             <!-- logo / title -->
             <div class="text-center">
               <div class="flex justify-center mb-4">
-                <ReclaimerrSVG
+                <MediaMasterrSVG
                   class="w-1/2 stroke-13 stroke-primary-stroke fill-primary"
                 />
               </div>
               <h1 class="text-4xl font-bold text-foreground mb-1">
-                Reclaimerr
+                MediaMasterr
               </h1>
               <p class="text-muted-foreground text-sm">
                 Welcome! Create your admin account to get started.

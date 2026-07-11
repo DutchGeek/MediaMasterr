@@ -668,7 +668,7 @@ async def test_notification_url(
     try:
         return await send_notification(
             url=url,
-            title="This is a test notification from Reclaimerr",
+            title="This is a test notification from MediaMasterr",
             message="If you received this, your notification settings are working correctly!",
             body_format=_DEFAULT_BODY_FORMAT,
         ), None

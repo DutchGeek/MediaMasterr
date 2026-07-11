@@ -535,7 +535,7 @@
       <h3 class="font-semibold text-foreground">Path Mappings</h3>
       <p class="text-muted-foreground text-sm mb-3">
         Map media server paths to local filesystem paths. Required when
-        Reclaimerr runs on the host but your media server reports
+        MediaMasterr runs on the host but your media server reports
         Docker/container paths (e.g. <code class="font-mono text-xs"
           >/movies</code
         >
@@ -691,8 +691,8 @@
     <div class="bg-muted/50 border rounded-lg p-4 shadow-sm">
       <h3 class="font-semibold text-foreground mb-1">Public Application URL</h3>
       <p class="text-muted-foreground text-sm mb-3">
-        Set the public URL users use to reach Reclaimerr through your reverse
-        proxy. Reclaimerr uses it when building Plex and OIDC callback URLs.
+        Set the public URL users use to reach MediaMasterr through your reverse
+        proxy. MediaMasterr uses it when building Plex and OIDC callback URLs.
         Leave it blank to use the current request URL instead.
       </p>
       <div class="max-w-xl">
@@ -716,7 +716,7 @@
         <div>
           <h3 class="font-semibold text-foreground">Post Action Webhooks</h3>
           <p class="text-muted-foreground text-sm">
-            Notify Autopulse or a custom endpoint after Reclaimerr successfully
+            Notify Autopulse or a custom endpoint after MediaMasterr successfully
             deletes or moves media. Failures are logged but do not roll back the
             reclaim action.
           </p>
@@ -1040,7 +1040,7 @@
       </div>
       <p class="text-muted-foreground text-sm mb-3">
         Keep an auto-synced "Leaving Soon" row on enabled Plex, Jellyfin, and
-        Emby servers. Reclaimerr updates these collections after each candidate
+        Emby servers. MediaMasterr updates these collections after each candidate
         scan and removes stale entries automatically.
       </p>
 
@@ -1060,7 +1060,7 @@
           />
         </div>
         <p class="text-xs text-muted-foreground mt-2 break-all">
-          Reclaimerr manages two collections per server:
+          MediaMasterr manages two collections per server:
           <strong
             >{leavingSoonCollectionTitle || "Leaving Soon"} [Movies]</strong
           >
@@ -1079,7 +1079,7 @@
           <br />
           <strong
             >Do not rename or modify these collections on the media server -
-            Reclaimerr depends on their names to manage them.</strong
+            MediaMasterr depends on their names to manage them.</strong
           >
         </Notice>
       {/if}
@@ -1266,7 +1266,7 @@
       >
         <p class="font-medium">Warning</p>
         <p class="mt-1">
-          When both the opt-in and task schedule are enabled, Reclaimerr will
+          When both the opt-in and task schedule are enabled, MediaMasterr will
           permanently delete cleanup candidates after their review period
           expires without per-item approval. Protected media and items with
           pending protection or delete requests are skipped.
@@ -1329,7 +1329,7 @@
       >
         <h3 class="font-semibold text-foreground">Shutdown</h3>
         <p class="text-muted-foreground text-sm mb-3">
-          Stop the Reclaimerr desktop process. Only available when running in
+          Stop the MediaMasterr desktop process. Only available when running in
           desktop mode. Use the tray icon or this button to exit cleanly.
         </p>
         <Button
@@ -1382,7 +1382,7 @@
       </AlertDialog.Title>
       <AlertDialog.Description class="text-muted-foreground">
         This only unlocks the scheduled delete task. Once you also enable the
-        task in <strong>Tasks</strong>, Reclaimerr can permanently delete
+        task in <strong>Tasks</strong>, MediaMasterr can permanently delete
         cleanup candidates after their configured review period.
       </AlertDialog.Description>
     </AlertDialog.Header>

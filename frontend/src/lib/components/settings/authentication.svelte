@@ -170,7 +170,7 @@
             id="oidcIssuerUrl"
             type="text"
             class="input-hover-el text-foreground placeholder:text-muted-foreground"
-            placeholder="https://auth.example.com/application/o/reclaimerr/"
+            placeholder="https://auth.example.com/application/o/mediamasterr/"
             bind:value={oidcSettings.issuer_url}
           />
         </div>

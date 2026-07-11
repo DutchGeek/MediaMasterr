@@ -1,6 +1,6 @@
 # Contributing
 
-Reclaimerr accepts focused, understandable contributions. The goal is to keep
+MediaMasterr accepts focused, understandable contributions. The goal is to keep
 the codebase maintainable.
 
 ## Development Setup
@@ -8,8 +8,8 @@ the codebase maintainable.
 **Requirements:** Python 3.11+, Node.js 20+, and `uv`
 
 ```bash
-git clone https://github.com/jessielw/Reclaimerr.git
-cd Reclaimerr
+git clone https://github.com/jessielw/MediaMasterr.git
+cd MediaMasterr
 uv sync
 cd frontend
 npm install

@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from "svelte";
   import { link, location } from "svelte-spa-router";
   import { auth } from "$lib/stores/auth";
@@ -232,10 +232,10 @@
       class="inline-flex items-center gap-3 rounded-lg p-1 -m-1 hover:text-primary"
     >
       <div class="w-12 h-12 flex items-center justify-center">
-        <img src={logoImage} alt="reclaimerr logo" class="w-10 h-10" />
+        <img src={logoImage} alt="MediaMasterr logo" class="w-10 h-10" />
       </div>
       <h1 class="text-xl font-bold text-foreground hover:text-inherit">
-        Reclaimerr
+        MediaMasterr
       </h1>
     </a>
     <!-- theme toggle -->
@@ -430,7 +430,7 @@
       class="flex items-center gap-3 text-xs text-muted-foreground break-keep cursor-default"
     >
       <HardDrive class="text-muted-foreground" />
-      Reclaimerr v{VERSION}
+      MediaMasterr v{VERSION}
     </div>
     <SidebarNotices />
   </div>

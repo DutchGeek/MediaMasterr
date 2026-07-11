@@ -1,6 +1,6 @@
 # Configuration
 
-Reclaimerr is configured through General Settings, service settings, and a small
+MediaMasterr is configured through General Settings, service settings, and a small
 set of environment variables for the runtime container or desktop process.
 
 ## Core Settings Areas
@@ -69,9 +69,9 @@ instance.
 
 ## Resetting The Admin Password
 
-Set `ADMIN_PASSWORD` in the environment, start Reclaimerr, sign in with the new
+Set `ADMIN_PASSWORD` in the environment, start MediaMasterr, sign in with the new
 password, then remove `ADMIN_PASSWORD` again.
 
-If an admin account already exists, Reclaimerr resets that account's password
-on startup. If no admin account exists yet, Reclaimerr creates the initial admin
+If an admin account already exists, MediaMasterr resets that account's password
+on startup. If no admin account exists yet, MediaMasterr creates the initial admin
 account with that password.

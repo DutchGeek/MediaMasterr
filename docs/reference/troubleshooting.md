@@ -57,7 +57,7 @@ require connectivity.
 The active main media server is the exception: assign another media server as
 main before disabling or deleting it.
 
-When deleting a Radarr or Sonarr instance, Reclaimerr disables rules assigned
+When deleting a Radarr or Sonarr instance, MediaMasterr disables rules assigned
 to that instance and removes path mappings scoped specifically to it. Review
 the warning shown after deletion and update those rules before re-enabling
 them.

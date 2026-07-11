@@ -1,6 +1,7 @@
 {
   "name": "reclaimerr-web",
   "version": "0.1.11",
+  "description": "MediaMasterr web frontend",
   "type": "module",
   "scripts": {
     "dev": "vite",

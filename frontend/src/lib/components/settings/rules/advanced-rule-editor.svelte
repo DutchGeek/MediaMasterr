@@ -1135,7 +1135,7 @@
           {#if arrAction === "unmonitor"}
             <p class="text-xs text-muted-foreground">
               Files are deleted from disk but the entry remains in {selectedArrName}
-              as unmonitored. Requires filesystem access on the Reclaimerr host.
+              as unmonitored. Requires filesystem access on the MediaMasterr host.
             </p>
           {:else}
             <p class="text-xs text-muted-foreground">

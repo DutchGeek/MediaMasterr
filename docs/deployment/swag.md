@@ -4,8 +4,8 @@ These examples follow the LinuxServer SWAG layout.
 
 ## Prerequisites
 
-1. Put SWAG and Reclaimerr on the same Docker network.
-2. Use `reclaimerr` as the upstream container name, or update the config.
+1. Put SWAG and MediaMasterr on the same Docker network.
+2. Use `mediamasterr` as the upstream container name, or update the config.
 3. Ensure your SWAG default site includes the proxy-confs include.
 4. Restart SWAG after changing the proxy config.
 
@@ -13,14 +13,14 @@ These examples follow the LinuxServer SWAG layout.
 
 Path:
 
-- `/config/nginx/proxy-confs/reclaimerr.subdomain.conf`
+- `/config/nginx/proxy-confs/mediamasterr.subdomain.conf`
 
 ```nginx
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
 
-    server_name reclaimerr.*;
+    server_name mediamasterr.*;
 
     include /config/nginx/ssl.conf;
 
@@ -29,7 +29,7 @@ server {
     location / {
         include /config/nginx/proxy.conf;
         include /config/nginx/resolver.conf;
-        set $upstream_app reclaimerr;
+        set $upstream_app mediamasterr;
         set $upstream_port 8000;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;

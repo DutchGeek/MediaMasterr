@@ -1,6 +1,6 @@
 # Architecture
 
-Reclaimerr is a FastAPI application with a small number of long-lived runtime
+MediaMasterr is a FastAPI application with a small number of long-lived runtime
 components:
 
 - the API server
@@ -49,7 +49,7 @@ loop.
 
 ## Data Flow
 
-Reclaimerr uses the database as the source of truth for:
+MediaMasterr uses the database as the source of truth for:
 
 - general settings
 - service configuration

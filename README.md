@@ -1,16 +1,16 @@
 <p align="center">
-    <img height="100px" alt="Reclaimerr's logo with name" src="public/logo_name.svg" />
+    <img height="100px" alt="MediaMasterr's logo with name" src="public/logo_name.svg" />
 </p>
 
 <p align="center">
-<picture><img alt="Desktop Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fdesktop.yml?style=flat&logo=github&logoColor=white&label=Desktop%20Build"></picture>
-<picture><img alt="Docker Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fdocker.yml?style=flat&logo=docker&logoColor=white&label=Docker%20Build"></picture>
-<picture><img alt="Frontend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Ffrontend.yml?style=flat&logo=svelte&logoColor=white&label=Frontend"></picture>
-<picture><img alt="Backend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fruff.yml?style=flat&logo=python&logoColor=white&label=Backend"></picture>
-<picture><img alt="MyPy" src="https://img.shields.io/github/actions/workflow/status/jessielw/reclaimerr/.github%2Fworkflows%2Fmypy.yml?style=flat&logo=python&logoColor=white&label=MyPy"></picture>
+<picture><img alt="Desktop Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/mediamasterr/.github%2Fworkflows%2Fdesktop.yml?style=flat&logo=github&logoColor=white&label=Desktop%20Build"></picture>
+<picture><img alt="Docker Build" src="https://img.shields.io/github/actions/workflow/status/jessielw/mediamasterr/.github%2Fworkflows%2Fdocker.yml?style=flat&logo=docker&logoColor=white&label=Docker%20Build"></picture>
+<picture><img alt="Frontend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/mediamasterr/.github%2Fworkflows%2Ffrontend.yml?style=flat&logo=svelte&logoColor=white&label=Frontend"></picture>
+<picture><img alt="Backend Check" src="https://img.shields.io/github/actions/workflow/status/jessielw/mediamasterr/.github%2Fworkflows%2Fruff.yml?style=flat&logo=python&logoColor=white&label=Backend"></picture>
+<picture><img alt="MyPy" src="https://img.shields.io/github/actions/workflow/status/jessielw/mediamasterr/.github%2Fworkflows%2Fmypy.yml?style=flat&logo=python&logoColor=white&label=MyPy"></picture>
 </p>
 
-**Reclaimerr** scans media libraries for eligible items, tracks protection and
+**MediaMasterr** scans media libraries for eligible items, tracks protection and
 deletion requests, and routes the final action through the appropriate service.
 
 - [Getting started](docs/getting-started/index.md)
@@ -28,16 +28,16 @@ deletion requests, and routes the final action through the appropriate service.
 
 ## Quick Start
 
-1. Install Reclaimerr with Docker, Desktop, or source.
+1. Install MediaMasterr with Docker, Desktop, or source.
 2. Connect at least one media server.
 3. Set one server as the main server when multiple servers are configured.
 4. Review the task schedule before enabling deletion.
 
 ## Support
 
-- [Documentation](https://jessielw.github.io/Reclaimerr/)
-- [GitHub Discussions](https://github.com/jessielw/Reclaimerr/discussions)
-- Matrix: https://matrix.to/#/#reclaimerr:matrix.org
+- [Documentation](https://jessielw.github.io/MediaMasterr/)
+- [GitHub Discussions](https://github.com/jessielw/MediaMasterr/discussions)
+- Matrix: https://matrix.to/#/#mediamasterr:matrix.org
 
 ## Preview
 

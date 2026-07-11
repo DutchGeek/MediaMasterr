@@ -1034,6 +1034,96 @@ wheels = [
 ]
 
 [[package]]
+name = "reclaimerr"
+version = "0.1.11"
+source = { editable = "." }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "alembic" },
+    { name = "apprise" },
+    { name = "apscheduler" },
+    { name = "argon2-cffi" },
+    { name = "authlib" },
+    { name = "cryptography" },
+    { name = "fastapi", extra = ["standard"] },
+    { name = "granian" },
+    { name = "itsdangerous" },
+    { name = "niquests", extra = ["speedups"] },
+    { name = "pillow" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "python-iso639" },
+    { name = "semver" },
+    { name = "slowapi" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tenacity" },
+]
+
+[package.optional-dependencies]
+desktop = [
+    { name = "filelock" },
+    { name = "platformdirs" },
+    { name = "pyinstaller" },
+    { name = "pystray" },
+    { name = "uvicorn" },
+]
+docs = [
+    { name = "pymdown-extensions" },
+    { name = "zensical" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "basedpyright" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "alembic", specifier = ">=1.18.5" },
+    { name = "apprise", specifier = ">=1.12.0" },
+    { name = "apscheduler", specifier = ">=3.11.3,<4.0.0" },
+    { name = "argon2-cffi", specifier = ">=25.1.0" },
+    { name = "authlib", specifier = ">=1.7.2" },
+    { name = "cryptography", specifier = ">=49.0.0" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.139.0" },
+    { name = "filelock", marker = "extra == 'desktop'", specifier = ">=3.29.4" },
+    { name = "granian", specifier = ">=2.7.9" },
+    { name = "itsdangerous", specifier = ">=2.2.0" },
+    { name = "niquests", extras = ["speedups"], specifier = ">=3.20.1" },
+    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "platformdirs", marker = "extra == 'desktop'", specifier = ">=4.10.0" },
+    { name = "pydantic-settings", specifier = ">=2.14.2" },
+    { name = "pyinstaller", marker = "extra == 'desktop'", specifier = ">=6.21.0" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
+    { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=11.0" },
+    { name = "pystray", marker = "extra == 'desktop'", specifier = ">=0.19.5" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "python-iso639", specifier = ">=2026.4.20" },
+    { name = "semver", specifier = ">=3.0.4" },
+    { name = "slowapi", specifier = ">=0.1.10" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },
+    { name = "tenacity", specifier = ">=9.1.4" },
+    { name = "uvicorn", marker = "extra == 'desktop'", specifier = ">=0.49.0" },
+    { name = "zensical", marker = "extra == 'docs'", specifier = ">=0.0.46" },
+]
+provides-extras = ["desktop", "docs"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "basedpyright", specifier = ">=1.39.9" },
+    { name = "mypy" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.15.20" },
+    { name = "uvicorn", specifier = ">=0.49.0" },
+]
+
+[[package]]
 name = "mypy"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1669,96 +1759,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/87/6b7421827c26d363fb7ed807c7cb1355da083a31955c33d1fbb95a010815/qh3-1.5.6-pp311-pypy311_pp73-musllinux_1_1_i686.whl", hash = "sha256:5c3800a9350f7cc37549a6a9642d4a3b09f55312ba6f4fd54891584f083be195", size = 2165714, upload-time = "2025-11-09T05:51:42.452Z" },
     { url = "https://files.pythonhosted.org/packages/6a/d1/4e4449b2ce00a05fc7779527d9639b6017b58f6e62916f4ada1524505443/qh3-1.5.6-pp311-pypy311_pp73-musllinux_1_1_x86_64.whl", hash = "sha256:557c8f40626405eae8e20d311fb8ec2ff359e392fbdd0a2f30f38e806daa0a2b", size = 2545136, upload-time = "2025-11-09T05:51:43.798Z" },
     { url = "https://files.pythonhosted.org/packages/58/74/809c8d3b8777ce69dced532b5df8c6d56baf348948f247b4ceadfedbe1fe/qh3-1.5.6-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:c3bd73752ed61bffa08ac3f63c28a4b089d73ab2177d4686c4c3a37d5de62176", size = 1990052, upload-time = "2025-11-09T05:51:45.272Z" },
-]
-
-[[package]]
-name = "reclaimerr"
-version = "0.1.11"
-source = { editable = "." }
-dependencies = [
-    { name = "aiosqlite" },
-    { name = "alembic" },
-    { name = "apprise" },
-    { name = "apscheduler" },
-    { name = "argon2-cffi" },
-    { name = "authlib" },
-    { name = "cryptography" },
-    { name = "fastapi", extra = ["standard"] },
-    { name = "granian" },
-    { name = "itsdangerous" },
-    { name = "niquests", extra = ["speedups"] },
-    { name = "pillow" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "python-iso639" },
-    { name = "semver" },
-    { name = "slowapi" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "tenacity" },
-]
-
-[package.optional-dependencies]
-desktop = [
-    { name = "filelock" },
-    { name = "platformdirs" },
-    { name = "pyinstaller" },
-    { name = "pystray" },
-    { name = "uvicorn" },
-]
-docs = [
-    { name = "pymdown-extensions" },
-    { name = "zensical" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "basedpyright" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite", specifier = ">=0.22.1" },
-    { name = "alembic", specifier = ">=1.18.5" },
-    { name = "apprise", specifier = ">=1.12.0" },
-    { name = "apscheduler", specifier = ">=3.11.3,<4.0.0" },
-    { name = "argon2-cffi", specifier = ">=25.1.0" },
-    { name = "authlib", specifier = ">=1.7.2" },
-    { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.139.0" },
-    { name = "filelock", marker = "extra == 'desktop'", specifier = ">=3.29.4" },
-    { name = "granian", specifier = ">=2.7.9" },
-    { name = "itsdangerous", specifier = ">=2.2.0" },
-    { name = "niquests", extras = ["speedups"], specifier = ">=3.20.1" },
-    { name = "pillow", specifier = ">=12.3.0" },
-    { name = "platformdirs", marker = "extra == 'desktop'", specifier = ">=4.10.0" },
-    { name = "pydantic-settings", specifier = ">=2.14.2" },
-    { name = "pyinstaller", marker = "extra == 'desktop'", specifier = ">=6.21.0" },
-    { name = "pyjwt", specifier = ">=2.13.0" },
-    { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=11.0" },
-    { name = "pystray", marker = "extra == 'desktop'", specifier = ">=0.19.5" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "python-iso639", specifier = ">=2026.4.20" },
-    { name = "semver", specifier = ">=3.0.4" },
-    { name = "slowapi", specifier = ">=0.1.10" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },
-    { name = "tenacity", specifier = ">=9.1.4" },
-    { name = "uvicorn", marker = "extra == 'desktop'", specifier = ">=0.49.0" },
-    { name = "zensical", marker = "extra == 'docs'", specifier = ">=0.0.46" },
-]
-provides-extras = ["desktop", "docs"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.39.9" },
-    { name = "mypy" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "ruff", specifier = ">=0.15.20" },
-    { name = "uvicorn", specifier = ">=0.49.0" },
 ]
 
 [[package]]

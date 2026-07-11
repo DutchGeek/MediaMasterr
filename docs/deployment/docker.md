@@ -1,14 +1,14 @@
 # Docker
 
-Docker is the standard way to run Reclaimerr outside of development.
+Docker is the standard way to run MediaMasterr outside of development.
 
 ## Example Compose
 
 ```yaml
 services:
-  reclaimerr:
-    image: ghcr.io/jessielw/reclaimerr:latest
-    container_name: reclaimerr
+  mediamasterr:
+    image: ghcr.io/jessielw/mediamasterr:latest
+    container_name: mediamasterr
     restart: unless-stopped
     env_file: .env
     volumes:

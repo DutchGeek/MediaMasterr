@@ -33,13 +33,13 @@ the same item, protection always takes precedence.
 Cleanup-candidate rules can optionally override the automatic deletion delay.
 Leave the override empty to inherit the global movie or TV delay. Values from
 `0` through `3650` days are supported, with `0` meaning immediately eligible.
-When multiple cleanup-candidate rules match the same item, Reclaimerr uses the
+When multiple cleanup-candidate rules match the same item, MediaMasterr uses the
 longest applicable delay so a shorter rule cannot reduce another rule's review
 period.
 
 ## Target Scopes
 
-Fields are limited to scopes where Reclaimerr has meaningful data.
+Fields are limited to scopes where MediaMasterr has meaningful data.
 
 | Scope         | Evaluated item            | Examples                                                |
 | ------------- | ------------------------- | ------------------------------------------------------- |
@@ -151,7 +151,7 @@ numeric comparisons; use `does not exist` to find unrated media.
 | Radarr movie IDs  | Movie version           | One or more Radarr IDs for the movie  |
 | Sonarr series IDs | Series, season, episode | One or more Sonarr IDs for the series |
 
-Reclaimerr can map one local item to multiple Radarr or Sonarr instances, so
+MediaMasterr can map one local item to multiple Radarr or Sonarr instances, so
 Arr ID fields are multi-value text fields. Use `matches any` for a precise
 rule against one known Arr ID, or `matches all` when an item must be present in
 several configured Arr instances.
@@ -193,7 +193,7 @@ collection has been watched recently.
 | Collection sibling last watched       | Movie version | Latest watch timestamp from another movie sibling |
 | Days since collection sibling watched | Movie version | Whole days since that sibling watch timestamp     |
 
-The current movie is excluded from the sibling calculation. Reclaimerr-managed
+The current movie is excluded from the sibling calculation. MediaMasterr-managed
 Leaving Soon collections are ignored so temporary cleanup collections do not
 affect rules.
 
@@ -274,7 +274,7 @@ a 1 second minimum delay between MDBList requests; MDBList supporter mode uses a
 | Movie version count  | Number of physical versions stored for the movie |
 
 Plex bitrate values are already stored as `kbps`. Jellyfin and Emby commonly
-report bits per second, so Reclaimerr converts those values to `kbps` during
+report bits per second, so MediaMasterr converts those values to `kbps` during
 rule evaluation. This provides the same rule units across media servers without
 rewriting stored metadata.
 
@@ -332,7 +332,7 @@ Season 0 specials are excluded from series completion. Progress from different
 requesters is never combined to complete a season or series. Seasons that were
 not requested do not inherit another season's requested or watched state.
 
-Reclaimerr first matches Seerr users automatically using usernames, display
+MediaMasterr first matches Seerr users automatically using usernames, display
 names, and email addresses from Seerr's user directory. Explicit requester
 watch-user mappings are additive fallbacks for users whose identities differ
 between Seerr and the playback provider. Username comparisons are
@@ -345,7 +345,7 @@ status is complete. Each provider's configured watched threshold remains the
 source of truth. Jellyfin and Emby Playback Reporting events describe activity
 but do not expose a reliable completion signal, so they do not independently
 satisfy this field. They remain available to the general `playback.*` fields.
-When the same completed play is available from multiple sources, Reclaimerr
+When the same completed play is available from multiple sources, MediaMasterr
 keeps the latest qualifying timestamp.
 
 After configuring Seerr or changing identity mappings, run `Sync Media` before
@@ -362,7 +362,7 @@ after Sonarr discovers new episodes.
 
 If a season has no successfully synchronized Sonarr episode inventory, its
 watch completion is unknown. Boolean and numeric completion conditions do not
-match that season; Reclaimerr does not fall back to treating the currently
+match that season; MediaMasterr does not fall back to treating the currently
 downloaded episodes as the complete season. Preview warnings count only seasons
 where missing inventory affects the current rule after its other conditions are
 applied, and show up to five example titles to aid troubleshooting.
@@ -384,14 +384,14 @@ The latest-season fields are available only to whole-series rules:
 | Latest season has unaired episodes | The latest regular Sonarr season has an episode airing later    |
 | Latest season has finale           | The latest regular season has a `season` or `series` finale tag |
 
-Reclaimerr ignores season 0 and checks only the highest-numbered regular
+MediaMasterr ignores season 0 and checks only the highest-numbered regular
 season. This keeps scans efficient while covering upcoming seasons and split
 cours. Episode monitoring status is not considered.
 
-Sonarr's series statistics may provide a future `nextAiring` value. Reclaimerr
+Sonarr's series statistics may provide a future `nextAiring` value. MediaMasterr
 uses that value to prove that an unaired episode exists without requesting the
 season's episodes. A missing `nextAiring` value cannot prove that no future
-episode exists, so Reclaimerr requests only the latest season's episodes when
+episode exists, so MediaMasterr requests only the latest season's episodes when
 the rule result still depends on Sonarr data.
 
 Episode-state data is loaded only when an enabled rule uses one of these
@@ -426,7 +426,7 @@ before enabling the rule.
 ### Durable Playback History
 
 Playback history fields are available to movie-version, series, season, and
-episode rules. Reclaimerr imports compact events from the Jellyfin/Emby
+episode rules. MediaMasterr imports compact events from the Jellyfin/Emby
 Playback Reporting plugin and Tautulli, then evaluates provider-neutral fields:
 
 | Field                        | Meaning                                                |
@@ -471,7 +471,7 @@ an item cannot be resolved, username conditions remain unavailable for that
 item while the other playback metrics remain usable.
 
 Plex durable playback history, including playback-user rules, requires
-Tautulli. Reclaimerr does not currently import durable playback events directly
+Tautulli. MediaMasterr does not currently import durable playback events directly
 from Plex.
 
 If no applicable provider is configured, a provider request fails, or an item

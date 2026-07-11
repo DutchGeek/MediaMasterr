@@ -56,7 +56,7 @@
         {@const Icon = svgIcon}
         <Icon class="size-5" aria-hidden="true" />
       {/if}
-      <span class="align-middle">About Reclaimerr</span>
+      <span class="align-middle">About MediaMasterr</span>
     </h2>
   </div>
 
@@ -78,11 +78,11 @@
       <article>
         <h2>Documentation</h2>
         <a
-          href="https://jessielw.github.io/Reclaimerr/"
+          href="https://jessielw.github.io/MediaMasterr/"
           target="_blank"
           rel="noopener noreferrer"
           class="text-primary underline"
-          >https://jessielw.github.io/Reclaimerr/</a
+          >https://jessielw.github.io/MediaMasterr/</a
         >
       </article>
 
@@ -92,7 +92,7 @@
         <p class="text-sm">
           For questions, troubleshooting, or just to chat with the community,
           check out our <a
-            href="https://github.com/jessielw/Reclaimerr/discussions"
+            href="https://github.com/jessielw/MediaMasterr/discussions"
             target="_blank"
             rel="noopener noreferrer"
             class="text-primary underline"
@@ -108,12 +108,12 @@
         <p class="text-sm">
           Join our Matrix room for real time support and discussion:
           <a
-            href="https://matrix.to/#/#reclaimerr:matrix.org"
+            href="https://matrix.to/#/#mediamasterr:matrix.org"
             target="_blank"
             rel="noopener noreferrer"
             class="text-primary underline"
           >
-            #reclaimerr:matrix.org
+            #mediamasterr:matrix.org
           </a>
         </p>
       </article>
@@ -122,7 +122,7 @@
       <article>
         <h2>Fluxer</h2>
         <p class="text-sm">
-          Once Fluxer V2 is released, we'll have a Reclaimerr channel there as
+          Once Fluxer V2 is released, we'll have a MediaMasterr channel there as
           well for real time chat. Stay tuned!
         </p>
       </article>

@@ -254,7 +254,7 @@ async def sync_update_available_notice(
         kind="update_available",
         severity="warning",
         title="Application update available",
-        message=f"A new Reclaimerr release is available{version_label}.",
+        message=f"A new MediaMasterr release is available{version_label}.",
         action_label="View release details",
         action_href=latest_release_url,
         context_json={

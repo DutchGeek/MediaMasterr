@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import Router from "svelte-spa-router";
   import { location } from "svelte-spa-router";
   import wrap from "svelte-spa-router/wrap";
@@ -159,8 +159,8 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <img src={logoImage} alt="reclaimerr logo" class="w-6 h-6" />
-        <h1 class="font-semibold text-lg text-foreground">Reclaimerr</h1>
+        <img src={logoImage} alt="MediaMasterr logo" class="w-6 h-6" />
+        <h1 class="font-semibold text-lg text-foreground">MediaMasterr</h1>
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]

@@ -180,7 +180,7 @@
           label: "MDBList",
           icon: KeyRound,
           desc:
-            "Enable this to allow Reclaimerr to collect metadata for Rotten Tomatoes, Metacritic, " +
+            "Enable this to allow MediaMasterr to collect metadata for Rotten Tomatoes, Metacritic, " +
             "Trakt, and Letterboxd.",
           baseUrlPlaceholder: "https://api.mdblist.com",
           adminOnly: true,

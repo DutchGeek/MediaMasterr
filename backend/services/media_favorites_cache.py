@@ -27,7 +27,7 @@ _PLEX_WATCHLIST_ENDPOINT = (
 )
 _PLEX_METADATA_BASE_URL = "https://metadata.provider.plex.tv"
 _PLEX_WATCHLIST_PAGE_SIZES = (20, 10, 5)
-_PLEX_PRODUCT_NAME = "Reclaimerr"
+_PLEX_PRODUCT_NAME = "MediaMasterr"
 _PLEX_CLIENT_IDENTIFIER = "reclaimerr"
 
 

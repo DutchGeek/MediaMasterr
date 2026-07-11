@@ -1,6 +1,6 @@
 # Database Migrations
 
-Reclaimerr uses Alembic for schema migrations. They run automatically on startup,
+MediaMasterr uses Alembic for schema migrations. They run automatically on startup,
 so users do not need to manage them manually.
 
 ## If You Change A Model

@@ -130,7 +130,7 @@ DEFAULT_SCHEDULES: tuple[DefaultSchedule, ...] = (
     },
     {
         "task": Task.CHECK_APP_UPDATES,
-        "description": "Checks GitHub for new Reclaimerr releases",
+        "description": "Checks GitHub for new MediaMasterr releases",
         "schedule_type": ScheduleType.INTERVAL,
         "schedule_value": "3600",  # hourly
         "default_schedule_type": ScheduleType.INTERVAL,

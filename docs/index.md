@@ -1,18 +1,18 @@
-# Reclaimerr Docs
+# MediaMasterr Docs
 
-Reclaimerr scans media libraries for eligible items, tracks protection and
+MediaMasterr scans media libraries for eligible items, tracks protection and
 deletion requests, and routes the final action through the appropriate service.
 
 Documentation for setup, usage, deployment, and development.
 
 ## Sections
 
-- [Getting Started](getting-started/index.md) - install Reclaimerr and complete
+- [Getting Started](getting-started/index.md) - install MediaMasterr and complete
   initial setup.
 - [Features](features.md) - review the core workflow and supported services.
-- [Using Reclaimerr](usage/how-it-works.md) - candidates, requests, and
+- [Using MediaMasterr](usage/how-it-works.md) - candidates, requests, and
   deletion flow.
-- [Deployment](deployment/docker.md) - run Reclaimerr in Docker or behind a
+- [Deployment](deployment/docker.md) - run MediaMasterr in Docker or behind a
   proxy.
 
 ## Capabilities
@@ -26,7 +26,7 @@ Documentation for setup, usage, deployment, and development.
 
 ## Project Links
 
-- [README](https://github.com/jessielw/Reclaimerr/blob/main/README.md)
+- [README](https://github.com/jessielw/MediaMasterr/blob/main/README.md)
 - [Features](features.md)
 - [API Reference](reference/api.md)
 - [Changelog](reference/changelog.md)

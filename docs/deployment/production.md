@@ -4,7 +4,7 @@ For production deployments, use this guide.
 
 ## Required Settings
 
-- Run Reclaimerr behind HTTPS.
+- Run MediaMasterr behind HTTPS.
 - Put the app behind a trusted reverse proxy.
 - Persist the data directory across restarts.
 - Use a strong `JWT_SECRET` and `ENCRYPTION_KEY`.
@@ -25,7 +25,7 @@ For production deployments, use this guide.
 ## Secrets and Persistence
 
 - Store `DATA_DIR` on a persistent volume or disk path.
-- Keep `database/reclaimerr.db` with the rest of the app data.
+- Keep `database/mediamasterr.db` with the rest of the app data.
 - Do not lose `secrets.env`; it contains generated secrets used to decrypt data.
 - Back up the full data directory before upgrading or migrating hosts. See the
   [backups guide](backups.md).
@@ -41,7 +41,7 @@ For production deployments, use this guide.
 
 ## Operational Notes
 
-- Run exactly one Reclaimerr process or replica against a SQLite database. The
+- Run exactly one MediaMasterr process or replica against a SQLite database. The
   in-process workflow locks do not coordinate multiple application processes.
 - Keep `DATA_DIR` on local storage. SQLite is not supported on NFS or other
   network filesystems; use host-local storage with a persistent volume mapping.

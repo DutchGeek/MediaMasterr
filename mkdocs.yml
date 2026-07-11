@@ -1,9 +1,9 @@
-site_name: Reclaimerr Docs
-site_url: https://jessielw.github.io/Reclaimerr/
-site_description: Reclaimerr documentation, setup, deployment, and development notes
+site_name: MediaMasterr Docs
+site_url: https://jessielw.github.io/MediaMasterr/
+site_description: MediaMasterr documentation, setup, deployment, and development notes
 site_author: jessielw
-repo_url: https://github.com/jessielw/Reclaimerr
-repo_name: jessielw/Reclaimerr
+repo_url: https://github.com/jessielw/MediaMasterr
+repo_name: jessielw/MediaMasterr
 edit_uri: edit/main/docs/
 
 theme:
@@ -65,7 +65,7 @@ nav:
       - Quick Start: getting-started/index.md
       - Installation: getting-started/installation.md
       - Configuration: getting-started/configuration.md
-  - Using Reclaimerr:
+  - Using MediaMasterr:
       - How It Works: usage/how-it-works.md
       - Deletion Flow: usage/deletion-flow.md
       - Rules: usage/rules.md

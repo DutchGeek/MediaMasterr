@@ -1,7 +1,7 @@
 [project]
 name = "reclaimerr"
 version = "0.1.11"
-description = "Backend of Reclaimerr"
+description = "Backend of MediaMasterr"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -47,9 +47,9 @@ desktop = [
 docs = ["zensical>=0.0.46", "pymdown-extensions>=11.0"]
 
 [project.urls]
-Homepage = "https://github.com/jessielw/Reclaimerr"
-Source = "https://github.com/jessielw/Reclaimerr"
-Documentation = "https://jessielw.github.io/Reclaimerr"
+Homepage = "https://github.com/jessielw/MediaMasterr"
+Source = "https://github.com/jessielw/MediaMasterr"
+Documentation = "https://jessielw.github.io/MediaMasterr"
 
 [build-system]
 requires = ["hatchling"]

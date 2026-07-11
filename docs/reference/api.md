@@ -1,6 +1,6 @@
 # API Reference
 
-Reclaimerr exposes a FastAPI backend. The full schema is available from the
+MediaMasterr exposes a FastAPI backend. The full schema is available from the
 running app at:
 
 - `GET /docs`

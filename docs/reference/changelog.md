@@ -1,6 +1,6 @@
 # Changelog
 
-Reclaimerr can expose a changelog through the API at `GET /api/info/changelog`.
+MediaMasterr can expose a changelog through the API at `GET /api/info/changelog`.
 That endpoint reads a `CHANGELOG.md` file from the running environment and
 splits it into release entries.
 

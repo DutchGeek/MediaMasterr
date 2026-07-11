@@ -202,7 +202,7 @@ class RadarrClient:
 
         Returns a list of dicts with keys: path, free_space, total_space.
         These are reported by the Radarr server itself, so they work correctly
-        regardless of where Reclaimerr is running (Docker, remote machine, etc.).
+        regardless of where MediaMasterr is running (Docker, remote machine, etc.).
         """
         _, data = await self._make_request("GET", "diskspace")
         if not isinstance(data, list):

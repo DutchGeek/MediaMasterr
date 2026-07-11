@@ -1,6 +1,6 @@
 # Features
 
-Reclaimerr is built around a predictable reclaim pipeline: scan, review,
+MediaMasterr is built around a predictable reclaim pipeline: scan, review,
 protect, approve, then delete or move through the correct service.
 
 ## Core Workflow

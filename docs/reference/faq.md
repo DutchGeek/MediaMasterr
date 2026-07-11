@@ -5,9 +5,9 @@
 No. Automatic deletion is off by default and requires an explicit opt-in in
 General Settings before the scheduled task can be enabled.
 
-## Can Reclaimerr delete items without Radarr or Sonarr?
+## Can MediaMasterr delete items without Radarr or Sonarr?
 
-Yes. If the media server supports the action, Reclaimerr can use the server
+Yes. If the media server supports the action, MediaMasterr can use the server
 directly. If not, it falls back to local deletion when that setting is enabled.
 
 ## Why is an item not being deleted?
@@ -32,9 +32,9 @@ verify the forwarded headers and trusted hosts.
 
 ## How do I reset the admin password?
 
-Set `ADMIN_PASSWORD` in the environment and restart Reclaimerr. If an admin
+Set `ADMIN_PASSWORD` in the environment and restart MediaMasterr. If an admin
 account already exists, the password for the first admin account is reset on
-startup. If no admin account exists yet, Reclaimerr creates the initial admin
+startup. If no admin account exists yet, MediaMasterr creates the initial admin
 account with that password.
 
 Remove `ADMIN_PASSWORD` after logging in.

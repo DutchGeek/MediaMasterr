@@ -32,17 +32,17 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: reclaimerr-windows-x64.zip
-            exe_path: dist/reclaimerr
+            artifact_name: mediamasterr-windows-x64.zip
+            exe_path: dist/mediamasterr
           - os: macos-latest
-            artifact_name: reclaimerr-macos-arm64.zip
-            exe_path: dist/reclaimerr
+            artifact_name: mediamasterr-macos-arm64.zip
+            exe_path: dist/mediamasterr
           - os: macos-15-intel
-            artifact_name: reclaimerr-macos-intel.zip
-            exe_path: dist/reclaimerr
+            artifact_name: mediamasterr-macos-intel.zip
+            exe_path: dist/mediamasterr
           - os: ubuntu-latest
-            artifact_name: reclaimerr-linux-x64.zip
-            exe_path: dist/reclaimerr
+            artifact_name: mediamasterr-linux-x64.zip
+            exe_path: dist/mediamasterr
 
     steps:
       - name: Checkout
