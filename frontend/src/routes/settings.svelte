@@ -13,6 +13,7 @@
   import General from "$lib/components/settings/general.svelte";
   import Authentication from "$lib/components/settings/authentication.svelte";
   import UserSignals from "$lib/components/settings/user-signals.svelte";
+  import ProtectionSettings from "$lib/components/settings/protection-settings.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
@@ -29,6 +30,7 @@
   import RadarrSVG from "$lib/components/svgs/radarr-svg.svelte";
   import SonarrSVG from "$lib/components/svgs/sonarr-svg.svelte";
   import Download from "@lucide/svelte/icons/download";
+  import Shield from "@lucide/svelte/icons/shield";
   import SeerrSVG from "$lib/components/svgs/seerr-svg.svelte";
   import TautulliSVG from "$lib/components/svgs/tautulli-svg.svelte";
   import BookAlert from "@lucide/svelte/icons/book-alert";
@@ -164,6 +166,14 @@
           lockName: true,
         },
         {
+          id: SettingsTab.Protection,
+          label: "Protection",
+          icon: Shield,
+          desc: "Configure the active Protection provider used by MediaMasterr",
+          adminOnly: true,
+          lockName: true,
+        },
+        {
           id: SettingsTab.Seerr,
           label: "Seerr",
           icon: SeerrSVG,
@@ -293,6 +303,7 @@
     [SettingsTab.Radarr]: "idle",
     [SettingsTab.Sonarr]: "idle",
     [SettingsTab.QBittorrent]: "idle",
+    [SettingsTab.Protection]: "idle",
     [SettingsTab.Seerr]: "idle",
     [SettingsTab.Tautulli]: "idle",
     [SettingsTab.MDBList]: "idle",
@@ -1034,6 +1045,10 @@
             <!-- tasks -->
           {:else if activeTab === SettingsTab.Tasks}
             <Tasks svgIcon={getTabIcon(activeTab)} />
+
+            <!-- protection provider settings -->
+          {:else if activeTab === SettingsTab.Protection}
+            <ProtectionSettings />
 
             <!-- notifications -->
           {:else if activeTab === SettingsTab.Notifications}

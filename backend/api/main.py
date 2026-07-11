@@ -48,6 +48,7 @@ from backend.database import close_db, init_db
 from backend.enums import BackgroundJobType
 from backend.jobs import reset_stale_jobs
 from backend.scheduler import shutdown_scheduler, start_scheduler
+from backend.services.protection.routes import router as protection_router
 from backend.utils.create_admin import create_initial_admin
 
 limiter = Limiter(key_func=get_remote_address)
@@ -186,6 +187,7 @@ fastapi_app.include_router(correlation_router)
 fastapi_app.include_router(requests_router)
 fastapi_app.include_router(delete_requests_router)
 fastapi_app.include_router(protected_router)
+fastapi_app.include_router(protection_router)
 fastapi_app.include_router(qbittorrent_router)
 fastapi_app.include_router(system_router)
 

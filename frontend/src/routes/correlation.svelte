@@ -130,7 +130,7 @@
         <Spinner class="w-12 h-12 text-primary" />
       </div>
     {:else if error && !detail}
-      <ErrorBox message={error} onRetry={load} />
+      <ErrorBox {error} />
     {:else}
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <section class="rounded-lg border border-border bg-card overflow-hidden">
@@ -229,7 +229,7 @@
               </div>
             </article>
           {:else if error}
-            <ErrorBox message={error} onRetry={() => loadDetail(selectedId)} />
+            <ErrorBox {error} />
           {/if}
         </section>
       </div>

@@ -134,7 +134,7 @@
         <Spinner class="w-12 h-12 text-primary" />
       </div>
     {:else if error}
-      <ErrorBox message={error} onRetry={loadOverview} />
+      <ErrorBox {error} />
     {:else if overview}
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {#each cards as card}

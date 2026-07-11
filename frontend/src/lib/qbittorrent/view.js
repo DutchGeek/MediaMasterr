@@ -1,3 +1,6 @@
+/**
+ * @param {number} seconds
+ */
 export function formatTorrentEta(seconds) {
   if (seconds < 0) return "∞";
   if (!Number.isFinite(seconds)) return "—";
@@ -9,6 +12,9 @@ export function formatTorrentEta(seconds) {
   return `${minutes}m`;
 }
 
+/**
+ * @param {number} value
+ */
 export function formatTorrentProgress(value) {
   return `${Math.round((value || 0) * 100)}%`;
 }

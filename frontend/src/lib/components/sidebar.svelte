@@ -4,23 +4,18 @@
   import { auth } from "$lib/stores/auth";
   import ThemeToggle from "./theme-toggle.svelte";
   import SidebarNotices from "./sidebar-notices.svelte";
-  import SidebarCandidatesBadge from "./sidebar-candidates-badge.svelte";
-  import SidebarRequestsBadge from "./sidebar-requests-badge.svelte";
   import { VERSION } from "$lib/version";
   import House from "@lucide/svelte/icons/house";
   import ClapperBoard from "@lucide/svelte/icons/clapperboard";
   import Tv from "@lucide/svelte/icons/tv";
   import Settings from "@lucide/svelte/icons/settings";
+  import Server from "@lucide/svelte/icons/server";
+  import CircleHelp from "@lucide/svelte/icons/circle-help";
   import DoorOpen from "@lucide/svelte/icons/door-open";
   import DoorClosed from "@lucide/svelte/icons/door-closed";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
-  import Ticket from "@lucide/svelte/icons/ticket";
   import Shield from "@lucide/svelte/icons/shield";
-  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import Filter from "@lucide/svelte/icons/filter";
-  import History from "@lucide/svelte/icons/history";
   import Download from "@lucide/svelte/icons/download";
-  import Link2 from "@lucide/svelte/icons/link-2";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Check from "@lucide/svelte/icons/check";
@@ -60,7 +55,7 @@
     },
     {
       path: "/movies",
-      label: "Movies",
+      label: "Radarr",
       icon: ClapperBoard,
       adminOnly: false,
       page: PageAccess.Movies,
@@ -68,53 +63,11 @@
     },
     {
       path: "/series",
-      label: "Series",
+      label: "Sonarr",
       icon: Tv,
       adminOnly: false,
       page: PageAccess.Series,
       tooltip: null,
-    },
-    {
-      path: "/requests",
-      label: "Requests",
-      icon: Ticket,
-      adminOnly: false,
-      page: PageAccess.Requests,
-      tooltip: "View and manage delete and protection requests",
-    },
-    {
-      path: "/protected",
-      label: "Protected",
-      icon: Shield,
-      adminOnly: false,
-      page: PageAccess.Protected,
-      tooltip:
-        "View and manage protected media that won't be automatically deleted",
-    },
-    {
-      path: "/candidates",
-      label: "Candidates",
-      icon: TriangleAlert,
-      adminOnly: false,
-      page: PageAccess.Candidates,
-      tooltip:
-        "Review media that are candidates for deletion based on your retention settings",
-    },
-    {
-      path: "/history",
-      label: "History",
-      icon: History,
-      adminOnly: false,
-      page: PageAccess.History,
-      tooltip: "Browse reclaim activity and recent file history",
-    },
-    {
-      path: "/correlation",
-      label: "Relationships",
-      icon: Link2,
-      adminOnly: true,
-      tooltip:
-        "Trace read-only relationships between torrents, media, watches, and protection",
     },
     {
       path: "/qbittorrent",
@@ -124,11 +77,12 @@
       tooltip: "View qBittorrent transfer and torrent status in read-only mode",
     },
     {
-      path: "/rules",
-      label: "Rules",
-      icon: Filter,
-      adminOnly: true,
-      tooltip: "Create and manage cleanup rules",
+      path: "/protection",
+      label: "Protection",
+      icon: Shield,
+      adminOnly: false,
+      page: PageAccess.Protected,
+      tooltip: "Manage MediaMasterr Protection provider, rules, and protected items",
     },
     {
       path: "/settings",
@@ -137,6 +91,20 @@
       adminOnly: false,
       page: PageAccess.Settings,
       tooltip: null,
+    },
+    {
+      path: "/system",
+      label: "System",
+      icon: Server,
+      adminOnly: true,
+      tooltip: "System controls and operational actions",
+    },
+    {
+      path: "/about",
+      label: "About",
+      icon: CircleHelp,
+      adminOnly: false,
+      tooltip: "About MediaMasterr and release details",
     },
   ];
 
@@ -241,17 +209,19 @@
 
 <aside class="w-64 bg-card border-r border-border flex flex-col h-full">
   <!-- logo -->
-  <div class="relative p-4 border-b border-border">
+  <div class="relative h-[72px] px-4 border-b border-border flex items-center">
     <a
       href="/"
       use:link
       onclick={onNavigate}
       class="inline-flex items-center gap-3 rounded-lg p-1 -m-1 hover:text-primary"
     >
-      <div class="w-12 h-12 flex items-center justify-center">
-        <img src={BRANDING.assets.logoIcon} alt={`${BRANDING.applicationName} logo`} class="w-10 h-10" />
-      </div>
-      <h1 class="text-xl font-bold text-foreground hover:text-inherit">
+      <img
+        src={BRANDING.assets.logo}
+        alt={`${BRANDING.applicationName} logo`}
+        class="h-9 w-auto object-contain"
+      />
+      <h1 class="text-[1.9rem] font-bold leading-none text-foreground hover:text-inherit">
         {BRANDING.applicationName}
       </h1>
     </a>
@@ -338,12 +308,6 @@
                   <item.icon />
                   <span class="flex items-center gap-2 flex-1 min-w-0">
                     <span class="font-medium">{item.label}</span>
-                    {#if item.path === "/requests"}
-                      <SidebarRequestsBadge />
-                    {/if}
-                    {#if item.path === "/candidates"}
-                      <SidebarCandidatesBadge />
-                    {/if}
                   </span>
                 </a>
               </Tooltip.Trigger>
@@ -364,12 +328,6 @@
               <item.icon />
               <span class="flex items-center gap-2 flex-1 min-w-0">
                 <span class="font-medium">{item.label}</span>
-                {#if item.path === "/requests"}
-                  <SidebarRequestsBadge />
-                {/if}
-                {#if item.path === "/candidates"}
-                  <SidebarCandidatesBadge />
-                {/if}
               </span>
             </a>
           {/if}

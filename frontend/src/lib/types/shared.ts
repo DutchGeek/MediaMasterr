@@ -103,6 +103,7 @@ export enum SettingsTab {
   Radarr = "radarr",
   Sonarr = "sonarr",
   QBittorrent = "qbittorrent",
+  Protection = "protection",
   Seerr = "seerr",
   Tautulli = "tautulli",
   MDBList = "mdblist",

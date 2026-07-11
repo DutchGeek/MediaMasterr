@@ -205,6 +205,32 @@ class ServiceConfig(Base):
     )
 
 
+class ProtectionProviderConfig(Base):
+    """Configuration for the active Protection provider integration."""
+
+    __tablename__ = "protection_provider_configs"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), default="reclaimerr")
+    base_url: Mapped[str | None] = mapped_column(String(255), default=None)
+    api_key: Mapped[str | None] = mapped_column(String(255), default=None)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    connection_status: Mapped[str] = mapped_column(String(32), default="disconnected")
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        init=False,
+    )
+
+
 class ServiceMediaLibrary(Base):
     """Media libraries available from the main media server."""
 

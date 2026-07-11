@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { get_api } from "$lib/api";
+  import { BRANDING } from "$lib/branding";
+  import { VERSION } from "$lib/version";
   import ErrorBox from "$lib/components/error-box.svelte";
   import Notice from "$lib/components/notice.svelte";
   import { formatDate, formatDistanceToNow } from "$lib/utils/date";
@@ -21,8 +23,18 @@
   import SeerrSVG from "$lib/components/svgs/seerr-svg.svelte";
   import TautulliSVG from "$lib/components/svgs/tautulli-svg.svelte";
 
+  type ProtectionStats = {
+    connected: boolean;
+    provider: string;
+    protected_files: number;
+    protected_size: number;
+    active_rules: number;
+    last_sync: string | null;
+  };
+
   // state
   let dashboard = $state<DashboardResponse | null>(null);
+  let protectionStats = $state<ProtectionStats | null>(null);
   let loading = $state(true);
   let error = $state("");
   let lastUpdatedAt = $state<string | null>(null);
@@ -49,6 +61,31 @@
   const showSyncNotice = $derived(
     (dashboard?.media_server_configured ?? false) && libraryTotal === 0,
   );
+  const connectedServicesCount = $derived(
+    dashboard?.services.filter((service) => service.enabled).length ?? 0,
+  );
+  const lastSystemSyncLabel = $derived.by(() => {
+    nowTick;
+    const candidates = [
+      ...(dashboard?.services
+        .map((service) => service.last_sync_at)
+        .filter((value): value is string => typeof value === "string") ?? []),
+      ...(protectionStats?.last_sync ? [protectionStats.last_sync] : []),
+    ];
+    if (candidates.length === 0) return "Never";
+
+    let newest = candidates[0];
+    let newestTs = Date.parse(newest);
+    for (const value of candidates.slice(1)) {
+      const ts = Date.parse(value);
+      if (!Number.isNaN(ts) && (Number.isNaN(newestTs) || ts > newestTs)) {
+        newest = value;
+        newestTs = ts;
+      }
+    }
+
+    return formatDistanceToNow(newest);
+  });
   const requestBalance7d = $derived(
     (dashboard?.requests.approved_7d ?? 0) -
       (dashboard?.requests.denied_7d ?? 0),
@@ -186,7 +223,12 @@
       if (showLoading) {
         loading = true;
       }
-      dashboard = await get_api<DashboardResponse>("/api/dashboard");
+      const [dashboardPayload, protectionPayload] = await Promise.all([
+        get_api<DashboardResponse>("/api/dashboard"),
+        get_api<ProtectionStats>("/api/protection/stats"),
+      ]);
+      dashboard = dashboardPayload;
+      protectionStats = protectionPayload;
       lastUpdatedAt = new Date().toISOString();
       error = "";
     } catch (err: any) {
@@ -226,23 +268,45 @@
 <div class="p-2.5 md:p-8">
   <div class="max-w-7xl mx-auto space-y-4">
     <div>
-      <h1 class="text-3xl font-bold text-foreground">Dashboard</h1>
-      <p class="text-muted-foreground">
-        Overview of your media library cleanup status
-      </p>
-      <div class="mt-2 flex items-center gap-3">
-        {#if lastUpdatedLabel}
-          <p class="text-xs text-muted-foreground">
-            Last updated {lastUpdatedLabel}
-          </p>
-        {/if}
-        <button
-          onclick={cycleSizeUnit}
-          class="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary/50 text-muted-foreground
-            hover:bg-secondary transition-colors cursor-pointer"
-        >
-          {sizeUnit === "AUTO" ? "Auto" : sizeUnit}
-        </button>
+      <div
+        class="rounded-lg border border-border bg-card px-5 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+      >
+        <div class="flex items-center gap-3 min-w-0">
+          <img
+            src={BRANDING.assets.logo}
+            alt={`${BRANDING.applicationName} logo`}
+            class="h-10 w-auto object-contain"
+          />
+          <div class="min-w-0">
+            <h1 class="text-3xl font-bold text-foreground">Dashboard</h1>
+            <p class="text-muted-foreground">
+              System health and unified media management status
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+            v{VERSION}
+          </span>
+          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+            Connected services: {connectedServicesCount}
+          </span>
+          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+            Last sync: {lastSystemSyncLabel}
+          </span>
+          {#if lastUpdatedLabel}
+            <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+              Updated {lastUpdatedLabel}
+            </span>
+          {/if}
+          <button
+            onclick={cycleSizeUnit}
+            class="text-xs px-2 py-0.5 rounded-full border border-border bg-secondary/50 text-muted-foreground hover:bg-secondary transition-colors cursor-pointer"
+          >
+            {sizeUnit === "AUTO" ? "Auto" : sizeUnit}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -534,6 +598,44 @@
                 {/if}
               </article>
             {/if}
+
+            <article class="bg-card rounded-lg border border-border p-5">
+              <h2 class="text-lg font-semibold text-foreground mb-4">
+                Protection
+              </h2>
+              <div class="space-y-2 text-sm">
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Connected</span>
+                  <span class={protectionStats?.connected ? "text-green-500" : "text-destructive"}>
+                    {protectionStats?.connected ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Provider</span>
+                  <span class="text-foreground">{protectionStats?.provider ?? "Reclaimerr"}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Protected files</span>
+                  <span class="text-foreground">{protectionStats?.protected_files ?? 0}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Protected size</span>
+                  <span class="text-foreground">{formatSize(protectionStats?.protected_size ?? 0)}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Active rules</span>
+                  <span class="text-foreground">{protectionStats?.active_rules ?? 0}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Last sync</span>
+                  <span class="text-foreground">
+                    {protectionStats?.last_sync
+                      ? formatDistanceToNow(protectionStats.last_sync)
+                      : "Never"}
+                  </span>
+                </div>
+              </div>
+            </article>
           </section>
 
           <!-- recent activity -->

@@ -1,6 +1,6 @@
 import { auth } from "./stores/auth";
 
-const UI_INDICATORS_INVALIDATE_EVENT = "reclaimerr:ui-indicators:invalidate";
+const UI_INDICATORS_INVALIDATE_EVENT = "mediamasterr:ui-indicators:invalidate";
 
 const UI_INDICATOR_MUTATION_PATH_PREFIXES = [
   "/api/protection-requests",

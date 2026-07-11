@@ -20,6 +20,9 @@
   import History from "./routes/history.svelte";
   import Correlation from "./routes/correlation.svelte";
   import QBittorrent from "./routes/qbittorrent.svelte";
+  import Protection from "./routes/protection.svelte";
+  import System from "./routes/system.svelte";
+  import About from "./routes/about.svelte";
   import Rules from "./routes/rules.svelte";
   import Settings from "./routes/settings.svelte";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
@@ -51,8 +54,11 @@
     "/history": route(History),
     "/correlation": route(Correlation),
     "/qbittorrent": route(QBittorrent),
+    "/protection": route(Protection),
     "/rules": route(Rules),
     "/settings": route(Settings),
+    "/system": route(System),
+    "/about": route(About),
     "/setup": route(Setup),
   };
 
@@ -171,8 +177,14 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <img src={BRANDING.assets.logoIcon} alt={`${BRANDING.applicationName} logo`} class="w-6 h-6" />
-        <h1 class="font-semibold text-lg text-foreground">{BRANDING.applicationName}</h1>
+        <img
+          src={BRANDING.assets.logo}
+          alt={`${BRANDING.applicationName} logo`}
+          class="h-9 w-auto object-contain"
+        />
+        <h1 class="font-bold text-[1.9rem] leading-none text-foreground">
+          {BRANDING.applicationName}
+        </h1>
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]
