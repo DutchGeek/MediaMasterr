@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from http import HTTPStatus
+from urllib.parse import urlsplit
 
+import niquests
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +23,10 @@ from backend.enums import MediaType
 from backend.tasks.cleanup import scan_cleanup_candidates
 
 from .models import (
+    ProtectionAuthenticationDefinition,
+    ProtectionAuthFieldDefinition,
     ProtectionItemRecord,
+    ProtectionProviderDefinition,
     ProtectionProviderStatus,
     ProtectionRuleRecord,
     ProtectionStatistics,
@@ -38,62 +44,262 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         db: AsyncSession,
         *,
         base_url: str | None,
-        api_key: str | None,
+        username: str | None,
+        password: str | None,
+        session_token: str | None,
+        authenticated: bool,
+        provider_version: str | None,
+        last_login: datetime | None,
         enabled: bool,
         last_sync: datetime | None,
     ) -> None:
         self._db = db
-        self._base_url = (base_url or "").strip() or None
-        self._api_key = (api_key or "").strip() or None
+        self._base_url = self._normalize_base_url(base_url)
+        self._username = (username or "").strip() or None
+        self._password = (password or "").strip() or None
+        self._session_token = (session_token or "").strip() or None
+        self._authenticated = authenticated
+        self._provider_version = (provider_version or "").strip() or None
+        self._last_login = last_login
         self._enabled = enabled
         self._last_sync = last_sync
 
+    @staticmethod
+    def _normalize_base_url(base_url: str | None) -> str | None:
+        normalized = (base_url or "").strip().rstrip("/")
+        if not normalized:
+            return None
+        if normalized.startswith("http://") or normalized.startswith("https://"):
+            candidate = normalized
+        else:
+            candidate = f"http://{normalized}"
+        parsed = urlsplit(candidate)
+        if not parsed.scheme or not parsed.netloc:
+            return None
+        return candidate
+
+    @staticmethod
+    def _capabilities() -> list[str]:
+        return ["Rules", "Protected Items", "Statistics"]
+
+    def _new_session(self) -> niquests.AsyncSession:
+        session = niquests.AsyncSession()
+        if self._session_token:
+            for pair in self._session_token.split(";"):
+                if "=" not in pair:
+                    continue
+                key, value = pair.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if key:
+                    session.cookies.set(key, value)
+        return session
+
+    @staticmethod
+    def _serialize_session(session: niquests.AsyncSession) -> str:
+        jar = session.cookies.get_dict()
+        return "; ".join(f"{k}={v}" for k, v in jar.items() if k and v)
+
+    async def _login(self, session: niquests.AsyncSession) -> tuple[bool, str | None]:
+        if not self._base_url or not self._username or not self._password:
+            return False, "URL, username, and password are required"
+        try:
+            response = await session.post(
+                f"{self._base_url}/api/auth/login",
+                json={"username": self._username, "password": self._password},
+                timeout=20,
+            )
+        except Exception as exc:
+            return False, f"Unable to reach provider: {exc}"
+
+        if response.status_code != HTTPStatus.OK:
+            message = None
+            try:
+                payload = response.json()
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if isinstance(detail, str) and detail.strip():
+                    message = detail
+            except Exception:
+                message = None
+            return False, message or "Authentication failed"
+
+        self._session_token = self._serialize_session(session)
+        self._authenticated = bool(self._session_token)
+        self._last_login = datetime.now(UTC)
+        return self._authenticated, None
+
+    async def _refresh_provider_version(self, session: niquests.AsyncSession) -> None:
+        if not self._base_url:
+            self._provider_version = None
+            return
+        try:
+            response = await session.get(f"{self._base_url}/api/info/version", timeout=20)
+            if response.status_code != HTTPStatus.OK:
+                self._provider_version = None
+                return
+            payload = response.json()
+            if isinstance(payload, dict):
+                version = payload.get("version")
+                self._provider_version = str(version).strip() if version else None
+        except Exception:
+            self._provider_version = None
+
+    async def _probe_session(self, session: niquests.AsyncSession) -> bool:
+        if not self._base_url:
+            return False
+        try:
+            response = await session.get(f"{self._base_url}/api/account/me", timeout=20)
+            return response.status_code == HTTPStatus.OK
+        except Exception:
+            return False
+
+    async def _ensure_authenticated(self) -> tuple[bool, str | None]:
+        if not self._enabled:
+            return False, "Provider is disabled"
+        if not self._base_url:
+            return False, "Provider URL is invalid"
+
+        session = self._new_session()
+        try:
+            if self._session_token and await self._probe_session(session):
+                self._authenticated = True
+                await self._refresh_provider_version(session)
+                return True, None
+
+            ok, message = await self._login(session)
+            if not ok:
+                self._authenticated = False
+                self._session_token = None
+                return False, message
+            await self._refresh_provider_version(session)
+            return True, None
+        finally:
+            await session.close()
+
+    def get_runtime_auth_state(self) -> dict[str, str | bool | None]:
+        return {
+            "session_token": self._session_token,
+            "authenticated": self._authenticated,
+            "provider_version": self._provider_version,
+            "last_login": to_utc_isoformat(self._last_login),
+            "last_sync": to_utc_isoformat(self._last_sync),
+        }
+
     def _is_connected(self) -> bool:
-        return bool(self._enabled and self._base_url and self._api_key)
+        return bool(self._enabled and self._base_url and self._username and self._password)
+
+    def getDefinition(self) -> ProtectionProviderDefinition:
+        return ProtectionProviderDefinition(
+            provider="reclaimerr",
+            display_name="Reclaimerr",
+            authentication=ProtectionAuthenticationDefinition(
+                type="web_login",
+                fields=[
+                    ProtectionAuthFieldDefinition(
+                        name="base_url",
+                        label="Server URL",
+                        required=True,
+                    ),
+                    ProtectionAuthFieldDefinition(
+                        name="username",
+                        label="Username",
+                        required=True,
+                    ),
+                    ProtectionAuthFieldDefinition(
+                        name="password",
+                        label="Password",
+                        required=True,
+                        secret=True,
+                    ),
+                ],
+            ),
+        )
 
     async def connect(self) -> ProtectionProviderStatus:
         connected = self._is_connected()
+        authentication_status = "authenticated" if self._authenticated else "not_authenticated"
         return ProtectionProviderStatus(
             connected=connected,
+            authenticated=self._authenticated,
             provider="Reclaimerr",
+            auth_method="web_login",
             connection_status="connected" if connected else "disconnected",
+            authentication_status=authentication_status,
             base_url=self._base_url,
+            provider_version=self._provider_version,
+            last_login=to_utc_isoformat(self._last_login),
             last_sync=to_utc_isoformat(self._last_sync),
+            capabilities=self._capabilities(),
             message=None
             if connected
-            else "Configure URL and API key to connect the Reclaimerr provider",
+            else "Configure URL, username, and password to connect the Reclaimerr provider",
         )
 
     async def testConnection(self) -> ProtectionProviderStatus:
-        connected = self._is_connected()
+        connected, message = await self._ensure_authenticated()
         return ProtectionProviderStatus(
-            connected=connected,
+            connected=self._is_connected(),
+            authenticated=connected,
             provider="Reclaimerr",
+            auth_method="web_login",
             connection_status="connected" if connected else "error",
+            authentication_status="authenticated" if connected else "not_authenticated",
             base_url=self._base_url,
+            provider_version=self._provider_version,
+            last_login=to_utc_isoformat(self._last_login),
             last_sync=to_utc_isoformat(self._last_sync),
-            message="Connection successful" if connected else "URL and API key are required",
+            capabilities=self._capabilities(),
+            message="Authenticated" if connected else message,
         )
 
     async def sync(self) -> ProtectionProviderStatus:
         if not self._is_connected():
             return ProtectionProviderStatus(
                 connected=False,
+                authenticated=False,
                 provider="Reclaimerr",
+                auth_method="web_login",
                 connection_status="error",
+                authentication_status="not_authenticated",
                 base_url=self._base_url,
+                provider_version=self._provider_version,
+                last_login=to_utc_isoformat(self._last_login),
                 last_sync=to_utc_isoformat(self._last_sync),
+                capabilities=self._capabilities(),
                 message="Provider is not connected",
+            )
+
+        authenticated, auth_error = await self._ensure_authenticated()
+        if not authenticated:
+            return ProtectionProviderStatus(
+                connected=True,
+                authenticated=False,
+                provider="Reclaimerr",
+                auth_method="web_login",
+                connection_status="error",
+                authentication_status="not_authenticated",
+                base_url=self._base_url,
+                provider_version=self._provider_version,
+                last_login=to_utc_isoformat(self._last_login),
+                last_sync=to_utc_isoformat(self._last_sync),
+                capabilities=self._capabilities(),
+                message=auth_error or "Authentication failed",
             )
 
         await scan_cleanup_candidates()
         self._last_sync = datetime.now(UTC)
         return ProtectionProviderStatus(
             connected=True,
+            authenticated=True,
             provider="Reclaimerr",
+            auth_method="web_login",
             connection_status="connected",
+            authentication_status="authenticated",
             base_url=self._base_url,
+            provider_version=self._provider_version,
+            last_login=to_utc_isoformat(self._last_login),
             last_sync=to_utc_isoformat(self._last_sync),
+            capabilities=self._capabilities(),
             message="Synchronization completed",
         )
 

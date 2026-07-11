@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "npm run test:rule-dnd && npm run test:qbittorrent && npm run test:correlation",
     "format": "prettier --write .",
     "test:rule-dnd": "node --test src/lib/components/settings/rules/rule-tree-dnd.test.js",
     "test:qbittorrent": "node --test src/lib/qbittorrent/view.test.js",

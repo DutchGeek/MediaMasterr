@@ -10,17 +10,42 @@
 
   type ProtectionConfig = {
     provider: string;
+    auth_method: string;
     base_url: string;
-    api_key_configured: boolean;
+    username: string;
+    password_configured: boolean;
+    configured_auth_fields: string[];
     enabled: boolean;
+  };
+
+  type ProtectionAuthField = {
+    name: string;
+    label: string;
+    required: boolean;
+    secret?: boolean;
+  };
+
+  type ProtectionProviderDefinition = {
+    provider: string;
+    display_name: string;
+    authentication: {
+      type: string;
+      fields: ProtectionAuthField[];
+    };
   };
 
   type ProtectionStatus = {
     connected: boolean;
+    authenticated: boolean;
     provider: string;
+    auth_method: string;
     connection_status: string;
+    authentication_status: string;
     base_url: string | null;
+    provider_version: string | null;
+    last_login: string | null;
     last_sync: string | null;
+    capabilities: string[];
     message: string | null;
   };
 
@@ -30,37 +55,79 @@
   let message = $state("");
   let error = $state("");
 
+  let providerDefinition = $state<ProtectionProviderDefinition | null>(null);
   let config = $state<ProtectionConfig | null>(null);
-  let form = $state({
+  let form = $state<Record<string, string | boolean>>({
     provider: "reclaimerr",
+    auth_method: "web_login",
     base_url: "",
-    api_key: "",
+    username: "",
+    password: "",
     enabled: true,
   });
 
   let status = $state<ProtectionStatus | null>(null);
 
+  const formatAuthType = (value: string): string =>
+    value
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+  const getFieldValue = (fieldName: string): string => {
+    const value = form[fieldName];
+    return typeof value === "string" ? value : "";
+  };
+
+  const setFieldValue = (fieldName: string, value: string): void => {
+    form = { ...form, [fieldName]: value };
+  };
+
+  const isFieldConfigured = (fieldName: string): boolean =>
+    config?.configured_auth_fields.includes(fieldName) ?? false;
+
+  const inputTypeForField = (field: ProtectionAuthField): string =>
+    field.secret ? "password" : "text";
+
+  const placeholderForField = (field: ProtectionAuthField): string => {
+    if (field.secret && isFieldConfigured(field.name)) {
+      return `Saved ${field.label.toLowerCase()} configured`;
+    }
+    return `Enter ${field.label.toLowerCase()}`;
+  };
+
   const loadConfig = async () => {
-    config = await get_api<ProtectionConfig>("/api/protection/config");
+    const [definitionPayload, configPayload, statusPayload] = await Promise.all([
+      get_api<ProtectionProviderDefinition>("/api/protection/provider"),
+      get_api<ProtectionConfig>("/api/protection/config"),
+      get_api<ProtectionStatus>("/api/protection/status"),
+    ]);
+    providerDefinition = definitionPayload;
+    config = configPayload;
     form = {
-      provider: config.provider,
-      base_url: config.base_url,
-      api_key: "",
-      enabled: config.enabled,
+      provider: configPayload.provider,
+      auth_method: configPayload.auth_method,
+      base_url: configPayload.base_url,
+      username: configPayload.username,
+      password: "",
+      enabled: configPayload.enabled,
     };
-    status = await get_api<ProtectionStatus>("/api/protection/status");
+    status = statusPayload;
   };
 
   const testConnection = async () => {
     testStatus = "loading";
     try {
       status = await post_api<ProtectionStatus>("/api/protection/test", {
-        provider: form.provider,
-        base_url: form.base_url,
-        api_key: form.api_key,
-        enabled: form.enabled,
+        provider: getFieldValue("provider"),
+        auth_method: getFieldValue("auth_method"),
+        base_url: getFieldValue("base_url"),
+        username: getFieldValue("username"),
+        password: getFieldValue("password"),
+        enabled: Boolean(form.enabled),
       });
-      message = status.message ?? "Connection successful";
+      message = status.message ?? "Authenticated";
       error = "";
       testStatus = status.connected ? "success" : "error";
     } catch (e: any) {
@@ -74,14 +141,16 @@
     saving = true;
     try {
       config = await post_api<ProtectionConfig>("/api/protection/config", {
-        provider: form.provider,
-        base_url: form.base_url,
-        api_key: form.api_key,
-        enabled: form.enabled,
+        provider: getFieldValue("provider"),
+        auth_method: getFieldValue("auth_method"),
+        base_url: getFieldValue("base_url"),
+        username: getFieldValue("username"),
+        password: getFieldValue("password"),
+        enabled: Boolean(form.enabled),
       });
-      form.api_key = "";
+      form = { ...form, password: "" };
       status = await get_api<ProtectionStatus>("/api/protection/status");
-      message = "Protection settings saved";
+      message = "Configuration Saved";
       error = "";
     } catch (e: any) {
       error = e?.message ?? "Failed to save Protection settings";
@@ -112,41 +181,65 @@
 
 <div class="space-y-4">
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <label class="space-y-1">
-      <span class="text-sm text-muted-foreground">Provider</span>
-      <input
-        value="Reclaimerr"
-        disabled
-        class="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-foreground"
-      />
-    </label>
+    <div class="space-y-4 rounded-lg border border-border bg-card p-4">
+      <h3 class="text-sm font-semibold text-foreground">Protection Provider</h3>
+      <label class="space-y-1 block">
+        <span class="text-sm text-muted-foreground">Provider</span>
+        <input
+          value={providerDefinition?.display_name ?? "Reclaimerr"}
+          disabled
+          class="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-foreground"
+        />
+      </label>
 
-    <label class="space-y-1">
-      <span class="text-sm text-muted-foreground">URL</span>
-      <input
-        bind:value={form.base_url}
-        class="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-        placeholder="e.g. https://reclaimerr.internal"
-      />
-    </label>
+      <label class="space-y-1 block">
+        <span class="text-sm text-muted-foreground">Authentication Method</span>
+        <input
+          value={providerDefinition ? formatAuthType(providerDefinition.authentication.type) : "Web Login"}
+          disabled
+          class="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-foreground"
+        />
+      </label>
 
-    <label class="space-y-1">
-      <span class="text-sm text-muted-foreground">API Key</span>
-      <input
-        bind:value={form.api_key}
-        class="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-        placeholder={config?.api_key_configured ? "Saved key configured" : "Enter API key"}
-      />
-    </label>
+      {#each providerDefinition?.authentication.fields ?? [] as field (field.name)}
+        <label class="space-y-1 block">
+          <span class="text-sm text-muted-foreground">{field.label}</span>
+          <input
+            value={getFieldValue(field.name)}
+            oninput={(event) => setFieldValue(field.name, event.currentTarget.value)}
+            type={inputTypeForField(field)}
+            class="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+            placeholder={placeholderForField(field)}
+            required={field.required}
+          />
+        </label>
+      {/each}
+    </div>
 
-    <label class="space-y-1">
-      <span class="text-sm text-muted-foreground">Connection Status</span>
-      <input
-        value={status?.connection_status ?? "unknown"}
-        disabled
-        class="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-foreground"
-      />
-    </label>
+    <div class="space-y-3 rounded-lg border border-border bg-card p-4">
+      <h3 class="text-sm font-semibold text-foreground">Connection Status</h3>
+      <div class="grid grid-cols-2 gap-2 text-sm">
+        <span class="text-muted-foreground">Provider</span>
+        <span class="text-foreground">{status?.provider ?? "Reclaimerr"}</span>
+        <span class="text-muted-foreground">Authentication</span>
+        <span class="text-foreground">{status?.authenticated ? "Authenticated" : "Not Authenticated"}</span>
+        <span class="text-muted-foreground">Version</span>
+        <span class="text-foreground">{status?.provider_version || "Unknown"}</span>
+        <span class="text-muted-foreground">Last Login</span>
+        <span class="text-foreground">{status?.last_login || "Never"}</span>
+        <span class="text-muted-foreground">Last Sync</span>
+        <span class="text-foreground">{status?.last_sync || "Never"}</span>
+      </div>
+
+      <div>
+        <p class="text-sm text-muted-foreground mb-1">Capabilities</p>
+        <ul class="space-y-1 text-sm text-foreground">
+          {#each status?.capabilities ?? [] as capability}
+            <li>✓ {capability}</li>
+          {/each}
+        </ul>
+      </div>
+    </div>
   </div>
 
   <div class="flex flex-wrap items-center gap-3">
@@ -177,8 +270,8 @@
     </Button>
   </div>
 
-  {#if status?.last_sync}
-    <p class="text-xs text-muted-foreground">Last sync: {status.last_sync}</p>
+  {#if testStatus === "loading"}
+    <p class="text-sm text-muted-foreground">Connecting...</p>
   {/if}
   {#if message}
     <p class="text-sm text-green-500">{message}</p>

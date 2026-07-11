@@ -84,7 +84,8 @@ async def test_protection_service_stats_include_protected_files_and_rules() -> N
             ProtectionProviderConfig(
                 provider="reclaimerr",
                 base_url="https://reclaimerr.local",
-                api_key=fer_encrypt("secret"),
+                username="admin",
+                password=fer_encrypt("secret"),
                 enabled=True,
                 connection_status="connected",
             )
@@ -103,7 +104,7 @@ async def test_protection_service_stats_include_protected_files_and_rules() -> N
 
 
 @pytest.mark.anyio
-async def test_protection_test_connection_requires_url_and_key() -> None:
+async def test_protection_test_connection_requires_url_and_credentials() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     session_maker = async_sessionmaker(
         engine,
@@ -119,8 +120,10 @@ async def test_protection_test_connection_requires_url_and_key() -> None:
         status = await service.test_connection(
             ProtectionConfigRequest(
                 provider="reclaimerr",
+                auth_method="web_login",
                 base_url="",
-                api_key="",
+                username="",
+                password="",
                 enabled=True,
             )
         )
@@ -129,3 +132,31 @@ async def test_protection_test_connection_requires_url_and_key() -> None:
 
     assert status.connected is False
     assert status.connection_status == "error"
+
+
+@pytest.mark.anyio
+async def test_protection_provider_definition_exposes_auth_metadata() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        definition = await ProtectionService(db).get_provider_definition()
+
+    await engine.dispose()
+
+    assert definition.provider == "reclaimerr"
+    assert definition.display_name == "Reclaimerr"
+    assert definition.authentication.type == "web_login"
+    assert [field.name for field in definition.authentication.fields] == [
+        "base_url",
+        "username",
+        "password",
+    ]
+    assert definition.authentication.fields[2].secret is True

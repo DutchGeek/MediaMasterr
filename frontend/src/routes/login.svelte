@@ -395,16 +395,20 @@
         {/if}
 
         <div class="text-center mb-4">
-          <div class="flex justify-center mb-4">
-            <img
-              src={BRANDING.assets.logo}
-              alt={`${BRANDING.applicationName} logo`}
-              class="w-3/4 max-w-[320px] transition-transform duration-300 {loginHovered
+          <div class="mb-4 flex justify-center">
+            <div
+              class="inline-flex items-center gap-5 transition-transform duration-300 {loginHovered
                 ? 'scale-[1.02]'
                 : 'scale-100'}"
-            />
+            >
+              <img
+                src={BRANDING.assets.logo}
+                alt={`${BRANDING.applicationName} logo`}
+                class="h-[68px] w-auto object-contain"
+              />
+              <h1 class="text-4xl font-bold leading-none text-foreground">{BRANDING.applicationName}</h1>
+            </div>
           </div>
-          <h1 class="text-4xl font-bold text-foreground mb-2">{BRANDING.applicationName}</h1>
         </div>
 
         {#if visibleMethods.length > 1}

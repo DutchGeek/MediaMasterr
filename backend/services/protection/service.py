@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from .schemas import (
     ProtectionConfigRequest,
     ProtectionConfigResponse,
     ProtectionItemResponse,
+    ProtectionProviderDefinitionResponse,
     ProtectionRuleResponse,
     ProtectionStatusResponse,
     ProtectionStatsResponse,
@@ -37,10 +39,17 @@ class ProtectionService:
 
         config = ProtectionProviderConfig(
             provider="reclaimerr",
+            auth_method="web_login",
             base_url=None,
+            username=None,
+            password=None,
             api_key=None,
+            session_token=None,
             enabled=False,
+            authenticated=False,
             connection_status="disconnected",
+            provider_version=None,
+            last_login_at=None,
             last_sync_at=None,
             last_error=None,
         )
@@ -49,7 +58,10 @@ class ProtectionService:
         return config
 
     def _provider_from_config(self, config: ProtectionProviderConfig) -> ProtectionProvider:
-        decrypted_api_key = fer_decrypt(config.api_key) if config.api_key else None
+        decrypted_password = fer_decrypt(config.password) if config.password else None
+        decrypted_session_token = (
+            fer_decrypt(config.session_token) if config.session_token else None
+        )
         provider_name = (config.provider or "reclaimerr").strip().lower()
         if provider_name != "reclaimerr":
             provider_name = "reclaimerr"
@@ -57,7 +69,12 @@ class ProtectionService:
         return ReclaimerrProtectionProvider(
             self._db,
             base_url=config.base_url,
-            api_key=decrypted_api_key,
+            username=config.username,
+            password=decrypted_password,
+            session_token=decrypted_session_token,
+            authenticated=bool(config.authenticated),
+            provider_version=config.provider_version,
+            last_login=config.last_login_at,
             enabled=bool(config.enabled),
             last_sync=config.last_sync_at,
         )
@@ -69,19 +86,37 @@ class ProtectionService:
         return ReclaimerrProtectionProvider(
             self._db,
             base_url=req.base_url,
-            api_key=req.api_key,
+            username=req.username,
+            password=req.password,
+            session_token=None,
+            authenticated=False,
+            provider_version=None,
+            last_login=None,
             enabled=req.enabled,
             last_sync=None,
         )
 
     @staticmethod
+    def _to_definition_response(
+        provider: ProtectionProvider,
+    ) -> ProtectionProviderDefinitionResponse:
+        definition = provider.getDefinition()
+        return ProtectionProviderDefinitionResponse.model_validate(asdict(definition))
+
+    @staticmethod
     def _to_status_response(status: ProtectionProviderStatus) -> ProtectionStatusResponse:
         return ProtectionStatusResponse(
             connected=status.connected,
+            authenticated=status.authenticated,
             provider=status.provider,
+            auth_method=status.auth_method,
             connection_status=status.connection_status,
+            authentication_status=status.authentication_status,
             base_url=status.base_url,
+            provider_version=status.provider_version,
+            last_login=status.last_login,
             last_sync=status.last_sync,
+            capabilities=status.capabilities,
             message=status.message,
         )
 
@@ -89,24 +124,45 @@ class ProtectionService:
         config = await self._get_or_create_config()
         return ProtectionConfigResponse(
             provider="reclaimerr",
+            auth_method=config.auth_method,
             base_url=config.base_url or "",
-            api_key_configured=bool(config.api_key),
+            username=config.username or "",
+            password_configured=bool(config.password),
+            configured_auth_fields=["password"] if config.password else [],
             enabled=bool(config.enabled),
         )
+
+    async def get_provider_definition(self) -> ProtectionProviderDefinitionResponse:
+        config = await self._get_or_create_config()
+        provider = self._provider_from_config(config)
+        return self._to_definition_response(provider)
 
     async def save_config(self, req: ProtectionConfigRequest) -> ProtectionConfigResponse:
         config = await self._get_or_create_config()
         config.provider = "reclaimerr"
+        config.auth_method = "web_login"
         config.base_url = req.base_url.strip() or None
+        next_username = req.username.strip() or None
+        credentials_changed = next_username != (config.username or None)
+        config.username = next_username
         config.enabled = req.enabled
 
-        api_key = req.api_key.strip()
-        if api_key:
-            config.api_key = fer_encrypt(api_key)
+        next_password = req.password.strip()
+        if next_password:
+            encrypted_password = fer_encrypt(next_password)
+            credentials_changed = credentials_changed or encrypted_password != config.password
+            config.password = encrypted_password
+
+        if credentials_changed:
+            config.session_token = None
+            config.authenticated = False
+            config.last_login_at = None
+            config.provider_version = None
 
         provider = self._provider_from_config(config)
         status = await provider.connect()
         config.connection_status = status.connection_status
+        config.authenticated = status.authenticated
         config.last_error = None if status.connected else status.message
 
         await self._db.flush()
@@ -118,6 +174,8 @@ class ProtectionService:
         status = await provider.connect()
 
         config.connection_status = status.connection_status
+        config.authenticated = status.authenticated
+        config.provider_version = status.provider_version
         config.last_error = None if status.connected else status.message
         await self._db.flush()
 
@@ -133,7 +191,31 @@ class ProtectionService:
         status = await provider.sync()
 
         config.connection_status = status.connection_status
+        config.authenticated = status.authenticated
+        config.provider_version = status.provider_version
         config.last_error = None if status.connected else status.message
+        if status.last_login:
+            config.last_login_at = datetime.fromisoformat(status.last_login)
+
+        runtime = None
+        get_runtime_state = getattr(provider, "get_runtime_auth_state", None)
+        if callable(get_runtime_state):
+            runtime = get_runtime_state()
+        if isinstance(runtime, dict):
+            token = runtime.get("session_token")
+            if isinstance(token, str) and token.strip():
+                config.session_token = fer_encrypt(token)
+            elif token is None:
+                config.session_token = None
+
+            provider_version = runtime.get("provider_version")
+            if isinstance(provider_version, str):
+                config.provider_version = provider_version or None
+
+            last_login = runtime.get("last_login")
+            if isinstance(last_login, str) and last_login:
+                config.last_login_at = datetime.fromisoformat(last_login)
+
         if status.connected:
             config.last_sync_at = datetime.now(UTC)
         await self._db.flush()

@@ -13,6 +13,7 @@ from .schemas import (
     ProtectionConfigRequest,
     ProtectionConfigResponse,
     ProtectionItemResponse,
+    ProtectionProviderDefinitionResponse,
     ProtectionRuleResponse,
     ProtectionStatusResponse,
     ProtectionStatsResponse,
@@ -20,6 +21,14 @@ from .schemas import (
 from .service import ProtectionService
 
 router = APIRouter(prefix="/api/protection", tags=["protection"])
+
+
+@router.get("/provider", response_model=ProtectionProviderDefinitionResponse)
+async def get_protection_provider_definition(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
+) -> ProtectionProviderDefinitionResponse:
+    return await ProtectionService(db).get_provider_definition()
 
 
 @router.get("/config", response_model=ProtectionConfigResponse)

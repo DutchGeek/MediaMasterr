@@ -209,19 +209,19 @@
 
 <aside class="w-64 bg-card border-r border-border flex flex-col h-full">
   <!-- logo -->
-  <div class="relative h-[72px] px-4 border-b border-border flex items-center">
+  <div class="relative h-[104px] px-4 border-b border-border flex items-center">
     <a
       href="/"
       use:link
       onclick={onNavigate}
-      class="inline-flex items-center gap-3 rounded-lg p-1 -m-1 hover:text-primary"
+      class="inline-flex items-center gap-5 rounded-lg p-1 -m-1 hover:text-primary"
     >
       <img
         src={BRANDING.assets.logo}
         alt={`${BRANDING.applicationName} logo`}
-        class="h-9 w-auto object-contain"
+        class="h-[68px] w-auto object-contain"
       />
-      <h1 class="text-[1.9rem] font-bold leading-none text-foreground hover:text-inherit">
+      <h1 class="text-4xl font-bold leading-none text-foreground hover:text-inherit">
         {BRANDING.applicationName}
       </h1>
     </a>

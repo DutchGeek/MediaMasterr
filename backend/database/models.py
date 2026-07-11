@@ -214,10 +214,17 @@ class ProtectionProviderConfig(Base):
         Integer, primary_key=True, init=False, autoincrement=True
     )
     provider: Mapped[str] = mapped_column(String(64), default="reclaimerr")
+    auth_method: Mapped[str] = mapped_column(String(64), default="web_login")
     base_url: Mapped[str | None] = mapped_column(String(255), default=None)
+    username: Mapped[str | None] = mapped_column(String(255), default=None)
+    password: Mapped[str | None] = mapped_column(String(255), default=None)
     api_key: Mapped[str | None] = mapped_column(String(255), default=None)
+    session_token: Mapped[str | None] = mapped_column(Text, default=None)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
     connection_status: Mapped[str] = mapped_column(String(32), default="disconnected")
+    provider_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(

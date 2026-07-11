@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from .models import (
+    ProtectionProviderDefinition,
     ProtectionItemRecord,
     ProtectionProviderStatus,
     ProtectionRuleRecord,
@@ -14,6 +15,10 @@ class ProtectionProvider(ABC):
     """Common abstraction for all Protection providers."""
 
     provider_name: str
+
+    @abstractmethod
+    def getDefinition(self) -> ProtectionProviderDefinition:
+        """Return provider metadata used to render authentication UI."""
 
     @abstractmethod
     async def connect(self) -> ProtectionProviderStatus:

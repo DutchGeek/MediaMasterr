@@ -4,12 +4,39 @@ from dataclasses import dataclass
 
 
 @dataclass(slots=True)
+class ProtectionAuthFieldDefinition:
+    name: str
+    label: str
+    required: bool
+    secret: bool = False
+
+
+@dataclass(slots=True)
+class ProtectionAuthenticationDefinition:
+    type: str
+    fields: list[ProtectionAuthFieldDefinition]
+
+
+@dataclass(slots=True)
+class ProtectionProviderDefinition:
+    provider: str
+    display_name: str
+    authentication: ProtectionAuthenticationDefinition
+
+
+@dataclass(slots=True)
 class ProtectionProviderStatus:
     connected: bool
+    authenticated: bool
     provider: str
+    auth_method: str
     connection_status: str
+    authentication_status: str
     base_url: str | None
+    provider_version: str | None
+    last_login: str | None
     last_sync: str | None
+    capabilities: list[str]
     message: str | None
 
 
