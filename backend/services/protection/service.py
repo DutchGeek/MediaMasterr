@@ -210,7 +210,7 @@ class ProtectionService:
             config.enabled = True
         provider = self._provider_from_config(config)
         status = await provider.connect()
-        if status.connected and not status.authenticated:
+        if status.connected:
             status = await provider.testConnection()
 
         self._update_config_from_status(config, provider, status)
@@ -261,7 +261,7 @@ class ProtectionService:
         status = await provider.sync()
         self._update_config_from_status(config, provider, status)
 
-        if status.connected:
+        if status.connected and status.authenticated:
             config.last_sync_at = datetime.now(UTC)
         await self._db.flush()
 

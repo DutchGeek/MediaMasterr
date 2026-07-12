@@ -13,6 +13,8 @@
   import type {
     DashboardActivityItem,
     DashboardResponse,
+    ProtectionStatsResponse,
+    ProtectionStatusResponse,
   } from "$lib/types/shared";
   import { capitalizeFirstLetter } from "$lib/utils/strings";
   import JellyfinSVG from "$lib/components/svgs/jellyfin-svg.svelte";
@@ -23,40 +25,12 @@
   import SeerrSVG from "$lib/components/svgs/seerr-svg.svelte";
   import TautulliSVG from "$lib/components/svgs/tautulli-svg.svelte";
 
-  type ProtectionStats = {
-    connected: boolean;
-    provider: string;
-    protected_files: number;
-    protected_size: number;
-    active_rules: number;
-    last_sync: string | null;
-    reclaimable_size?: number | null;
-    reclaimable_bytes?: number | null;
-    reclaimable_total?: number | null;
-    reclaimable_total_bytes?: number | null;
-  };
-
-  type ProtectionStatus = {
-    connected: boolean;
-    authenticated: boolean;
-    provider: string;
-    auth_method: string;
-    connection_status: string;
-    authentication_status: string;
-    base_url: string | null;
-    provider_version: string | null;
-    last_login: string | null;
-    last_sync: string | null;
-    capabilities: string[];
-    message: string | null;
-  };
-
   const PROTECTION_DASHBOARD_REFRESH_EVENT = "mediamasterr:protection:refresh";
 
   // state
   let dashboard = $state<DashboardResponse | null>(null);
-  let protectionStatus = $state<ProtectionStatus | null>(null);
-  let protectionStats = $state<ProtectionStats | null>(null);
+  let protectionStatus = $state<ProtectionStatusResponse | null>(null);
+  let protectionStats = $state<ProtectionStatsResponse | null>(null);
   let loading = $state(true);
   let error = $state("");
   let lastUpdatedAt = $state<string | null>(null);
@@ -123,6 +97,11 @@
         ? "Authenticated"
         : "Not Authenticated"),
   );
+  const protectionServiceLastSyncLabel = $derived.by(() => {
+    nowTick;
+    const lastSync = protectionStatus?.last_sync ?? protectionStats?.last_sync;
+    return lastSync ? formatDistanceToNow(lastSync) : "Not synchronized";
+  });
   const protectionLastSyncLabel = $derived.by(() => {
     nowTick;
     const lastSync = protectionStatus?.last_sync ?? protectionStats?.last_sync;
@@ -278,8 +257,8 @@
   // fetch dashboard stats from API
   const fetchProtectionMetrics = async () => {
     const [statusPayload, statsPayload] = await Promise.all([
-      get_api<ProtectionStatus>("/api/protection/status"),
-      get_api<ProtectionStats>("/api/protection/stats"),
+      get_api<ProtectionStatusResponse>("/api/protection/status"),
+      get_api<ProtectionStatsResponse>("/api/protection/stats"),
     ]);
     protectionStatus = statusPayload;
     protectionStats = statsPayload;
@@ -628,12 +607,46 @@
                 <h2 class="text-lg font-semibold text-foreground mb-4">
                   Services
                 </h2>
-                {#if dashboard.services.length === 0}
+                {#if dashboard.services.length === 0 && !protectionStatus}
                   <p class="text-muted-foreground">No services configured.</p>
                 {:else}
                   <div
                     class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
                   >
+                    <div
+                      class="rounded-md border border-border bg-secondary/20 p-3 min-w-0"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <p
+                          class="inline-flex items-center gap-1 font-medium text-foreground truncate"
+                        >
+                          Reclaimerr Protection
+                        </p>
+                        <span
+                          class={`text-xs px-2 py-0.5 rounded-full ${(protectionStatus?.connected ?? false)
+                            ? "bg-green-500/20 text-green-500"
+                            : "bg-destructive/20 text-destructive"}`}
+                        >
+                          {protectionStatus?.connection_status ?? "disconnected"}
+                        </span>
+                      </div>
+                      <span
+                        class="text-xs text-muted-foreground truncate block mt-1"
+                      >
+                        Provider: {protectionProviderLabel}
+                      </span>
+                      <p class="text-xs text-muted-foreground mt-1 truncate">
+                        Last sync: {protectionServiceLastSyncLabel}
+                      </p>
+                      <p class="text-xs text-muted-foreground mt-1 truncate">
+                        Authentication: {protectionAuthLabel}
+                      </p>
+                      {#if protectionStatus?.provider_version}
+                        <p class="text-xs text-muted-foreground mt-1 truncate">
+                          Version: {protectionStatus.provider_version}
+                        </p>
+                      {/if}
+                    </div>
                     {#each dashboard.services as service (`${service.service_type}:${service.name}`)}
                       {#if service.enabled}
                         {@const ServiceIcon =

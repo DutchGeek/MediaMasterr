@@ -8,6 +8,10 @@
   import { formatDate, formatDistanceToNow } from "$lib/utils/date";
   import { formatFileSize } from "$lib/utils/formatters";
   import ErrorBox from "$lib/components/error-box.svelte";
+  import type {
+    ProtectionStatsResponse,
+    ProtectionStatusResponse,
+  } from "$lib/types/shared";
 
   type ProtectionConfig = {
     provider: string;
@@ -44,30 +48,6 @@
     enabled: boolean;
   };
 
-  type ProtectionStatus = {
-    connected: boolean;
-    authenticated: boolean;
-    provider: string;
-    auth_method: string;
-    connection_status: string;
-    authentication_status: string;
-    base_url: string | null;
-    provider_version: string | null;
-    last_login: string | null;
-    last_sync: string | null;
-    capabilities: string[];
-    message: string | null;
-  };
-
-  type ProtectionStats = {
-    connected: boolean;
-    provider: string;
-    protected_files: number;
-    protected_size: number;
-    active_rules: number;
-    last_sync: string | null;
-  };
-
   type ProtectionRule = {
     rule: string;
     source: string;
@@ -100,8 +80,8 @@
     enabled: true,
   });
 
-  let status = $state<ProtectionStatus | null>(null);
-  let stats = $state<ProtectionStats | null>(null);
+  let status = $state<ProtectionStatusResponse | null>(null);
+  let stats = $state<ProtectionStatsResponse | null>(null);
   let rules = $state<ProtectionRule[]>([]);
   let items = $state<ProtectionItem[]>([]);
 
@@ -111,7 +91,7 @@
 
   const isConnected = $derived(status?.connected ?? false);
   const lastSyncLabel = $derived(
-    status?.last_sync ? formatDistanceToNow(status.last_sync) : "Never",
+    status?.last_sync ? formatDistanceToNow(status.last_sync) : "Not synchronized",
   );
 
   const formatAuthType = (value: string): string =>
@@ -168,8 +148,8 @@
   const loadPageData = async () => {
     const [statusPayload, statsPayload, rulesPayload, itemsPayload] =
       await Promise.all([
-        get_api<ProtectionStatus>("/api/protection/status"),
-        get_api<ProtectionStats>("/api/protection/stats"),
+        get_api<ProtectionStatusResponse>("/api/protection/status"),
+        get_api<ProtectionStatsResponse>("/api/protection/stats"),
         get_api<ProtectionRule[]>("/api/protection/rules"),
         get_api<ProtectionItem[]>("/api/protection/items"),
       ]);
@@ -195,7 +175,7 @@
   const testConnection = async () => {
     testing = true;
     try {
-      status = await post_api<ProtectionStatus>("/api/protection/test", {
+      status = await post_api<ProtectionStatusResponse>("/api/protection/test", {
         provider: getFieldValue("provider"),
         auth_method: getFieldValue("auth_method"),
         base_url: getFieldValue("base_url"),
@@ -237,7 +217,7 @@
   const syncNow = async () => {
     syncing = true;
     try {
-      status = await post_api<ProtectionStatus>("/api/protection/sync", {});
+      status = await post_api<ProtectionStatusResponse>("/api/protection/sync", {});
       await loadPageData();
       notifyDashboardProtectionRefresh();
       error = "";
@@ -402,7 +382,7 @@
         <article class="bg-card rounded-lg border border-border p-5">
           <p class="text-sm text-muted-foreground">Protected Files</p>
           <p class="text-3xl font-bold text-foreground mt-2">
-            {stats?.protected_files ?? 0}
+            {stats?.protected_files ? stats.protected_files : "No protected items"}
           </p>
         </article>
         <article class="bg-card rounded-lg border border-border p-5">
@@ -420,7 +400,7 @@
         <article class="bg-card rounded-lg border border-border p-5">
           <p class="text-sm text-muted-foreground">Last Sync</p>
           <p class="text-2xl font-bold text-foreground mt-2">
-            {stats?.last_sync ? formatDistanceToNow(stats.last_sync) : "Never"}
+            {stats?.last_sync ? formatDistanceToNow(stats.last_sync) : "Not synchronized"}
           </p>
         </article>
       </section>

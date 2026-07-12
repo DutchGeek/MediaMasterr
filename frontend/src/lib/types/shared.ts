@@ -1126,3 +1126,31 @@ export interface DashboardResponse {
   viewer: DashboardViewer;
   media_server_configured: boolean;
 }
+
+export interface ProtectionStatusResponse {
+  connected: boolean;
+  authenticated: boolean;
+  provider: string;
+  auth_method: string;
+  connection_status: string;
+  authentication_status: string;
+  base_url: string | null;
+  provider_version: string | null;
+  last_login: string | null;
+  last_sync: string | null;
+  capabilities: string[];
+  message: string | null;
+}
+
+export interface ProtectionStatsResponse {
+  connected: boolean;
+  provider: string;
+  protected_files: number;
+  protected_size: number;
+  active_rules: number;
+  last_sync: string | null;
+  reclaimable_size?: number | null;
+  reclaimable_bytes?: number | null;
+  reclaimable_total?: number | null;
+  reclaimable_total_bytes?: number | null;
+}

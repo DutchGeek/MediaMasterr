@@ -256,7 +256,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
     async def testConnection(self) -> ProtectionProviderStatus:
         connected, message = await self._ensure_authenticated()
         return ProtectionProviderStatus(
-            connected=self._is_connected(),
+            connected=connected,
             authenticated=connected,
             provider="Reclaimerr",
             auth_method="web_login",
@@ -290,7 +290,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         authenticated, auth_error = await self._ensure_authenticated()
         if not authenticated:
             return ProtectionProviderStatus(
-                connected=True,
+                connected=False,
                 authenticated=False,
                 provider="Reclaimerr",
                 auth_method="web_login",
