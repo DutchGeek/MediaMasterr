@@ -19,6 +19,7 @@
   import EmbySVG from "$lib/components/svgs/emby-svg.svelte";
   import { get_api } from "$lib/api";
   import { BRANDING } from "$lib/branding";
+  import BrandLogo from "$lib/components/brand-logo.svelte";
   import { VERSION } from "$lib/version";
   import { shuffleArray } from "$lib/utils/array";
   import { TOP_RATED_BACKDROPS } from "$lib/misc/tmdb-images";
@@ -396,18 +397,11 @@
 
         <div class="text-center mb-4">
           <div class="mb-4 flex justify-center">
-            <div
-              class="inline-flex items-center gap-5 transition-transform duration-300 {loginHovered
-                ? 'scale-[1.02]'
-                : 'scale-100'}"
-            >
-              <img
-                src={BRANDING.assets.logo}
-                alt={`${BRANDING.applicationName} logo`}
-                class="h-[68px] w-auto object-contain"
-              />
-              <h1 class="text-4xl font-bold leading-none text-foreground">{BRANDING.applicationName}</h1>
-            </div>
+            <BrandLogo
+              class="transition-transform duration-300 {loginHovered ? 'scale-[1.02]' : 'scale-100'}"
+              logoHeightClass="h-[68px]"
+              titleClass="text-4xl font-bold leading-none text-foreground"
+            />
           </div>
         </div>
 

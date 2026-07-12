@@ -3,7 +3,6 @@
   import { get_api, post_api } from "$lib/api";
   import { Button } from "$lib/components/ui/button/index.js";
   import Spinner from "$lib/components/ui/spinner/spinner.svelte";
-  import TestButton from "$lib/components/test-button.svelte";
   import Save from "@lucide/svelte/icons/save";
 
   type TestStatus = "idle" | "loading" | "success" | "error";
@@ -111,7 +110,7 @@
       base_url: configPayload.base_url,
       username: configPayload.username,
       password: "",
-      enabled: configPayload.enabled,
+      enabled: true,
     };
     status = statusPayload;
   };
@@ -125,7 +124,7 @@
         base_url: getFieldValue("base_url"),
         username: getFieldValue("username"),
         password: getFieldValue("password"),
-        enabled: Boolean(form.enabled),
+        enabled: true,
       });
       message = status.message ?? "Authenticated";
       error = "";
@@ -146,7 +145,7 @@
         base_url: getFieldValue("base_url"),
         username: getFieldValue("username"),
         password: getFieldValue("password"),
-        enabled: Boolean(form.enabled),
+        enabled: true,
       });
       form = { ...form, password: "" };
       status = await get_api<ProtectionStatus>("/api/protection/status");
@@ -179,9 +178,9 @@
   });
 </script>
 
-<div class="space-y-4">
+<div class="space-y-3">
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <div class="space-y-4 rounded-lg border border-border bg-card p-4">
+    <div class="space-y-4 rounded-lg border border-border bg-card p-4 h-full">
       <h3 class="text-sm font-semibold text-foreground">Protection Provider</h3>
       <label class="space-y-1 block">
         <span class="text-sm text-muted-foreground">Provider</span>
@@ -216,7 +215,7 @@
       {/each}
     </div>
 
-    <div class="space-y-3 rounded-lg border border-border bg-card p-4">
+    <div class="space-y-3 rounded-lg border border-border bg-card p-4 h-full">
       <h3 class="text-sm font-semibold text-foreground">Connection Status</h3>
       <div class="grid grid-cols-2 gap-2 text-sm">
         <span class="text-muted-foreground">Provider</span>
@@ -243,15 +242,12 @@
   </div>
 
   <div class="flex flex-wrap items-center gap-3">
-    <TestButton
-      onclick={testConnection}
-      disabled={saving || syncing}
-      status={testStatus}
-      class="cursor-pointer"
-      size="default"
-    >
+    <Button onclick={testConnection} disabled={saving || syncing} class="cursor-pointer gap-2">
+      {#if testStatus === "loading"}
+        <Spinner class="size-4" />
+      {/if}
       Test Connection
-    </TestButton>
+    </Button>
     <Button onclick={save} disabled={saving || syncing} class="cursor-pointer gap-2">
       {#if saving}
         <Spinner class="size-4" />

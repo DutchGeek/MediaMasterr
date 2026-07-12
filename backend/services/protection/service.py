@@ -45,7 +45,7 @@ class ProtectionService:
             password=None,
             api_key=None,
             session_token=None,
-            enabled=False,
+            enabled=True,
             authenticated=False,
             connection_status="disconnected",
             provider_version=None,
@@ -92,7 +92,7 @@ class ProtectionService:
             authenticated=False,
             provider_version=None,
             last_login=None,
-            enabled=req.enabled,
+            enabled=True,
             last_sync=None,
         )
 
@@ -120,8 +120,45 @@ class ProtectionService:
             message=status.message,
         )
 
+    @staticmethod
+    def _update_config_from_status(
+        config: ProtectionProviderConfig,
+        provider: ProtectionProvider,
+        status: ProtectionProviderStatus,
+    ) -> None:
+        config.connection_status = status.connection_status
+        config.authenticated = status.authenticated
+        config.provider_version = status.provider_version
+        config.last_error = None if status.connected else status.message
+        if status.last_login:
+            config.last_login_at = datetime.fromisoformat(status.last_login)
+
+        runtime = None
+        get_runtime_state = getattr(provider, "get_runtime_auth_state", None)
+        if callable(get_runtime_state):
+            runtime = get_runtime_state()
+        if not isinstance(runtime, dict):
+            return
+
+        token = runtime.get("session_token")
+        if isinstance(token, str) and token.strip():
+            config.session_token = fer_encrypt(token)
+        elif token is None:
+            config.session_token = None
+
+        provider_version = runtime.get("provider_version")
+        if isinstance(provider_version, str):
+            config.provider_version = provider_version or None
+
+        last_login = runtime.get("last_login")
+        if isinstance(last_login, str) and last_login:
+            config.last_login_at = datetime.fromisoformat(last_login)
+
     async def get_config(self) -> ProtectionConfigResponse:
         config = await self._get_or_create_config()
+        if not config.enabled:
+            config.enabled = True
+            await self._db.flush()
         return ProtectionConfigResponse(
             provider="reclaimerr",
             auth_method=config.auth_method,
@@ -145,7 +182,7 @@ class ProtectionService:
         next_username = req.username.strip() or None
         credentials_changed = next_username != (config.username or None)
         config.username = next_username
-        config.enabled = req.enabled
+        config.enabled = True
 
         next_password = req.password.strip()
         if next_password:
@@ -160,23 +197,22 @@ class ProtectionService:
             config.provider_version = None
 
         provider = self._provider_from_config(config)
-        status = await provider.connect()
-        config.connection_status = status.connection_status
-        config.authenticated = status.authenticated
-        config.last_error = None if status.connected else status.message
+        status = await provider.testConnection()
+        self._update_config_from_status(config, provider, status)
 
         await self._db.flush()
         return await self.get_config()
 
     async def get_status(self) -> ProtectionStatusResponse:
         config = await self._get_or_create_config()
+        if not config.enabled:
+            config.enabled = True
         provider = self._provider_from_config(config)
         status = await provider.connect()
+        if status.connected and not status.authenticated:
+            status = await provider.testConnection()
 
-        config.connection_status = status.connection_status
-        config.authenticated = status.authenticated
-        config.provider_version = status.provider_version
-        config.last_error = None if status.connected else status.message
+        self._update_config_from_status(config, provider, status)
         await self._db.flush()
 
         return self._to_status_response(status)
@@ -187,34 +223,11 @@ class ProtectionService:
 
     async def sync(self) -> ProtectionStatusResponse:
         config = await self._get_or_create_config()
+        if not config.enabled:
+            config.enabled = True
         provider = self._provider_from_config(config)
         status = await provider.sync()
-
-        config.connection_status = status.connection_status
-        config.authenticated = status.authenticated
-        config.provider_version = status.provider_version
-        config.last_error = None if status.connected else status.message
-        if status.last_login:
-            config.last_login_at = datetime.fromisoformat(status.last_login)
-
-        runtime = None
-        get_runtime_state = getattr(provider, "get_runtime_auth_state", None)
-        if callable(get_runtime_state):
-            runtime = get_runtime_state()
-        if isinstance(runtime, dict):
-            token = runtime.get("session_token")
-            if isinstance(token, str) and token.strip():
-                config.session_token = fer_encrypt(token)
-            elif token is None:
-                config.session_token = None
-
-            provider_version = runtime.get("provider_version")
-            if isinstance(provider_version, str):
-                config.provider_version = provider_version or None
-
-            last_login = runtime.get("last_login")
-            if isinstance(last_login, str) and last_login:
-                config.last_login_at = datetime.fromisoformat(last_login)
+        self._update_config_from_status(config, provider, status)
 
         if status.connected:
             config.last_sync_at = datetime.now(UTC)

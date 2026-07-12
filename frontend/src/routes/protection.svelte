@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { get_api, post_api } from "$lib/api";
-  import { BRANDING } from "$lib/branding";
   import { VERSION } from "$lib/version";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import Spinner from "$lib/components/ui/spinner/spinner.svelte";
+  import BrandLogo from "$lib/components/brand-logo.svelte";
   import { formatDate, formatDistanceToNow } from "$lib/utils/date";
   import { formatFileSize } from "$lib/utils/formatters";
   import ErrorBox from "$lib/components/error-box.svelte";
@@ -152,7 +154,7 @@
       base_url: configPayload.base_url,
       username: configPayload.username,
       password: "",
-      enabled: configPayload.enabled,
+      enabled: true,
     };
   };
 
@@ -192,7 +194,7 @@
         base_url: getFieldValue("base_url"),
         username: getFieldValue("username"),
         password: getFieldValue("password"),
-        enabled: Boolean(form.enabled),
+        enabled: true,
       });
       error = "";
     } catch (e: any) {
@@ -211,7 +213,7 @@
         base_url: getFieldValue("base_url"),
         username: getFieldValue("username"),
         password: getFieldValue("password"),
-        enabled: Boolean(form.enabled),
+        enabled: true,
       });
       form = { ...form, password: "" };
       await loadPageData();
@@ -247,11 +249,7 @@
       class="rounded-lg border border-border bg-card p-5 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
     >
       <div class="flex items-center gap-3">
-        <img
-          src={BRANDING.assets.logo}
-          alt={`${BRANDING.applicationName} logo`}
-          class="h-10 w-auto object-contain"
-        />
+        <BrandLogo showTitle={false} logoHeightClass="h-10" />
         <div>
           <h1 class="text-3xl font-bold text-foreground">Protection</h1>
           <p class="text-sm text-muted-foreground">
@@ -289,11 +287,11 @@
         <p class="mt-3">Loading Protection...</p>
       </div>
     {:else}
-      <section class="rounded-lg border border-border bg-card p-5 md:p-6 space-y-4">
+      <section class="rounded-lg border border-border bg-card p-5 md:p-6 space-y-3">
         <h2 class="text-lg font-semibold text-foreground">Settings</h2>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="space-y-4 rounded-lg border border-border bg-card p-4">
+          <div class="space-y-4 rounded-lg border border-border bg-card p-4 h-full">
             <h3 class="text-sm font-semibold text-foreground">Protection Provider</h3>
             <label class="space-y-2 block">
               <span class="text-sm text-muted-foreground">Provider</span>
@@ -328,7 +326,7 @@
             {/each}
           </div>
 
-          <div class="space-y-3 rounded-lg border border-border bg-card p-4">
+          <div class="space-y-3 rounded-lg border border-border bg-card p-4 h-full">
             <h3 class="text-sm font-semibold text-foreground">Connection Status</h3>
             <div class="grid grid-cols-2 gap-2 text-sm">
               <span class="text-muted-foreground">Connection</span>
@@ -360,28 +358,30 @@
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            onclick={testConnection}
-            disabled={testing}
-            class="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 disabled:opacity-60"
-          >
-            {testing ? "Connecting..." : "Test Connection"}
-          </button>
-          <button
-            onclick={saveSettings}
-            disabled={saving}
-            class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-          <button
+        <div class="flex flex-wrap items-center gap-2">
+          <Button onclick={testConnection} disabled={testing || saving || syncing} variant="secondary" class="cursor-pointer gap-2">
+            {#if testing}
+              <Spinner class="size-4" />
+            {/if}
+            Test Connection
+          </Button>
+          <Button onclick={saveSettings} disabled={saving || testing || syncing} class="cursor-pointer gap-2">
+            {#if saving}
+              <Spinner class="size-4" />
+            {/if}
+            Save
+          </Button>
+          <Button
             onclick={syncNow}
-            disabled={syncing || !isConnected}
-            class="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-60"
+            disabled={syncing || !isConnected || testing || saving}
+            variant="outline"
+            class="cursor-pointer gap-2"
           >
-            {syncing ? "Syncing..." : "Sync Now"}
-          </button>
+            {#if syncing}
+              <Spinner class="size-4" />
+            {/if}
+            Sync Now
+          </Button>
           <p class="text-xs text-muted-foreground">
             Last sync: {status?.last_sync ? formatDate(status.last_sync) : "Never"}
           </p>

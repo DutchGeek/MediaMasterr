@@ -27,7 +27,7 @@
   import { createFilterState } from "$lib/utils/pagination";
   import { uiIndicators } from "$lib/stores/ui-indicators";
   import { hasPageAccess } from "$lib/page-access";
-  import { BRANDING } from "$lib/branding";
+  import BrandLogo from "$lib/components/brand-logo.svelte";
 
   // optional callback to close sidebar on mobile after navigation
   let { onNavigate = () => {} }: { onNavigate?: () => void } = $props();
@@ -216,14 +216,10 @@
       onclick={onNavigate}
       class="inline-flex items-center gap-5 rounded-lg p-1 -m-1 hover:text-primary"
     >
-      <img
-        src={BRANDING.assets.logo}
-        alt={`${BRANDING.applicationName} logo`}
-        class="h-[68px] w-auto object-contain"
+      <BrandLogo
+        logoHeightClass="h-[68px]"
+        titleClass="text-4xl font-bold leading-none text-foreground hover:text-inherit"
       />
-      <h1 class="text-4xl font-bold leading-none text-foreground hover:text-inherit">
-        {BRANDING.applicationName}
-      </h1>
     </a>
     <!-- theme toggle -->
     <ThemeToggle class="absolute top-1 right-1" />
