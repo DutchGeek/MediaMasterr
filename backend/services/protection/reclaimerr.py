@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from http import HTTPStatus
-import json
 from urllib.parse import urlsplit
 
 import niquests
@@ -160,6 +159,43 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                 if isinstance(nested, list):
                     return [item for item in nested if isinstance(item, dict)]
         return []
+
+    @staticmethod
+    def _rule_status_from_payload(item: dict[str, object]) -> str:
+        enabled = item.get("enabled")
+        if isinstance(enabled, bool):
+            return "Active" if enabled else "Disabled"
+
+        raw_status = item.get("status")
+        if isinstance(raw_status, str) and raw_status.strip():
+            lowered = raw_status.strip().lower()
+            if lowered in {"active", "enabled", "true"}:
+                return "Active"
+            if lowered in {"disabled", "inactive", "false"}:
+                return "Disabled"
+            return raw_status
+
+        return "Active"
+
+    @staticmethod
+    def _item_status_from_payload(item: dict[str, object]) -> str:
+        raw_status = item.get("status")
+        if isinstance(raw_status, str) and raw_status.strip():
+            return raw_status
+
+        permanent = bool(item.get("permanent"))
+        expires_at = item.get("expires_at") or item.get("expiration")
+        if permanent or expires_at in (None, "", "Never"):
+            return "Active"
+
+        if isinstance(expires_at, str):
+            parsed = ReclaimerrProtectionProvider._parse_datetime(expires_at)
+            if parsed is None:
+                return "Unknown"
+            now = datetime.now(UTC)
+            return "Active" if parsed > now else "Expired"
+
+        return "Unknown"
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:
@@ -347,7 +383,13 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                 return
             if isinstance(payload, dict):
                 version = payload.get("version")
-                self._provider_version = str(version).strip() if version else None
+                if version:
+                    normalized = str(version).strip()
+                    self._provider_version = (
+                        None if normalized.startswith("<module ") else normalized
+                    )
+                else:
+                    self._provider_version = None
         except Exception:
             self._provider_version = None
 
@@ -512,6 +554,31 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                 "Protection sync database writes: provider_mode=remote records_written=0"
             )
             return remote_status
+
+        # Reclaimerr v0.2.x no longer exposes /api/protection/sync; use a
+        # compatibility refresh that validates auth and rehydrates remote views.
+        compatibility_rules = await self.getProtectionRules()
+        compatibility_items = await self.getProtectedItems()
+        if compatibility_rules or compatibility_items:
+            self._last_sync = datetime.now(UTC)
+            return ProtectionProviderStatus(
+                connected=True,
+                authenticated=True,
+                provider="Reclaimerr",
+                auth_method="web_login",
+                connection_status="connected",
+                authentication_status="authenticated",
+                base_url=self._base_url,
+                provider_version=self._provider_version,
+                last_login=to_utc_isoformat(self._last_login),
+                last_sync=to_utc_isoformat(self._last_sync),
+                capabilities=self._capabilities(),
+                message=(
+                    "Synchronization completed via compatibility mode "
+                    f"(rules={len(compatibility_rules)} items={len(compatibility_items)})"
+                ),
+            )
+
         LOG.warning(
             "Protection remote sync unavailable, falling back to local scan: "
             f"reason={remote_error}"
@@ -596,6 +663,36 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         "Remote protection rules unavailable, using local fallback: "
                         f"auth_error={auth_error}"
                     )
+
+                    response, payload, _json_ok = await self._request_with_trace(
+                        session,
+                        "GET",
+                        f"{self._base_url}/api/rules",
+                        trace_label="remote-rules-compat",
+                        timeout=20,
+                    )
+                    compat_rules = self._as_payload_list(payload, ("rules", "items", "data", "result"))
+                    if response is not None and response.status_code == HTTPStatus.OK and compat_rules:
+                        remote_rows: list[ProtectionRuleRecord] = []
+                        for item in compat_rules:
+                            remote_rows.append(
+                                ProtectionRuleRecord(
+                                    rule=str(item.get("rule") or item.get("name") or "Unknown"),
+                                    source=str(item.get("source") or "Reclaimerr"),
+                                    protected_items=int(item.get("protected_items") or 0),
+                                    status=self._rule_status_from_payload(item),
+                                    last_updated=(
+                                        str(item.get("last_updated") or item.get("updated_at"))
+                                        if (item.get("last_updated") is not None or item.get("updated_at") is not None)
+                                        else None
+                                    ),
+                                )
+                            )
+                        LOG.debug(
+                            "Protection rules discovered from remote compatibility endpoint: "
+                            f"total_rules={len(remote_rows)}"
+                        )
+                        return remote_rows
                 finally:
                     await session.close()
 
@@ -704,6 +801,64 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         "Remote protected items unavailable, using local fallback: "
                         f"auth_error={auth_error}"
                     )
+
+                    compatibility_items: list[dict[str, object]] = []
+                    page = 1
+                    while True:
+                        response, payload, _json_ok = await self._request_with_trace(
+                            session,
+                            "GET",
+                            f"{self._base_url}/api/protected?page={page}&per_page=200",
+                            trace_label=f"remote-items-compat-page-{page}",
+                            timeout=20,
+                        )
+                        if response is None or response.status_code != HTTPStatus.OK:
+                            break
+
+                        payload_dict = payload if isinstance(payload, dict) else {}
+                        page_items = payload_dict.get("items")
+                        if not isinstance(page_items, list):
+                            break
+
+                        compatibility_items.extend(
+                            [entry for entry in page_items if isinstance(entry, dict)]
+                        )
+
+                        total_pages = payload_dict.get("total_pages")
+                        if isinstance(total_pages, int) and page >= total_pages:
+                            break
+                        if len(page_items) < 200:
+                            break
+                        page += 1
+
+                    if compatibility_items:
+                        remote_rows = [
+                            ProtectionItemRecord(
+                                path=str(
+                                    item.get("path")
+                                    or item.get("media_title")
+                                    or item.get("title")
+                                    or "Unknown"
+                                ),
+                                reason=str(item.get("reason") or "Protected by policy"),
+                                provider=str(item.get("provider") or "Reclaimerr"),
+                                expiration=(
+                                    str(item.get("expiration") or item.get("expires_at"))
+                                    if (
+                                        item.get("expiration") is not None
+                                        or item.get("expires_at") is not None
+                                    )
+                                    else None
+                                ),
+                                status=self._item_status_from_payload(item),
+                            )
+                            for item in compatibility_items
+                        ]
+                        LOG.debug(
+                            "Protected files discovered from remote compatibility endpoint: "
+                            f"total_items={len(remote_rows)}"
+                        )
+                        return remote_rows
                 finally:
                     await session.close()
 
@@ -775,6 +930,56 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         "Remote protection stats unavailable, using local fallback: "
                         f"auth_error={auth_error}"
                     )
+
+                    # Reclaimerr v0.2.x does not expose /api/protection/stats;
+                    # derive live stats from remote /api/rules + /api/protected.
+                    response_rules, payload_rules, _ = await self._request_with_trace(
+                        session,
+                        "GET",
+                        f"{self._base_url}/api/rules",
+                        trace_label="remote-stats-compat-rules",
+                        timeout=20,
+                    )
+                    response_items, payload_items, _ = await self._request_with_trace(
+                        session,
+                        "GET",
+                        f"{self._base_url}/api/protected?page=1&per_page=200",
+                        trace_label="remote-stats-compat-items",
+                        timeout=20,
+                    )
+                    if (
+                        response_rules is not None
+                        and response_rules.status_code == HTTPStatus.OK
+                        and response_items is not None
+                        and response_items.status_code == HTTPStatus.OK
+                    ):
+                        rules_payload = self._as_payload_list(
+                            payload_rules,
+                            ("rules", "items", "data", "result"),
+                        )
+                        items_payload = []
+                        if isinstance(payload_items, dict):
+                            raw_items = payload_items.get("items")
+                            if isinstance(raw_items, list):
+                                items_payload = [entry for entry in raw_items if isinstance(entry, dict)]
+
+                        active_rules = sum(
+                            1 for rule in rules_payload if self._rule_status_from_payload(rule) == "Active"
+                        )
+                        stats = ProtectionStatistics(
+                            connected=True,
+                            provider="Reclaimerr",
+                            protected_files=len(items_payload),
+                            protected_size=0,
+                            active_rules=active_rules,
+                            last_sync=to_utc_isoformat(self._last_sync),
+                        )
+                        LOG.debug(
+                            "Protection statistics discovered from remote compatibility endpoint: "
+                            f"protected_files={stats.protected_files} protected_size={stats.protected_size} "
+                            f"active_rules={stats.active_rules}"
+                        )
+                        return stats
                 finally:
                     await session.close()
 

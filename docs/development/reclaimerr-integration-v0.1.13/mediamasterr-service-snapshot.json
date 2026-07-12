@@ -1,0 +1,146 @@
+{
+  "status": {
+    "connected": true,
+    "authenticated": true,
+    "provider": "Reclaimerr",
+    "auth_method": "web_login",
+    "connection_status": "connected",
+    "authentication_status": "authenticated",
+    "base_url": "http://100.66.158.40:8000",
+    "provider_version": null,
+    "last_login": "2026-07-12T15:08:04.385244+00:00",
+    "last_sync": null,
+    "capabilities": [
+      "Rules",
+      "Protected Items",
+      "Statistics"
+    ],
+    "message": "Authenticated"
+  },
+  "stats": {
+    "connected": true,
+    "provider": "Reclaimerr",
+    "protected_files": 99,
+    "protected_size": 0,
+    "active_rules": 6,
+    "last_sync": null
+  },
+  "rules_count": 6,
+  "items_count": 99,
+  "rules_sample": [
+    {
+      "rule": "Anime Series - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T03:59:52"
+    },
+    {
+      "rule": "Movies - American - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T03:58:42"
+    },
+    {
+      "rule": "TVShows - American - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T04:01:46"
+    },
+    {
+      "rule": "TVShows - Filipino - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T04:02:27"
+    },
+    {
+      "rule": "TVShows - Kids - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T04:02:52"
+    },
+    {
+      "rule": "TVShows - Korean - WATCHED",
+      "source": "Reclaimerr",
+      "protected_items": 0,
+      "status": "Active",
+      "last_updated": "2026-06-22T04:03:17"
+    }
+  ],
+  "items_sample": [
+    {
+      "path": "X2: X-Men United",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men: The Last Stand",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men: First Class",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men: Days of Future Past",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men: Dark Phoenix",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men: Apocalypse",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men Origins: Wolverine",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "X-Men",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "Wonder Woman",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    },
+    {
+      "path": "Venom: The Last Dance",
+      "reason": "Admin decision",
+      "provider": "Reclaimerr",
+      "expiration": null,
+      "status": "Active"
+    }
+  ]
+}

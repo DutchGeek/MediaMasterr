@@ -1,0 +1,78 @@
+{
+  "responses": [
+    {
+      "method": "POST",
+      "endpoint": "/api/protection/sync",
+      "http_status": 503,
+      "response_headers": {
+        "content-length": "27",
+        "content-type": "application/json"
+      },
+      "json_parse_error": null,
+      "json_response": {
+        "detail": "setup_required"
+      },
+      "parsed_record_count": null
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/protection/status",
+      "http_status": 503,
+      "response_headers": {
+        "content-length": "27",
+        "content-type": "application/json"
+      },
+      "json_parse_error": null,
+      "json_response": {
+        "detail": "setup_required"
+      },
+      "parsed_record_count": null
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/protection/stats",
+      "http_status": 503,
+      "response_headers": {
+        "content-length": "27",
+        "content-type": "application/json"
+      },
+      "json_parse_error": null,
+      "json_response": {
+        "detail": "setup_required"
+      },
+      "parsed_record_count": {
+        "protected_files": null,
+        "active_rules": null,
+        "protected_size": null
+      }
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/protection/rules",
+      "http_status": 503,
+      "response_headers": {
+        "content-length": "27",
+        "content-type": "application/json"
+      },
+      "json_parse_error": null,
+      "json_response": {
+        "detail": "setup_required"
+      },
+      "parsed_record_count": 0
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/protection/items",
+      "http_status": 503,
+      "response_headers": {
+        "content-length": "27",
+        "content-type": "application/json"
+      },
+      "json_parse_error": null,
+      "json_response": {
+        "detail": "setup_required"
+      },
+      "parsed_record_count": 0
+    }
+  ]
+}
