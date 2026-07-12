@@ -263,3 +263,86 @@ async def test_protection_save_config_persists_authenticated_runtime_state(
     assert config.enabled is True
     assert config.session_token is not None
     assert fer_decrypt(config.session_token) == "session=abc123"
+
+
+@pytest.mark.anyio
+async def test_protection_test_connection_uses_saved_password_when_blank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def fake_test_connection(self: ReclaimerrProtectionProvider) -> ProtectionProviderStatus:
+        if self._password != "stored-secret":
+            return ProtectionProviderStatus(
+                connected=False,
+                authenticated=False,
+                provider="Reclaimerr",
+                auth_method="web_login",
+                connection_status="error",
+                authentication_status="not_authenticated",
+                base_url=self._base_url,
+                provider_version=None,
+                last_login=None,
+                last_sync=None,
+                capabilities=["Rules", "Protected Items", "Statistics"],
+                message="URL, username, and password are required",
+            )
+        return ProtectionProviderStatus(
+            connected=True,
+            authenticated=True,
+            provider="Reclaimerr",
+            auth_method="web_login",
+            connection_status="connected",
+            authentication_status="authenticated",
+            base_url=self._base_url,
+            provider_version="0.1.11",
+            last_login=datetime.now(UTC).isoformat(),
+            last_sync=None,
+            capabilities=["Rules", "Protected Items", "Statistics"],
+            message="Authenticated",
+        )
+
+    monkeypatch.setattr(
+        ReclaimerrProtectionProvider,
+        "testConnection",
+        fake_test_connection,
+    )
+
+    async with session_maker() as db:
+        db.add(
+            ProtectionProviderConfig(
+                provider="reclaimerr",
+                auth_method="web_login",
+                base_url="https://reclaimerr.local",
+                username="admin",
+                password=fer_encrypt("stored-secret"),
+                enabled=True,
+            )
+        )
+        await db.commit()
+
+        service = ProtectionService(db)
+        status = await service.test_connection(
+            ProtectionConfigRequest(
+                provider="reclaimerr",
+                auth_method="web_login",
+                base_url="https://reclaimerr.local",
+                username="admin",
+                password="",
+                enabled=True,
+            )
+        )
+
+    await engine.dispose()
+
+    assert status.connected is True
+    assert status.authenticated is True
+    assert status.connection_status == "connected"

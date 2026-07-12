@@ -6,6 +6,7 @@
   import { ModeWatcher } from "mode-watcher";
   import Sidebar from "$lib/components/sidebar.svelte";
   import { BRANDING } from "$lib/branding";
+  import BrandLogo from "$lib/components/brand-logo.svelte";
   import { DEFAULT_THEME_FAMILY } from "$lib/theme-families";
   import { themeFamily } from "$lib/stores/theme-family";
   import AuthComplete from "./routes/auth-complete.svelte";
@@ -163,7 +164,7 @@
     <div class="flex h-screen bg-background">
       <!-- mobile header bar -->
       <div
-        class="lg:hidden fixed top-0 left-0 right-0 z-30 bg-card border-b border-border px-4 py-3 flex
+        class="lg:hidden fixed top-0 left-0 right-0 z-30 h-16 bg-card border-b border-border px-4 flex
           items-center gap-3"
       >
         <button
@@ -177,14 +178,7 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <img
-          src={BRANDING.assets.logo}
-          alt={`${BRANDING.applicationName} logo`}
-          class="h-9 w-auto object-contain"
-        />
-        <h1 class="font-bold text-[1.9rem] leading-none text-foreground">
-          {BRANDING.applicationName}
-        </h1>
+        <BrandLogo logoHeightClass="h-9" titleClass="font-bold text-2xl leading-none text-foreground" />
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]

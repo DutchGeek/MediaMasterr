@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.encryption import fer_decrypt, fer_encrypt
+from backend.core.logger import LOG
 from backend.database.models import ProtectionProviderConfig
 
 from .models import ProtectionProviderStatus, ProtectionStatistics
@@ -218,8 +219,39 @@ class ProtectionService:
         return self._to_status_response(status)
 
     async def test_connection(self, req: ProtectionConfigRequest) -> ProtectionStatusResponse:
-        provider = self._provider_from_request(req)
-        return self._to_status_response(await provider.testConnection())
+        config = await self._get_or_create_config()
+        resolved_password = req.password.strip()
+        if not resolved_password and config.password:
+            resolved_password = fer_decrypt(config.password)
+
+        merged_request = ProtectionConfigRequest(
+            provider=req.provider,
+            auth_method=req.auth_method,
+            base_url=req.base_url.strip() or (config.base_url or ""),
+            username=req.username.strip() or (config.username or ""),
+            password=resolved_password,
+            enabled=True,
+        )
+
+        LOG.info(
+            "Protection test connection request: "
+            f"provider={merged_request.provider} "
+            f"auth_method={merged_request.auth_method} "
+            f"base_url={merged_request.base_url} "
+            f"username={merged_request.username} "
+            f"password_provided={bool(merged_request.password)}"
+        )
+
+        provider = self._provider_from_request(merged_request)
+        status = await provider.testConnection()
+        LOG.info(
+            "Protection test connection response: "
+            f"provider={status.provider} "
+            f"status={status.connection_status} "
+            f"authenticated={status.authenticated} "
+            f"message={status.message}"
+        )
+        return self._to_status_response(status)
 
     async def sync(self) -> ProtectionStatusResponse:
         config = await self._get_or_create_config()

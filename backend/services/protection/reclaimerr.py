@@ -8,6 +8,7 @@ import niquests
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.logger import LOG
 from backend.core.rule_engine import RULE_OUTCOME_PROTECT, normalize_rule_outcome
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database.models import (
@@ -103,14 +104,26 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
     async def _login(self, session: niquests.AsyncSession) -> tuple[bool, str | None]:
         if not self._base_url or not self._username or not self._password:
             return False, "URL, username, and password are required"
+        url = f"{self._base_url}/api/auth/login"
+        LOG.info(
+            "Reclaimerr auth request: "
+            f"method=POST url={url} payload_format=json username={self._username}"
+        )
         try:
             response = await session.post(
-                f"{self._base_url}/api/auth/login",
+                url,
                 json={"username": self._username, "password": self._password},
                 timeout=20,
             )
         except Exception as exc:
+            LOG.warning(f"Reclaimerr auth request failed: {exc}")
             return False, f"Unable to reach provider: {exc}"
+
+        LOG.info(
+            "Reclaimerr auth response: "
+            f"status={response.status_code} "
+            f"set_cookie={bool(response.headers.get('set-cookie'))}"
+        )
 
         if response.status_code != HTTPStatus.OK:
             message = None
@@ -121,6 +134,11 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                     message = detail
             except Exception:
                 message = None
+            LOG.warning(
+                "Reclaimerr authentication failed: "
+                f"status={response.status_code} "
+                f"message={message or 'Authentication failed'}"
+            )
             return False, message or "Authentication failed"
 
         self._session_token = self._serialize_session(session)

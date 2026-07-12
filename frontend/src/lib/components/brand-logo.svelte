@@ -1,6 +1,5 @@
 <script lang="ts">
   import { BRANDING } from "$lib/branding";
-  import logoAsset from "$lib/assets/logo.png";
 
   let {
     class: className = "",
@@ -17,7 +16,7 @@
 
 <div class={`inline-flex items-center gap-5 ${className}`.trim()}>
   <img
-    src={logoAsset}
+    src={BRANDING.assets.logo}
     alt={`${BRANDING.applicationName} logo`}
     class={`${logoHeightClass} w-auto object-contain`.trim()}
   />
