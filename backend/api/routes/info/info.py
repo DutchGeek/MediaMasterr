@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core import __version__
+from backend.core.__version__ import __version__, program_name, program_url
 from backend.core.auth import get_current_user, has_permission
 from backend.database import get_db
 from backend.database.models import (
@@ -90,8 +90,8 @@ async def get_version() -> dict[str, str]:
     """Get application version."""
     return {
         "version": str(__version__),
-        "program": __version__.program_name,
-        "url": __version__.program_url,
+        "program": program_name,
+        "url": program_url,
     }
 
 

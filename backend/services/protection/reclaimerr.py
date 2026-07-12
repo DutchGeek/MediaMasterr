@@ -102,15 +102,6 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         jar = session.cookies.get_dict()
         return "; ".join(f"{k}={v}" for k, v in jar.items() if k and v)
 
-    @staticmethod
-    def _response_snippet(response: niquests.Response) -> str:
-        try:
-            body = response.text or ""
-        except Exception as exc:
-            return f"<unavailable: {exc}>"
-        body = body.strip()
-        return body[:500] if body else "<empty>"
-
     async def _request_with_trace(
         self,
         session: niquests.AsyncSession,
@@ -120,7 +111,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         trace_label: str,
         **kwargs,
     ) -> tuple[niquests.Response | None, object | None, bool]:
-        LOG.info(
+        LOG.debug(
             "Protection provider request: "
             f"label={trace_label} method={method.upper()} url={url}"
         )
@@ -142,12 +133,33 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
             payload = None
             json_ok = False
 
-        LOG.info(
+        LOG.debug(
             "Protection provider response: "
             f"label={trace_label} method={method.upper()} url={url} status={response.status_code} "
-            f"json_ok={json_ok} body_snippet={json.dumps(self._response_snippet(response))}"
+            f"json_ok={json_ok} response_size={len(response.content or b'')}"
         )
         return response, payload, json_ok
+
+    @staticmethod
+    def _as_payload_dict(payload: object, keys: tuple[str, ...]) -> dict[str, object] | None:
+        if isinstance(payload, dict):
+            for key in keys:
+                nested = payload.get(key)
+                if isinstance(nested, dict):
+                    return nested
+            return payload
+        return None
+
+    @staticmethod
+    def _as_payload_list(payload: object, keys: tuple[str, ...]) -> list[dict[str, object]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            for key in keys:
+                nested = payload.get(key)
+                if isinstance(nested, list):
+                    return [item for item in nested if isinstance(item, dict)]
+        return []
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:
@@ -257,9 +269,10 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                     payload,
                     f"Provider returned status {response.status_code}",
                 )
-            if not isinstance(payload, dict):
+            payload_dict = self._as_payload_dict(payload, ("status", "data", "result"))
+            if payload_dict is None:
                 return None, "Provider returned non-JSON status payload"
-            return self._status_from_remote_payload(payload), None
+            return self._status_from_remote_payload(payload_dict), None
         finally:
             await session.close()
 
@@ -267,7 +280,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         if not self._base_url or not self._username or not self._password:
             return False, "URL, username, and password are required"
         url = f"{self._base_url}/api/auth/login"
-        LOG.info(
+        LOG.debug(
             "Reclaimerr auth request: "
             f"method=POST url={url} payload_format=json username={self._username}"
         )
@@ -282,7 +295,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         if response is None:
             return False, "Unable to reach provider"
 
-        LOG.info(
+        LOG.debug(
             "Reclaimerr auth response: "
             f"status={response.status_code} "
             f"set_cookie={bool(response.headers.get('set-cookie'))} "
@@ -308,7 +321,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         self._session_token = self._serialize_session(session)
         self._authenticated = bool(self._session_token)
         self._last_login = datetime.now(UTC)
-        LOG.info(
+        LOG.debug(
             "Protection auth session established: "
             f"authenticated={self._authenticated} session_cookie_keys={list(session.cookies.get_dict().keys())}"
         )
@@ -495,7 +508,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
             timeout=60,
         )
         if remote_status is not None:
-            LOG.info(
+            LOG.debug(
                 "Protection sync database writes: provider_mode=remote records_written=0"
             )
             return remote_status
@@ -506,7 +519,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
 
         protected_before = await self._db.scalar(select(func.count(ProtectedMedia.id)))
         rules_before = await self._db.scalar(select(func.count(ReclaimRule.id)))
-        LOG.info(
+        LOG.debug(
             "Protection sync local DB before scan: "
             f"protected_media={int(protected_before or 0)} rules={int(rules_before or 0)}"
         )
@@ -515,7 +528,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
 
         protected_after = await self._db.scalar(select(func.count(ProtectedMedia.id)))
         rules_after = await self._db.scalar(select(func.count(ReclaimRule.id)))
-        LOG.info(
+        LOG.debug(
             "Protection sync local DB after scan: "
             f"protected_media={int(protected_after or 0)} rules={int(rules_after or 0)} "
             f"protected_media_written={int((protected_after or 0) - (protected_before or 0))}"
@@ -549,11 +562,13 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         trace_label="remote-rules",
                         timeout=20,
                     )
-                    if response is not None and response.status_code == HTTPStatus.OK and isinstance(payload, list):
+                    parsed_rules = self._as_payload_list(
+                        payload,
+                        ("rules", "items", "data", "result"),
+                    )
+                    if response is not None and response.status_code == HTTPStatus.OK and parsed_rules:
                         remote_rows: list[ProtectionRuleRecord] = []
-                        for item in payload:
-                            if not isinstance(item, dict):
-                                continue
+                        for item in parsed_rules:
                             remote_rows.append(
                                 ProtectionRuleRecord(
                                     rule=str(item.get("rule") or "Unknown"),
@@ -567,11 +582,16 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                                     ),
                                 )
                             )
-                        LOG.info(
+                        LOG.debug(
                             "Protection rules discovered from remote provider: "
                             f"total_rules={len(remote_rows)}"
                         )
                         return remote_rows
+                    if response is not None and response.status_code == HTTPStatus.OK:
+                        LOG.debug(
+                            "Protection rules remote payload parsed empty: "
+                            f"top_level_keys={list(payload.keys()) if isinstance(payload, dict) else 'list_or_other'}"
+                        )
                     LOG.warning(
                         "Remote protection rules unavailable, using local fallback: "
                         f"auth_error={auth_error}"
@@ -606,7 +626,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                     last_updated=to_utc_isoformat(rule.updated_at),
                 )
             )
-        LOG.info(
+        LOG.debug(
             "Protection rules discovered from local DB: "
             f"total_rules={len(rows)} raw_rules={len(rules)}"
         )
@@ -650,11 +670,13 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         trace_label="remote-items",
                         timeout=20,
                     )
-                    if response is not None and response.status_code == HTTPStatus.OK and isinstance(payload, list):
+                    parsed_items = self._as_payload_list(
+                        payload,
+                        ("items", "protected_items", "data", "result"),
+                    )
+                    if response is not None and response.status_code == HTTPStatus.OK and parsed_items:
                         remote_rows: list[ProtectionItemRecord] = []
-                        for item in payload:
-                            if not isinstance(item, dict):
-                                continue
+                        for item in parsed_items:
                             remote_rows.append(
                                 ProtectionItemRecord(
                                     path=str(item.get("path") or "Unknown"),
@@ -668,11 +690,16 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                                     status=str(item.get("status") or "Unknown"),
                                 )
                             )
-                        LOG.info(
+                        LOG.debug(
                             "Protected files discovered from remote provider: "
                             f"total_items={len(remote_rows)}"
                         )
                         return remote_rows
+                    if response is not None and response.status_code == HTTPStatus.OK:
+                        LOG.debug(
+                            "Protected items remote payload parsed empty: "
+                            f"top_level_keys={list(payload.keys()) if isinstance(payload, dict) else 'list_or_other'}"
+                        )
                     LOG.warning(
                         "Remote protected items unavailable, using local fallback: "
                         f"auth_error={auth_error}"
@@ -700,7 +727,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                     status="Active" if is_active else "Expired",
                 )
             )
-        LOG.info(
+        LOG.debug(
             "Protected files discovered from local DB: "
             f"total_items={len(rows)} raw_entries={len(entries)}"
         )
@@ -719,25 +746,31 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         trace_label="remote-stats",
                         timeout=20,
                     )
-                    if response is not None and response.status_code == HTTPStatus.OK and isinstance(payload, dict):
+                    parsed_stats = self._as_payload_dict(payload, ("stats", "data", "result"))
+                    if response is not None and response.status_code == HTTPStatus.OK and parsed_stats:
                         stats = ProtectionStatistics(
-                            connected=bool(payload.get("connected", True)),
-                            provider=str(payload.get("provider") or "Reclaimerr"),
-                            protected_files=int(payload.get("protected_files") or 0),
-                            protected_size=int(payload.get("protected_size") or 0),
-                            active_rules=int(payload.get("active_rules") or 0),
+                            connected=bool(parsed_stats.get("connected", True)),
+                            provider=str(parsed_stats.get("provider") or "Reclaimerr"),
+                            protected_files=int(parsed_stats.get("protected_files") or 0),
+                            protected_size=int(parsed_stats.get("protected_size") or 0),
+                            active_rules=int(parsed_stats.get("active_rules") or 0),
                             last_sync=(
-                                str(payload.get("last_sync"))
-                                if payload.get("last_sync") is not None
+                                str(parsed_stats.get("last_sync"))
+                                if parsed_stats.get("last_sync") is not None
                                 else None
                             ),
                         )
-                        LOG.info(
+                        LOG.debug(
                             "Protection statistics discovered from remote provider: "
                             f"protected_files={stats.protected_files} protected_size={stats.protected_size} "
                             f"active_rules={stats.active_rules}"
                         )
                         return stats
+                    if response is not None and response.status_code == HTTPStatus.OK:
+                        LOG.debug(
+                            "Protection stats remote payload parsed empty: "
+                            f"top_level_keys={list(payload.keys()) if isinstance(payload, dict) else 'list_or_other'}"
+                        )
                     LOG.warning(
                         "Remote protection stats unavailable, using local fallback: "
                         f"auth_error={auth_error}"
@@ -766,7 +799,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
             active_rules=sum(1 for rule in rules if rule.status == "Active"),
             last_sync=status.last_sync,
         )
-        LOG.info(
+        LOG.debug(
             "Protection statistics discovered from local DB: "
             f"protected_files={stats.protected_files} protected_size={stats.protected_size} "
             f"active_rules={stats.active_rules}"

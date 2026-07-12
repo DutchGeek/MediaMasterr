@@ -693,65 +693,6 @@
               </article>
             {/if}
 
-            <article class="bg-card rounded-lg border border-border p-5">
-              <h2 class="text-lg font-semibold text-foreground mb-4">
-                Protection
-              </h2>
-              <div class="space-y-2 text-sm">
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Provider</span>
-                  <span class="text-foreground">{protectionProviderLabel}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Connection Status</span>
-                  <span
-                    class={(protectionStatus?.connected ?? protectionStats?.connected)
-                      ? "text-green-500"
-                      : "text-destructive"}
-                  >
-                    {protectionConnectionLabel}
-                  </span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Authentication State</span>
-                  <span class="text-foreground">{protectionAuthLabel}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Last Sync</span>
-                  <span class="text-foreground">{protectionLastSyncLabel}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Protected Files</span>
-                  <span class="text-foreground">{protectionFilesLabel}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Protected Size</span>
-                  <span class="text-foreground"
-                    >{formatSize(protectionStats?.protected_size ?? 0)}</span
-                  >
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Active Rules</span>
-                  <span class="text-foreground">{protectionStats?.active_rules ?? 0}</span>
-                </div>
-                {#if protectionReclaimableSize !== null}
-                  <div class="flex items-center justify-between">
-                    <span class="text-muted-foreground">Reclaimable Size</span>
-                    <span class="text-foreground"
-                      >{formatSize(protectionReclaimableSize)}</span
-                    >
-                  </div>
-                {/if}
-                {#if protectionStatus?.provider_version}
-                  <div class="flex items-center justify-between">
-                    <span class="text-muted-foreground">Provider Version</span>
-                    <span class="text-foreground">
-                      {protectionStatus.provider_version}
-                    </span>
-                  </div>
-                {/if}
-              </div>
-            </article>
           </section>
 
           <!-- recent activity -->
