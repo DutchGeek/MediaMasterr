@@ -214,12 +214,9 @@
       href="/"
       use:link
       onclick={onNavigate}
-      class="inline-flex items-center gap-5 rounded-lg p-1 -m-1 hover:text-primary"
+      class="inline-flex items-center rounded-lg p-1 -m-1 hover:opacity-90"
     >
-      <BrandLogo
-        logoHeightClass="h-[68px]"
-        titleClass="text-4xl font-bold leading-none text-foreground hover:text-inherit"
-      />
+      <BrandLogo widthClass="w-[200px]" />
     </a>
     <!-- theme toggle -->
     <ThemeToggle class="absolute top-1 right-1" />

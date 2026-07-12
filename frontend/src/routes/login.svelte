@@ -399,8 +399,7 @@
           <div class="mb-4 flex justify-center">
             <BrandLogo
               class="transition-transform duration-300 {loginHovered ? 'scale-[1.02]' : 'scale-100'}"
-              logoHeightClass="h-[68px]"
-              titleClass="text-4xl font-bold leading-none text-foreground"
+              widthClass="w-[320px] sm:w-[360px] md:w-[400px]"
             />
           </div>
         </div>

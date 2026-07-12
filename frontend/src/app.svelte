@@ -141,9 +141,9 @@
   <div class="dark flex h-screen items-center justify-center bg-background">
     <div class="text-center">
       <img
-        src={BRANDING.assets.logoIcon}
+        src={BRANDING.assets.logo}
         alt={`${BRANDING.applicationName} logo`}
-        class="mx-auto h-14 w-14"
+        class="mx-auto w-[220px] max-w-full h-auto object-contain"
       />
       <div
         class="mt-3 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary
@@ -178,7 +178,7 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <BrandLogo logoHeightClass="h-9" titleClass="font-bold text-2xl leading-none text-foreground" />
+        <BrandLogo widthClass="w-[150px]" />
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]

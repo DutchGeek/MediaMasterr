@@ -249,7 +249,7 @@
       class="rounded-lg border border-border bg-card p-5 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
     >
       <div class="flex items-center gap-3">
-        <BrandLogo showTitle={false} logoHeightClass="h-10" />
+        <BrandLogo widthClass="w-[180px]" />
         <div>
           <h1 class="text-3xl font-bold text-foreground">Protection</h1>
           <p class="text-sm text-muted-foreground">

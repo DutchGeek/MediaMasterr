@@ -6,6 +6,7 @@
 
   import { get_api } from "$lib/api";
   import { BRANDING } from "$lib/branding";
+  import BrandLogo from "$lib/components/brand-logo.svelte";
   import Spinner from "$lib/components/ui/spinner/spinner.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -52,11 +53,7 @@
 
 <div class="space-y-6">
   <div class="flex justify-center">
-    <img
-      src={BRANDING.assets.logo}
-      alt={`${BRANDING.applicationName} logo`}
-      class="w-full max-w-[340px]"
-    />
+    <BrandLogo widthClass="w-[320px] sm:w-[360px]" />
   </div>
 
   <div>

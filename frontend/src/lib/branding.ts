@@ -1,12 +1,11 @@
 export const BRANDING = {
   applicationName: "MediaMasterr",
-  applicationTitle: "MediaMasterr | Unified Media Management",
+  applicationTitle: "MediaMasterr",
   tagline: "Unify • Manage • Optimize",
   primaryColor: "#6366f1",
   accentColor: "#5658f3",
   assets: {
     logo: "/branding/logo.png",
-    logoIcon: "/branding/logo-icon.png",
     faviconSvg: "/branding/favicon.svg",
     faviconPng: "/branding/favicon.png",
     appleTouchIcon: "/branding/apple-touch-icon.png",
