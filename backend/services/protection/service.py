@@ -265,13 +265,19 @@ class ProtectionService:
             config.last_sync_at = datetime.now(UTC)
         await self._db.flush()
 
+        LOG.info(
+            "Protection sync service result: "
+            f"connected={status.connected} authenticated={status.authenticated} "
+            f"connection_status={status.connection_status} last_sync={status.last_sync}"
+        )
+
         return self._to_status_response(status)
 
     async def get_stats(self) -> ProtectionStatsResponse:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         stats: ProtectionStatistics = await provider.getStatistics()
-        return ProtectionStatsResponse(
+        response = ProtectionStatsResponse(
             connected=stats.connected,
             provider=stats.provider,
             protected_files=stats.protected_files,
@@ -279,12 +285,18 @@ class ProtectionService:
             active_rules=stats.active_rules,
             last_sync=stats.last_sync,
         )
+        LOG.info(
+            "Protection API return count: endpoint=/api/protection/stats "
+            f"protected_files={response.protected_files} protected_size={response.protected_size} "
+            f"active_rules={response.active_rules}"
+        )
+        return response
 
     async def get_rules(self) -> list[ProtectionRuleResponse]:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         rules = await provider.getProtectionRules()
-        return [
+        response = [
             ProtectionRuleResponse(
                 rule=rule.rule,
                 source=rule.source,
@@ -294,12 +306,17 @@ class ProtectionService:
             )
             for rule in rules
         ]
+        LOG.info(
+            "Protection API return count: endpoint=/api/protection/rules "
+            f"records={len(response)}"
+        )
+        return response
 
     async def get_items(self) -> list[ProtectionItemResponse]:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         items = await provider.getProtectedItems()
-        return [
+        response = [
             ProtectionItemResponse(
                 path=item.path,
                 reason=item.reason,
@@ -309,3 +326,8 @@ class ProtectionService:
             )
             for item in items
         ]
+        LOG.info(
+            "Protection API return count: endpoint=/api/protection/items "
+            f"records={len(response)}"
+        )
+        return response
