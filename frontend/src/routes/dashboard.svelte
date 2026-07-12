@@ -30,10 +30,32 @@
     protected_size: number;
     active_rules: number;
     last_sync: string | null;
+    reclaimable_size?: number | null;
+    reclaimable_bytes?: number | null;
+    reclaimable_total?: number | null;
+    reclaimable_total_bytes?: number | null;
   };
+
+  type ProtectionStatus = {
+    connected: boolean;
+    authenticated: boolean;
+    provider: string;
+    auth_method: string;
+    connection_status: string;
+    authentication_status: string;
+    base_url: string | null;
+    provider_version: string | null;
+    last_login: string | null;
+    last_sync: string | null;
+    capabilities: string[];
+    message: string | null;
+  };
+
+  const PROTECTION_DASHBOARD_REFRESH_EVENT = "mediamasterr:protection:refresh";
 
   // state
   let dashboard = $state<DashboardResponse | null>(null);
+  let protectionStatus = $state<ProtectionStatus | null>(null);
   let protectionStats = $state<ProtectionStats | null>(null);
   let loading = $state(true);
   let error = $state("");
@@ -85,6 +107,45 @@
     }
 
     return formatDistanceToNow(newest);
+  });
+  const protectionProviderLabel = $derived(
+    protectionStatus?.provider ?? protectionStats?.provider ?? "Reclaimerr",
+  );
+  const protectionConnectionLabel = $derived(
+    protectionStatus?.connection_status ??
+      (protectionStatus?.connected || protectionStats?.connected
+        ? "Connected"
+        : "Disconnected"),
+  );
+  const protectionAuthLabel = $derived(
+    protectionStatus?.authentication_status ??
+      (protectionStatus?.authenticated
+        ? "Authenticated"
+        : "Not Authenticated"),
+  );
+  const protectionLastSyncLabel = $derived.by(() => {
+    nowTick;
+    const lastSync = protectionStatus?.last_sync ?? protectionStats?.last_sync;
+    return lastSync ? formatDistanceToNow(lastSync) : "Not synchronized";
+  });
+  const protectionFilesLabel = $derived.by(() => {
+    const files = protectionStats?.protected_files;
+    if (typeof files !== "number" || files <= 0) return "No protected items";
+    return String(files);
+  });
+  const protectionReclaimableSize = $derived.by(() => {
+    const candidates = [
+      protectionStats?.reclaimable_size,
+      protectionStats?.reclaimable_bytes,
+      protectionStats?.reclaimable_total,
+      protectionStats?.reclaimable_total_bytes,
+    ];
+    for (const value of candidates) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+    return null;
   });
   const requestBalance7d = $derived(
     (dashboard?.requests.approved_7d ?? 0) -
@@ -215,6 +276,15 @@
     serviceType === "jellyfin";
 
   // fetch dashboard stats from API
+  const fetchProtectionMetrics = async () => {
+    const [statusPayload, statsPayload] = await Promise.all([
+      get_api<ProtectionStatus>("/api/protection/status"),
+      get_api<ProtectionStats>("/api/protection/stats"),
+    ]);
+    protectionStatus = statusPayload;
+    protectionStats = statsPayload;
+  };
+
   const fetchStats = async (showLoading = true) => {
     if (isFetching) return;
 
@@ -223,12 +293,11 @@
       if (showLoading) {
         loading = true;
       }
-      const [dashboardPayload, protectionPayload] = await Promise.all([
+      const [dashboardPayload] = await Promise.all([
         get_api<DashboardResponse>("/api/dashboard"),
-        get_api<ProtectionStats>("/api/protection/stats"),
       ]);
+      await fetchProtectionMetrics();
       dashboard = dashboardPayload;
-      protectionStats = protectionPayload;
       lastUpdatedAt = new Date().toISOString();
       error = "";
     } catch (err: any) {
@@ -242,9 +311,17 @@
     }
   };
 
+  const handleProtectionRefresh = () => {
+    void fetchProtectionMetrics();
+  };
+
   // fetch stats when component mounts
   onMount(async () => {
     await fetchStats();
+    window.addEventListener(
+      PROTECTION_DASHBOARD_REFRESH_EVENT,
+      handleProtectionRefresh,
+    );
     refreshTimer = setInterval(() => {
       fetchStats(false);
     }, 60000);
@@ -254,6 +331,10 @@
   });
 
   onDestroy(() => {
+    window.removeEventListener(
+      PROTECTION_DASHBOARD_REFRESH_EVENT,
+      handleProtectionRefresh,
+    );
     if (refreshTimer) {
       clearInterval(refreshTimer);
       refreshTimer = null;
@@ -605,35 +686,57 @@
               </h2>
               <div class="space-y-2 text-sm">
                 <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Connected</span>
-                  <span class={protectionStats?.connected ? "text-green-500" : "text-destructive"}>
-                    {protectionStats?.connected ? "Yes" : "No"}
+                  <span class="text-muted-foreground">Provider</span>
+                  <span class="text-foreground">{protectionProviderLabel}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Connection Status</span>
+                  <span
+                    class={(protectionStatus?.connected ?? protectionStats?.connected)
+                      ? "text-green-500"
+                      : "text-destructive"}
+                  >
+                    {protectionConnectionLabel}
                   </span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Provider</span>
-                  <span class="text-foreground">{protectionStats?.provider ?? "Reclaimerr"}</span>
+                  <span class="text-muted-foreground">Authentication State</span>
+                  <span class="text-foreground">{protectionAuthLabel}</span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Protected files</span>
-                  <span class="text-foreground">{protectionStats?.protected_files ?? 0}</span>
+                  <span class="text-muted-foreground">Last Sync</span>
+                  <span class="text-foreground">{protectionLastSyncLabel}</span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Protected size</span>
-                  <span class="text-foreground">{formatSize(protectionStats?.protected_size ?? 0)}</span>
+                  <span class="text-muted-foreground">Protected Files</span>
+                  <span class="text-foreground">{protectionFilesLabel}</span>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Active rules</span>
+                  <span class="text-muted-foreground">Protected Size</span>
+                  <span class="text-foreground"
+                    >{formatSize(protectionStats?.protected_size ?? 0)}</span
+                  >
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Active Rules</span>
                   <span class="text-foreground">{protectionStats?.active_rules ?? 0}</span>
                 </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-muted-foreground">Last sync</span>
-                  <span class="text-foreground">
-                    {protectionStats?.last_sync
-                      ? formatDistanceToNow(protectionStats.last_sync)
-                      : "Never"}
-                  </span>
-                </div>
+                {#if protectionReclaimableSize !== null}
+                  <div class="flex items-center justify-between">
+                    <span class="text-muted-foreground">Reclaimable Size</span>
+                    <span class="text-foreground"
+                      >{formatSize(protectionReclaimableSize)}</span
+                    >
+                  </div>
+                {/if}
+                {#if protectionStatus?.provider_version}
+                  <div class="flex items-center justify-between">
+                    <span class="text-muted-foreground">Provider Version</span>
+                    <span class="text-foreground">
+                      {protectionStatus.provider_version}
+                    </span>
+                  </div>
+                {/if}
               </div>
             </article>
           </section>

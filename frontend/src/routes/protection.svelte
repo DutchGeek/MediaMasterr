@@ -84,6 +84,8 @@
     status: string;
   };
 
+  const PROTECTION_DASHBOARD_REFRESH_EVENT = "mediamasterr:protection:refresh";
+
   let loading = $state(true);
   let error = $state("");
 
@@ -141,6 +143,11 @@
     return `Enter ${field.label.toLowerCase()}`;
   };
 
+  const notifyDashboardProtectionRefresh = () => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event(PROTECTION_DASHBOARD_REFRESH_EVENT));
+  };
+
   const loadConfig = async () => {
     const [definitionPayload, configPayload] = await Promise.all([
       get_api<ProtectionProviderDefinition>("/api/protection/provider"),
@@ -196,6 +203,7 @@
         password: getFieldValue("password"),
         enabled: true,
       });
+      notifyDashboardProtectionRefresh();
       error = "";
     } catch (e: any) {
       error = e?.message ?? "Connection test failed";
@@ -217,6 +225,7 @@
       });
       form = { ...form, password: "" };
       await loadPageData();
+      notifyDashboardProtectionRefresh();
       error = "";
     } catch (e: any) {
       error = e?.message ?? "Failed to save Protection settings";
@@ -230,6 +239,7 @@
     try {
       status = await post_api<ProtectionStatus>("/api/protection/sync", {});
       await loadPageData();
+      notifyDashboardProtectionRefresh();
       error = "";
     } catch (e: any) {
       error = e?.message ?? "Failed to sync Protection provider";
