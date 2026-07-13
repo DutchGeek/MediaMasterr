@@ -313,13 +313,24 @@ async def get_metadata_provider_status(
 
 def _service_config_payload(config: ServiceConfig) -> dict[str, Any]:
     """Prepare service configuration payload, masking API key and including main server libraries."""
+    masked_key = ""
+    if config.api_key:
+        try:
+            masked_key = _mask_api_key(fer_decrypt(config.api_key))
+        except Exception as exc:
+            LOG.warning(
+                "Failed to decrypt API key for service config "
+                f"{config.id} ({config.service_type.value}): {exc}"
+            )
+            masked_key = "****"
+
     return {
         "id": config.id,
         "name": config.name or _default_service_name(config.service_type),
         "service_type": config.service_type,
         "enabled": config.enabled,
         "base_url": config.base_url,
-        "api_key": _mask_api_key(fer_decrypt(config.api_key) if config.api_key else ""),
+        "api_key": masked_key,
         "extra_settings": config.extra_settings,
         "is_main": config.is_main if config.service_type in MEDIA_SERVERS else None,
     }

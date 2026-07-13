@@ -432,7 +432,7 @@
                 {filterCatalog?.imported.find((item) => item.key === importedFilter)
                   ?.label ?? "Imported Filter"}
               {:else}
-                Imported ARR Filter
+                ARR Filters
               {/if}
             </Select.Trigger>
             <Select.Content class="bg-card">
@@ -453,7 +453,7 @@
                 {filterCatalog?.native.find((item) => item.key === decisionFilter)
                   ?.label ?? "Decision Filter"}
               {:else}
-                MediaMasterr Filter
+                Decision Filters
               {/if}
             </Select.Trigger>
             <Select.Content class="bg-card">

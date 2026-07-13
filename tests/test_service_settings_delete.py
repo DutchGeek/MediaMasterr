@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.api.routes.settings import services
 from backend.api.routes.settings.services import (
+    get_service_settings,
     delete_service_settings,
     set_service_settings,
 )
@@ -362,6 +363,41 @@ def test_stale_service_toggle_cannot_restore_deleted_config(monkeypatch):
 
         clear_mock.assert_not_awaited()
         init_mock.assert_not_awaited()
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_get_service_settings_tolerates_invalid_encrypted_api_key() -> None:
+    async def run() -> None:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(
+            engine, expire_on_commit=False, class_=AsyncSession
+        )
+
+        async with session_maker() as db_session:
+            admin = _admin_user()
+            db_session.add(admin)
+            db_session.add(
+                ServiceConfig(
+                    service_type=Service.SONARR,
+                    name="Sonarr",
+                    base_url="http://sonarr.local",
+                    api_key="not-encrypted",
+                    enabled=True,
+                    is_main=False,
+                    extra_settings=None,
+                )
+            )
+            await db_session.commit()
+
+            payload = await get_service_settings(admin, db_session)
+            sonarr = payload[Service.SONARR]
+            assert sonarr["api_key"] == "****"
+            assert sonarr["enabled"] is True
+
         await engine.dispose()
 
     asyncio.run(run())
