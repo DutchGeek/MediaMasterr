@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -967,53 +967,12 @@ async def get_series(
     elif decision_state == "watching":
         recent_cutoff = datetime.now(UTC).replace(microsecond=0)
         recent_cutoff = recent_cutoff - timedelta(days=14)
-        query = query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff)
-        count_query = count_query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff)
-
-
-@router.get("/filters", response_model=MediaFilterCatalogResponse)
-async def get_media_filters(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: AsyncSession = Depends(get_db),
-    media_type: MediaType = Query(MediaType.MOVIE),
-) -> MediaFilterCatalogResponse:
-    required_page = PageAccess.Movies if media_type is MediaType.MOVIE else PageAccess.Series
-    if not has_page_access(current_user, required_page):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"{required_page.value.replace('_', ' ').title()} page access required",
+        query = query.where(
+            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff
         )
-    model = Movie if media_type is MediaType.MOVIE else Series
-    provider_label = "Radarr" if media_type is MediaType.MOVIE else "Sonarr"
-    rows = (
-        await db.execute(
-            select(model.arr_tags).where(model.removed_at.is_(None), model.arr_tags.is_not(None))
+        count_query = count_query.where(
+            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff
         )
-    ).all()
-    imported_labels: set[str] = set()
-    for (raw_tags,) in rows:
-        if isinstance(raw_tags, list):
-            for tag in raw_tags:
-                if isinstance(tag, str) and tag.strip():
-                    imported_labels.add(tag.strip())
-
-    imported = [
-        MediaFilterOptionResponse(
-            key=label,
-            label=label,
-            group=f"Imported from {provider_label}",
-            read_only=True,
-        )
-        for label in sorted(imported_labels)
-    ]
-    native = [
-        MediaFilterOptionResponse(key="safe_to_delete", label="Safe To Delete", group="MediaMasterr"),
-        MediaFilterOptionResponse(key="protected", label="Protected", group="MediaMasterr"),
-        MediaFilterOptionResponse(key="waiting", label="Waiting", group="MediaMasterr"),
-        MediaFilterOptionResponse(key="watching", label="Watching", group="MediaMasterr"),
-        MediaFilterOptionResponse(key="unwatched", label="Unwatched", group="MediaMasterr"),
-    ]
-    return MediaFilterCatalogResponse(imported=imported, native=native)
 
     # apply sorting
     order_column = getattr(Series, sort_by)
@@ -1334,6 +1293,65 @@ async def get_media_filters(
         per_page=per_page,
         total_pages=total_pages,
     )
+
+
+@router.get("/filters", response_model=MediaFilterCatalogResponse)
+async def get_media_filters(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = Query(MediaType.MOVIE),
+) -> MediaFilterCatalogResponse:
+    required_page = (
+        PageAccess.Movies if media_type is MediaType.MOVIE else PageAccess.Series
+    )
+    if not has_page_access(current_user, required_page):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{required_page.value.replace('_', ' ').title()} page access required",
+        )
+    model = Movie if media_type is MediaType.MOVIE else Series
+    provider_label = "Radarr" if media_type is MediaType.MOVIE else "Sonarr"
+    rows = (
+        await db.execute(
+            select(model.arr_tags).where(
+                model.removed_at.is_(None), model.arr_tags.is_not(None)
+            )
+        )
+    ).all()
+    imported_labels: set[str] = set()
+    for (raw_tags,) in rows:
+        if isinstance(raw_tags, list):
+            for tag in raw_tags:
+                if isinstance(tag, str) and tag.strip():
+                    imported_labels.add(tag.strip())
+
+    imported = [
+        MediaFilterOptionResponse(
+            key=label,
+            label=label,
+            group=f"Imported from {provider_label}",
+            read_only=True,
+        )
+        for label in sorted(imported_labels)
+    ]
+    native = [
+        MediaFilterOptionResponse(
+            key="safe_to_delete", label="Safe To Delete", group="MediaMasterr"
+        ),
+        MediaFilterOptionResponse(
+            key="protected", label="Protected", group="MediaMasterr"
+        ),
+        MediaFilterOptionResponse(
+            key="waiting", label="Waiting", group="MediaMasterr"
+        ),
+        MediaFilterOptionResponse(
+            key="watching", label="Watching", group="MediaMasterr"
+        ),
+        MediaFilterOptionResponse(
+            key="unwatched", label="Unwatched", group="MediaMasterr"
+        ),
+    ]
+    return MediaFilterCatalogResponse(imported=imported, native=native)
 
 
 @router.get("/series/{series_id}/seasons", response_model=list[SeasonWithStatus])

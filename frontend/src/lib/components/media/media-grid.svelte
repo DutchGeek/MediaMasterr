@@ -7,6 +7,7 @@
     MediaType,
     PaginatedResponse,
   } from "$lib/types/shared";
+  import { formatLibraryDisplayName } from "$lib/utils/library-labels";
 
   interface Props {
     data: PaginatedResponse<MediaItem> | null;
@@ -64,7 +65,7 @@
     {#each groupedItems as group (group.name)}
       <section class="mb-6">
         <div class="mb-3">
-          <h2 class="text-lg font-semibold text-foreground">{group.name}</h2>
+          <h2 class="text-lg font-semibold text-foreground">{formatLibraryDisplayName(group.name)}</h2>
           <p class="text-xs text-muted-foreground">{group.items.length} item{group.items.length === 1 ? "" : "s"} on this page</p>
         </div>
         <div

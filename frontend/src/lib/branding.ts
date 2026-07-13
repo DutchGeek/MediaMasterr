@@ -5,7 +5,7 @@ export const BRANDING = {
   primaryColor: "#6366f1",
   accentColor: "#5658f3",
   assets: {
-    logo: "/branding/logo.png",
+    logo: "/branding/logo.svg",
     faviconSvg: "/branding/favicon.svg",
     faviconPng: "/branding/favicon.png",
     appleTouchIcon: "/branding/apple-touch-icon.png",

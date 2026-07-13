@@ -7,6 +7,7 @@
   import Notice from "$lib/components/notice.svelte";
   import { formatDate, formatDistanceToNow } from "$lib/utils/date";
   import { formatFileSize } from "$lib/utils/formatters";
+  import { formatLibraryDisplayName } from "$lib/utils/library-labels";
   import { createFilterState } from "$lib/utils/pagination";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
@@ -530,7 +531,7 @@
                 {#each dashboard.decision_summary.libraries as library}
                   <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="font-medium text-foreground truncate">{library.label}</p>
+                      <p class="font-medium text-foreground truncate">{formatLibraryDisplayName(library.label)}</p>
                       <p class="text-xs text-muted-foreground">{library.item_count} reclaimable item{library.item_count === 1 ? "" : "s"}</p>
                     </div>
                     <span class="shrink-0 text-sm font-semibold text-primary">
