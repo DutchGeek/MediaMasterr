@@ -3,11 +3,12 @@
 
 ## frontend build stage
 FROM node:25-alpine3.22 AS frontend-build
-WORKDIR /frontend
+WORKDIR /workspace/frontend
 ARG VITE_APP_CHANNEL=dev
 COPY frontend/package.json ./package.json
 RUN npm install
 COPY frontend ./
+COPY branding ../branding
 RUN VITE_APP_CHANNEL=${VITE_APP_CHANNEL} npm run build
 
 ## backend base image
@@ -31,7 +32,7 @@ EXPOSE 8000
 
 ## API image (includes frontend build)
 FROM backend-base AS api
-COPY --from=frontend-build /frontend/dist /app/frontend/dist
+COPY --from=frontend-build /workspace/frontend/dist /app/frontend/dist
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sh", "-c", \
 	"exec granian --interface asgi --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} backend.api.main:app"]
