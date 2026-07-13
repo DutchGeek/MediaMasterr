@@ -34,6 +34,7 @@ export enum PageAccess {
   Dashboard = "dashboard",
   Movies = "movies",
   Series = "series",
+  Operations = "operations",
   Requests = "requests",
   Protected = "protected",
   Candidates = "candidates",
@@ -88,6 +89,69 @@ export interface MediaIdentityItem {
 export interface MediaIdentityListResponse {
   items: MediaIdentityItem[];
   total: number;
+}
+
+export type FilesystemAccessMode =
+  | "discovery"
+  | "assisted"
+  | "automated";
+
+export interface OperationsCard {
+  key: string;
+  title: string;
+  description: string;
+  count: number;
+  severity: "info" | "low" | "medium" | "high";
+}
+
+export interface OperationsOverviewResponse {
+  cards: OperationsCard[];
+  generated_at: string;
+}
+
+export interface OperationsRecommendation {
+  id: string;
+  card_key: string;
+  title: string;
+  summary: string;
+  action: string;
+  safety_level: "safe" | "low_risk" | "medium_risk" | "high_risk";
+  target_type: string;
+  target_id: string | null;
+  estimated_recovery_bytes: number;
+}
+
+export interface OperationsRecommendationsResponse {
+  items: OperationsRecommendation[];
+  total: number;
+}
+
+export interface FilesystemRootConfig {
+  id: number;
+  name: string;
+  path: string;
+  media_type: string;
+  enabled: boolean;
+}
+
+export interface FilesystemConfigResponse {
+  access_mode: FilesystemAccessMode;
+  roots: FilesystemRootConfig[];
+}
+
+export interface CleanupPlanSummary {
+  id: number;
+  name: string;
+  status: string;
+  operation_count: number;
+  estimated_recovery_bytes: number;
+  safe_count: number;
+  review_required_count: number;
+  created_at: string;
+}
+
+export interface CleanupPlanListResponse {
+  plans: CleanupPlanSummary[];
 }
 
 export enum MediaType {

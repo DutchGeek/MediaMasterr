@@ -19,6 +19,7 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Check from "@lucide/svelte/icons/check";
+  import Wrench from "@lucide/svelte/icons/wrench";
   import { toTitleCase } from "$lib/utils/strings";
   import * as Avatar from "$lib/components/ui/avatar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -68,6 +69,14 @@
       adminOnly: false,
       page: PageAccess.Series,
       tooltip: null,
+    },
+    {
+      path: "/operations",
+      label: "Operations",
+      icon: Wrench,
+      adminOnly: false,
+      page: PageAccess.Operations,
+      tooltip: "Media Intelligence Engine recommendations and cleanup planning",
     },
     {
       path: "/qbittorrent",

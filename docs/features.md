@@ -36,3 +36,44 @@ protect, approve, then delete or move through the correct service.
 - Radarr
 - Sonarr
 
+## Media Intelligence Engine (MIE)
+
+MediaMasterr v0.4 introduces a provider-agnostic intelligence layer that
+correlates media, torrents, protection, and filesystem evidence into
+recommendations that are explainable and safe.
+
+```mermaid
+flowchart TD
+	A[Media Intelligence Engine] --> B[Filesystem Indexer]
+	A --> C[Torrent Index]
+	A --> D[Media Index]
+	A --> E[Relationship Engine]
+	A --> F[Lifecycle Engine]
+	A --> G[Orphan Detector]
+	A --> H[Duplicate Detector]
+	A --> I[Cleanup Planner]
+	A --> J[Operations Service]
+	A --> K[Decision Engine Integration]
+
+	B --> E
+	C --> E
+	D --> E
+	E --> F
+	F --> I
+	G --> I
+	H --> I
+	I --> J
+	J --> K
+```
+
+### Operations Surface
+
+The Operations page is recommendation-first and grouped by actionable cards,
+including import backlog, duplicates, orphan detection, and space recovery.
+
+### Filesystem Access Modes
+
+- Discovery: read-only visibility, no cleanup execution
+- Assisted (default): read/write with explicit user approval per operation
+- Automated: read/write with only approved rules eligible for auto execution
+

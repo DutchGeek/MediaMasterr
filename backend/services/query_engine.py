@@ -77,6 +77,24 @@ def _text_tokens(name: str) -> list[str]:
     return [token.strip().lower() for token in name.replace("-", " ").split() if token.strip()]
 
 
+def _normalized_provider_filter_id(source: str, raw_id: object) -> str:
+    normalized = str(raw_id or "").strip()
+    return f"{source}:{normalized}" if normalized else ""
+
+
+def _provider_label(service_type: Service) -> str:
+    return "Sonarr" if service_type is Service.SONARR else "Radarr"
+
+
+def _prefixed_imported_label(service_type: Service, name: str) -> str:
+    base = name.strip()
+    provider = _provider_label(service_type)
+    lower_base = base.lower()
+    if lower_base.startswith(f"{provider.lower()} -"):
+        return base
+    return f"{provider} - {base}"
+
+
 def _arr_tag_clause(media_type: MediaType, token: str) -> Any:
     model = Movie if media_type is MediaType.MOVIE else Series
     return model.arr_tags.like(f'%"{token}"%')
@@ -306,18 +324,63 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
     candidates: list[tuple[Service, int, list[dict[str, Any]]]] = []
 
     for config_id, client in service_manager.radarr_clients().items():
+        imported: list[dict[str, Any]] = []
         try:
-            saved = await client.get_saved_filters()
+            for saved in await client.get_saved_filters():
+                imported.append(
+                    {
+                        "id": _normalized_provider_filter_id("saved", saved.get("id")),
+                        "name": str(saved.get("name") or "").strip(),
+                        "raw": dict(saved.get("raw") or {}),
+                    }
+                )
         except Exception:
-            continue
-        candidates.append((Service.RADARR, config_id, saved))
+            # Some ARR versions/instances do not expose saved filters over API.
+            pass
+        try:
+            for label, movie_ids in (await client.get_all_tag_details()).items():
+                tag_name = str(label or "").strip()
+                if not tag_name:
+                    continue
+                imported.append(
+                    {
+                        "id": _normalized_provider_filter_id("tag", tag_name.lower()),
+                        "name": tag_name,
+                        "raw": {"movieIds": [int(v) for v in movie_ids]},
+                    }
+                )
+        except Exception:
+            pass
+        candidates.append((Service.RADARR, config_id, imported))
 
     for config_id, client in service_manager.sonarr_clients().items():
+        imported: list[dict[str, Any]] = []
         try:
-            saved = await client.get_saved_filters()
+            for saved in await client.get_saved_filters():
+                imported.append(
+                    {
+                        "id": _normalized_provider_filter_id("saved", saved.get("id")),
+                        "name": str(saved.get("name") or "").strip(),
+                        "raw": dict(saved.get("raw") or {}),
+                    }
+                )
         except Exception:
-            continue
-        candidates.append((Service.SONARR, config_id, saved))
+            pass
+        try:
+            for label, series_ids in (await client.get_all_tag_details()).items():
+                tag_name = str(label or "").strip()
+                if not tag_name:
+                    continue
+                imported.append(
+                    {
+                        "id": _normalized_provider_filter_id("tag", tag_name.lower()),
+                        "name": tag_name,
+                        "raw": {"seriesIds": [int(v) for v in series_ids]},
+                    }
+                )
+        except Exception:
+            pass
+        candidates.append((Service.SONARR, config_id, imported))
 
     for service_type, config_id, filters in candidates:
         media_type = MediaType.MOVIE if service_type is Service.RADARR else MediaType.SERIES
@@ -418,7 +481,10 @@ async def get_filter_catalog(
     imported = [
         MediaFilterOptionResponse(
             key=f"imported:{row.id}",
-            label=row.name,
+            label=_prefixed_imported_label(
+                row.provider_service or Service.RADARR,
+                row.name,
+            ),
             group=f"Imported from {'Sonarr' if row.provider_service is Service.SONARR else 'Radarr'}",
             read_only=True,
             source=(row.provider_service.value if row.provider_service else None),

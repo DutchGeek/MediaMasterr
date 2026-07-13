@@ -27,6 +27,12 @@ export const PAGE_ACCESS_OPTIONS: PageAccessOption[] = [
     description: "Browse synced series media.",
   },
   {
+    value: PageAccess.Operations,
+    label: "Operations",
+    path: "/operations",
+    description: "Review Media Intelligence recommendations and plans.",
+  },
+  {
     value: PageAccess.Requests,
     label: "Requests",
     path: "/requests",
@@ -71,6 +77,7 @@ const redirectPreference = [
   PageAccess.Dashboard,
   PageAccess.Movies,
   PageAccess.Series,
+  PageAccess.Operations,
   PageAccess.Requests,
   PageAccess.Protected,
   PageAccess.History,

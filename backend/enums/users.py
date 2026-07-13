@@ -19,6 +19,7 @@ class PageAccess(StrEnum):
     DASHBOARD = auto()
     MOVIES = auto()
     SERIES = auto()
+    OPERATIONS = auto()
     REQUESTS = auto()
     PROTECTED = auto()
     CANDIDATES = auto()
