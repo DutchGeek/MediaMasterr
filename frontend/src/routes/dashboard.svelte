@@ -7,6 +7,7 @@
   import Notice from "$lib/components/notice.svelte";
   import { formatDate, formatDistanceToNow } from "$lib/utils/date";
   import { formatFileSize } from "$lib/utils/formatters";
+  import { createFilterState } from "$lib/utils/pagination";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import Minus from "@lucide/svelte/icons/minus";
@@ -38,15 +39,26 @@
   let clockTimer: ReturnType<typeof setInterval> | null = null;
   let nowTick = $state(Date.now());
   let isFetching = false;
+  const _activityTabStore = createFilterState<"media" | "system">(
+    "dashboard_activity_tab",
+    "media",
+  );
+  let activityTab = $state<"media" | "system">(_activityTabStore.getInitial());
 
   // derived state
   const activity = $derived(dashboard?.activity ?? []);
+  const mediaActivity = $derived(dashboard?.media_activity ?? []);
+  const systemActivity = $derived(dashboard?.system_activity ?? []);
+  const visibleActivity = $derived(
+    activityTab === "media" ? mediaActivity : systemActivity,
+  );
   const isAdmin = $derived(dashboard?.viewer.can_view_admin_panels ?? false);
   const lastUpdatedLabel = $derived.by(() => {
     nowTick;
     if (!lastUpdatedAt) return null;
     return formatDistanceToNow(lastUpdatedAt);
   });
+  $effect(() => _activityTabStore.save(activityTab));
   const libraryTotal = $derived(
     (dashboard?.kpis.total_movies ?? 0) + (dashboard?.kpis.total_series ?? 0),
   );
@@ -245,6 +257,11 @@
     if (item.subtitle) details.push(item.subtitle);
     if (item.actor_display) details.push(`by ${item.actor_display}`);
     return details.join(" • ");
+  };
+
+  const openActivityTarget = (item: DashboardActivityItem) => {
+    if (!item.target_path) return;
+    window.location.hash = `#${item.target_path}`;
   };
 
   // determine if we should show last sync info for a service
@@ -802,18 +819,38 @@
 
           <!-- recent activity -->
           <section class="bg-card rounded-lg border border-border p-5">
-            <h2 class="text-xl font-semibold text-foreground mb-4">
-              Recent Activity
-            </h2>
+            <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <h2 class="text-xl font-semibold text-foreground">
+                Recent Activity
+              </h2>
+              <div class="inline-flex rounded-lg border border-border bg-secondary/30 p-1">
+                <button
+                  class={`rounded-md px-3 py-1.5 text-sm cursor-pointer transition-colors ${activityTab === "media" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onclick={() => (activityTab = "media")}
+                >
+                  Media Activity
+                </button>
+                <button
+                  class={`rounded-md px-3 py-1.5 text-sm cursor-pointer transition-colors ${activityTab === "system" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onclick={() => (activityTab = "system")}
+                >
+                  System Activity
+                </button>
+              </div>
+            </div>
 
-            {#if activity.length === 0}
+            {#if visibleActivity.length === 0}
               <p class="text-muted-foreground text-center py-8">
-                No recent activity
+                No recent {activityTab} activity
               </p>
             {:else}
               <div class="max-h-96 divide-y overflow-y-auto divide-border pr-3">
-                {#each activity as item (item.id)}
-                  <div class="py-3">
+                {#each visibleActivity as item (item.id)}
+                  <button
+                    class={`block w-full py-3 text-left ${item.target_path ? "cursor-pointer hover:bg-secondary/20" : "cursor-default"}`}
+                    onclick={() => openActivityTarget(item)}
+                    disabled={!item.target_path}
+                  >
                     <div class="flex items-start justify-between gap-3">
                       <div class="min-w-0">
                         <div class="flex items-center gap-2 min-w-0">
@@ -843,7 +880,7 @@
                         </p>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 {/each}
               </div>
             {/if}

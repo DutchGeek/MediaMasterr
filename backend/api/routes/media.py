@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.api.candidate_views import normalize_reason_parts, reason_tokens
-from backend.core.auth import get_current_user, has_permission, require_page_access
+from backend.core.auth import (
+    get_current_user,
+    has_page_access,
+    has_permission,
+    require_page_access,
+)
 from backend.core.auto_delete import resolve_auto_delete_policy
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.core.utils.misc import normalize_genre_names
@@ -55,6 +60,8 @@ from backend.models.media import (
     EpisodeWithStatus,
     MediaStatusInfo,
     MoveCandidatesRequest,
+    MediaFilterCatalogResponse,
+    MediaFilterOptionResponse,
     MovieVersionResponse,
     MovieWithStatus,
     PaginatedCandidatesResponse,
@@ -506,6 +513,8 @@ async def get_movies(
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     search: str | None = Query(None, max_length=200),
     candidates_only: bool = Query(False),
+    arr_tag: str | None = Query(None, max_length=100),
+    decision_state: str | None = Query(None, max_length=50),
 ) -> PaginatedMediaResponse:
     """
     Get all movies with status information.
@@ -515,6 +524,12 @@ async def get_movies(
     - Protected
     - Has pending exception request
     """
+    arr_tag = arr_tag if isinstance(arr_tag, str) and arr_tag.strip() else None
+    decision_state = (
+        decision_state
+        if isinstance(decision_state, str) and decision_state.strip()
+        else None
+    )
     # build base query
     query = (
         select(Movie)
@@ -531,6 +546,10 @@ async def get_movies(
         query = query.where(Movie.title.ilike(search_term))
         count_query = count_query.where(Movie.title.ilike(search_term))
 
+    if arr_tag:
+        query = query.where(Movie.arr_tags.like(f'%"{arr_tag}"%'))
+        count_query = count_query.where(Movie.arr_tags.like(f'%"{arr_tag}"%'))
+
     # apply candidates filter
     # Note: use distinct() to guard against row multiplication if a movie ever ends up
     # with more than one ReclaimCandidate row (this should really not ever happen)
@@ -541,6 +560,36 @@ async def get_movies(
         count_query = count_query.join(
             ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id
         ).distinct()
+
+    if decision_state == "safe_to_delete":
+        query = query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
+        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
+    elif decision_state == "protected":
+        query = query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
+        count_query = count_query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
+    elif decision_state == "waiting":
+        query = query.join(
+            ProtectionRequest,
+            and_(
+                ProtectionRequest.movie_id == Movie.id,
+                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+            ),
+        ).distinct()
+        count_query = count_query.join(
+            ProtectionRequest,
+            and_(
+                ProtectionRequest.movie_id == Movie.id,
+                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+            ),
+        ).distinct()
+    elif decision_state == "unwatched":
+        query = query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
+        count_query = count_query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
+    elif decision_state == "watching":
+        recent_cutoff = datetime.now(UTC).replace(microsecond=0)
+        recent_cutoff = recent_cutoff - timedelta(days=14)
+        query = query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= recent_cutoff)
+        count_query = count_query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= recent_cutoff)
 
     # apply sorting
     order_column = getattr(Movie, sort_by)
@@ -843,6 +892,8 @@ async def get_series(
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     search: str | None = Query(None, max_length=200),
     candidates_only: bool = Query(False),
+    arr_tag: str | None = Query(None, max_length=100),
+    decision_state: str | None = Query(None, max_length=50),
 ) -> PaginatedMediaResponse:
     """
     Get all series with status information.
@@ -852,6 +903,12 @@ async def get_series(
     - Protected
     - Has pending exception request
     """
+    arr_tag = arr_tag if isinstance(arr_tag, str) and arr_tag.strip() else None
+    decision_state = (
+        decision_state
+        if isinstance(decision_state, str) and decision_state.strip()
+        else None
+    )
     # build base query
     query = (
         select(Series)
@@ -868,6 +925,10 @@ async def get_series(
         query = query.where(Series.title.ilike(search_term))
         count_query = count_query.where(Series.title.ilike(search_term))
 
+    if arr_tag:
+        query = query.where(Series.arr_tags.like(f'%"{arr_tag}"%'))
+        count_query = count_query.where(Series.arr_tags.like(f'%"{arr_tag}"%'))
+
     # apply candidates filter
     # Note: we're using distinct() to avoid row multiplication when a series has multiple
     # season level candidates (each shares the same series_id)
@@ -878,6 +939,81 @@ async def get_series(
         count_query = count_query.join(
             ReclaimCandidate, ReclaimCandidate.series_id == Series.id
         ).distinct()
+
+    if decision_state == "safe_to_delete":
+        query = query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
+        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
+    elif decision_state == "protected":
+        query = query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
+        count_query = count_query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
+    elif decision_state == "waiting":
+        query = query.join(
+            ProtectionRequest,
+            and_(
+                ProtectionRequest.series_id == Series.id,
+                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+            ),
+        ).distinct()
+        count_query = count_query.join(
+            ProtectionRequest,
+            and_(
+                ProtectionRequest.series_id == Series.id,
+                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+            ),
+        ).distinct()
+    elif decision_state == "unwatched":
+        query = query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
+        count_query = count_query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
+    elif decision_state == "watching":
+        recent_cutoff = datetime.now(UTC).replace(microsecond=0)
+        recent_cutoff = recent_cutoff - timedelta(days=14)
+        query = query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff)
+        count_query = count_query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff)
+
+
+@router.get("/filters", response_model=MediaFilterCatalogResponse)
+async def get_media_filters(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = Query(MediaType.MOVIE),
+) -> MediaFilterCatalogResponse:
+    required_page = PageAccess.Movies if media_type is MediaType.MOVIE else PageAccess.Series
+    if not has_page_access(current_user, required_page):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{required_page.value.replace('_', ' ').title()} page access required",
+        )
+    model = Movie if media_type is MediaType.MOVIE else Series
+    provider_label = "Radarr" if media_type is MediaType.MOVIE else "Sonarr"
+    rows = (
+        await db.execute(
+            select(model.arr_tags).where(model.removed_at.is_(None), model.arr_tags.is_not(None))
+        )
+    ).all()
+    imported_labels: set[str] = set()
+    for (raw_tags,) in rows:
+        if isinstance(raw_tags, list):
+            for tag in raw_tags:
+                if isinstance(tag, str) and tag.strip():
+                    imported_labels.add(tag.strip())
+
+    imported = [
+        MediaFilterOptionResponse(
+            key=label,
+            label=label,
+            group=f"Imported from {provider_label}",
+            read_only=True,
+        )
+        for label in sorted(imported_labels)
+    ]
+    native = [
+        MediaFilterOptionResponse(key="safe_to_delete", label="Safe To Delete", group="MediaMasterr"),
+        MediaFilterOptionResponse(key="protected", label="Protected", group="MediaMasterr"),
+        MediaFilterOptionResponse(key="waiting", label="Waiting", group="MediaMasterr"),
+        MediaFilterOptionResponse(key="watching", label="Watching", group="MediaMasterr"),
+        MediaFilterOptionResponse(key="unwatched", label="Unwatched", group="MediaMasterr"),
+    ]
+    return MediaFilterCatalogResponse(imported=imported, native=native)
 
     # apply sorting
     order_column = getattr(Series, sort_by)

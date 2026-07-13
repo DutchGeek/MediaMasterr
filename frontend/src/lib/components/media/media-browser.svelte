@@ -12,6 +12,7 @@
   import Search from "@lucide/svelte/icons/search";
   import {
     ProtectionRequestStatus,
+    type MediaFilterCatalogResponse,
     MediaType,
     type DeleteRequest,
     type ProtectionRequest,
@@ -55,19 +56,33 @@
     `${_prefix}_candidates_only`,
     false,
   );
+  const ALL_IMPORTED_FILTERS = "__all_imported__";
+  const ALL_DECISION_FILTERS = "__all_decisions__";
+  const _importedFilterStore = createFilterState<string>(
+    `${_prefix}_imported_filter`,
+    ALL_IMPORTED_FILTERS,
+  );
+  const _decisionFilterStore = createFilterState<string>(
+    `${_prefix}_decision_filter`,
+    ALL_DECISION_FILTERS,
+  );
 
   let loading = $state(true);
   let error = $state("");
   let mediaData = $state<PaginatedResponse<
     MovieWithStatus | SeriesWithStatus
   > | null>(null);
+  let filterCatalog = $state<MediaFilterCatalogResponse | null>(null);
 
   // filters and search
   let searchQuery = $state("");
   let sortBy = $state(_sortByStore.getInitial());
   let sortOrder = $state(_sortOrderStore.getInitial());
   let candidatesOnly = $state(_candidatesOnlyStore.getInitial());
+  let importedFilter = $state(_importedFilterStore.getInitial());
+  let decisionFilter = $state(_decisionFilterStore.getInitial());
   let currentPage = $state(1);
+  let pendingOpenMediaId = $state<number | null>(null);
 
   // poster size control
   const POSTER_SIZE_KEY = "mediamasterr_poster_size";
@@ -122,6 +137,8 @@
   $effect(() => _sortByStore.save(sortBy));
   $effect(() => _sortOrderStore.save(sortOrder));
   $effect(() => _candidatesOnlyStore.save(candidatesOnly));
+  $effect(() => _importedFilterStore.save(importedFilter));
+  $effect(() => _decisionFilterStore.save(decisionFilter));
 
   // watch for changes in sortBy, sortOrder, candidatesOnly, and perPage to reload
   $effect(() => {
@@ -129,10 +146,32 @@
     sortOrder;
     candidatesOnly;
     perPage;
+    importedFilter;
+    decisionFilter;
     if (mounted) {
       loadMedia(1);
     }
   });
+
+  $effect(() => {
+    if (!pendingOpenMediaId || !mediaData) return;
+    const match = mediaData.items.find((item) => item.id === pendingOpenMediaId);
+    if (match) {
+      selectedMedia = match;
+      showDetailDialog = true;
+      pendingOpenMediaId = null;
+    }
+  });
+
+  const loadFilterCatalog = async () => {
+    try {
+      filterCatalog = await get_api<MediaFilterCatalogResponse>(
+        `/api/media/filters?media_type=${mediaType}`,
+      );
+    } catch {
+      filterCatalog = null;
+    }
+  };
 
   // load media from API with filters and pagination
   const loadMedia = async (page: number = currentPage) => {
@@ -158,6 +197,12 @@
 
       if (candidatesOnly) {
         params.append("candidates_only", "true");
+      }
+      if (importedFilter && importedFilter !== ALL_IMPORTED_FILTERS) {
+        params.append("arr_tag", importedFilter);
+      }
+      if (decisionFilter && decisionFilter !== ALL_DECISION_FILTERS) {
+        params.append("decision_state", decisionFilter);
       }
 
       const data = await get_api<
@@ -282,7 +327,20 @@
 
   // initial load
   onMount(() => {
+    const hashQuery = window.location.hash.split("?")[1] ?? "";
+    const searchParams = new URLSearchParams(hashQuery);
+    const initialSearch = searchParams.get("search");
+    const initialOpen = searchParams.get("open");
+    const inspectorRequested = searchParams.get("inspector") === "1";
+    if (initialSearch) {
+      searchQuery = initialSearch;
+    }
+    if (initialOpen && inspectorRequested) {
+      const parsedId = parseInt(initialOpen, 10);
+      pendingOpenMediaId = Number.isNaN(parsedId) ? null : parsedId;
+    }
     mounted = true;
+    void loadFilterCatalog();
     loadMedia(currentPage);
   });
 
@@ -366,6 +424,50 @@
             >Reclaim candidates only</span
           >
         </label>
+
+        <div class="flex flex-1 flex-col gap-2 md:flex-row">
+          <Select.Root type="single" bind:value={importedFilter}>
+            <Select.Trigger class="w-full bg-card text-card-foreground">
+              {#if importedFilter && importedFilter !== ALL_IMPORTED_FILTERS}
+                {filterCatalog?.imported.find((item) => item.key === importedFilter)
+                  ?.label ?? "Imported Filter"}
+              {:else}
+                Imported ARR Filter
+              {/if}
+            </Select.Trigger>
+            <Select.Content class="bg-card">
+              <Select.Item value={ALL_IMPORTED_FILTERS} label="All imported filters" class="text-card-foreground">
+                All imported filters
+              </Select.Item>
+              {#each filterCatalog?.imported ?? [] as option}
+                <Select.Item value={option.key} label={option.label} class="text-card-foreground">
+                  {option.group} • {option.label}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+
+          <Select.Root type="single" bind:value={decisionFilter}>
+            <Select.Trigger class="w-full bg-card text-card-foreground">
+              {#if decisionFilter && decisionFilter !== ALL_DECISION_FILTERS}
+                {filterCatalog?.native.find((item) => item.key === decisionFilter)
+                  ?.label ?? "Decision Filter"}
+              {:else}
+                MediaMasterr Filter
+              {/if}
+            </Select.Trigger>
+            <Select.Content class="bg-card">
+              <Select.Item value={ALL_DECISION_FILTERS} label="All decision filters" class="text-card-foreground">
+                All decision filters
+              </Select.Item>
+              {#each filterCatalog?.native ?? [] as option}
+                <Select.Item value={option.key} label={option.label} class="text-card-foreground">
+                  {option.label}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+        </div>
 
         <!-- per page + poster size -->
         <div class="flex items-center gap-3 sm:contents">

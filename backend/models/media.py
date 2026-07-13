@@ -534,6 +534,18 @@ class PaginatedMediaResponse(BaseModel):
     total_pages: int
 
 
+class MediaFilterOptionResponse(BaseModel):
+    key: str
+    label: str
+    group: str
+    read_only: bool = False
+
+
+class MediaFilterCatalogResponse(BaseModel):
+    imported: list[MediaFilterOptionResponse]
+    native: list[MediaFilterOptionResponse]
+
+
 @dataclass(slots=True)
 class CandidateDisplayGroup:
     group_kind: str

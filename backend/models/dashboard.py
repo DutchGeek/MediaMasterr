@@ -41,6 +41,7 @@ class DashboardActivityItem(BaseModel):
     actor_display: str | None = None
     media_type: str | None = None
     media_title: str | None = None
+    target_path: str | None = None
 
 
 class DashboardViewer(BaseModel):
@@ -87,6 +88,8 @@ class DashboardResponse(BaseModel):
     requests: DashboardRequestsSummary
     services: list[DashboardServiceSummary]
     activity: list[DashboardActivityItem]
+    media_activity: list[DashboardActivityItem]
+    system_activity: list[DashboardActivityItem]
     viewer: DashboardViewer
     media_server_configured: bool
     decision_summary: DashboardDecisionSummary

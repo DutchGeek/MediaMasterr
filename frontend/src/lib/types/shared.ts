@@ -1152,6 +1152,7 @@ export interface DashboardActivityItem {
   actor_display: string | null;
   media_type: string | null;
   media_title: string | null;
+  target_path: string | null;
 }
 
 export interface DashboardViewer {
@@ -1198,9 +1199,23 @@ export interface DashboardResponse {
   requests: DashboardRequestsSummary;
   services: DashboardServiceSummary[];
   activity: DashboardActivityItem[];
+  media_activity: DashboardActivityItem[];
+  system_activity: DashboardActivityItem[];
   viewer: DashboardViewer;
   media_server_configured: boolean;
   decision_summary: DashboardDecisionSummary;
+}
+
+export interface MediaFilterOptionResponse {
+  key: string;
+  label: string;
+  group: string;
+  read_only: boolean;
+}
+
+export interface MediaFilterCatalogResponse {
+  imported: MediaFilterOptionResponse[];
+  native: MediaFilterOptionResponse[];
 }
 
 export interface ProtectionStatusResponse {

@@ -42,6 +42,7 @@ from backend.models.dashboard import (
     DashboardServiceSummary,
     DashboardViewer,
 )
+from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -218,130 +219,17 @@ async def get_dashboard(
             )
         ]
 
-    request_activity = (
-        select(
-            literal("request").label("activity_type"),
-            ProtectionRequest.id.label("source_id"),
-            ProtectionRequest.created_at.label("created_at"),
-            ProtectionRequest.status.label("request_status"),
-            literal(None, type_=TaskRun.task.type).label("task"),
-            literal(None, type_=TaskRun.status.type).label("task_status"),
-            literal(None, type_=TaskRun.items_processed.type).label("items_processed"),
-            ProtectionRequest.media_type.label("media_type"),
-            Movie.title.label("movie_title"),
-            Series.title.label("series_title"),
-            User.username.label("username"),
-            User.display_name.label("display_name"),
-        )
-        .outerjoin(User, User.id == ProtectionRequest.requested_by_user_id)
-        .outerjoin(Movie, Movie.id == ProtectionRequest.movie_id)
-        .outerjoin(Series, Series.id == ProtectionRequest.series_id)
+    media_activity, system_activity = await EventEngine.build_dashboard_activity(
+        db,
+        current_user=current_user,
+        is_admin=is_admin,
     )
-    if not is_admin:
-        request_activity = request_activity.where(
-            ProtectionRequest.requested_by_user_id == current_user.id
-        )
-
-    task_activity = select(
-        literal("task").label("activity_type"),
-        TaskRun.id.label("source_id"),
-        TaskRun.created_at.label("created_at"),
-        literal(None, type_=ProtectionRequest.status.type).label("request_status"),
-        TaskRun.task.label("task"),
-        TaskRun.status.label("task_status"),
-        TaskRun.items_processed.label("items_processed"),
-        literal(None, type_=ProtectionRequest.media_type.type).label("media_type"),
-        literal(None, type_=Movie.title.type).label("movie_title"),
-        literal(None, type_=Series.title.type).label("series_title"),
-        literal(None, type_=User.username.type).label("username"),
-        literal(None, type_=User.display_name.type).label("display_name"),
-    )
-
-    activity_parts = [request_activity, task_activity]
-
-    if is_admin:
-        protected_activity = (
-            select(
-                literal("protected").label("activity_type"),
-                ProtectedMedia.id.label("source_id"),
-                ProtectedMedia.created_at.label("created_at"),
-                literal(None, type_=ProtectionRequest.status.type).label(
-                    "request_status"
-                ),
-                literal(None, type_=TaskRun.task.type).label("task"),
-                literal(None, type_=TaskRun.status.type).label("task_status"),
-                literal(None, type_=TaskRun.items_processed.type).label(
-                    "items_processed"
-                ),
-                ProtectedMedia.media_type.label("media_type"),
-                Movie.title.label("movie_title"),
-                Series.title.label("series_title"),
-                User.username.label("username"),
-                User.display_name.label("display_name"),
-            )
-            .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
-            .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
-            .outerjoin(Series, Series.id == ProtectedMedia.series_id)
-        )
-        activity_parts.append(protected_activity)
-
-    activity_union = union_all(*activity_parts).subquery()
-    activity_rows = (
-        await db.execute(
-            select(activity_union)
-            .order_by(activity_union.c.created_at.desc())
-            .limit(20)
-        )
-    ).all()
-
-    activity: list[DashboardActivityItem] = []
-    for row in activity_rows:
-        actor_display = row.display_name or row.username if row.username else None
-        media_title = (
-            row.movie_title if row.media_type == MediaType.MOVIE else row.series_title
-        )
-
-        if row.activity_type == "request" and row.request_status:
-            activity.append(
-                DashboardActivityItem(
-                    id=f"request-{row.source_id}",
-                    type="request",
-                    title=f"Exception request {row.request_status.value}",
-                    subtitle=media_title,
-                    created_at=to_utc_isoformat(row.created_at) or "",
-                    actor_display=actor_display,
-                    media_type=row.media_type.value if row.media_type else None,
-                    media_title=media_title,
-                )
-            )
-        elif row.activity_type == "task" and row.task and row.task_status:
-            subtitle = (
-                f"Processed {row.items_processed} items"
-                if row.items_processed is not None
-                else None
-            )
-            activity.append(
-                DashboardActivityItem(
-                    id=f"task-{row.source_id}",
-                    type="task",
-                    title=f"{row.task.friendly_name()} {row.task_status.value}",
-                    subtitle=subtitle,
-                    created_at=to_utc_isoformat(row.created_at) or "",
-                )
-            )
-        elif row.activity_type == "protected":
-            activity.append(
-                DashboardActivityItem(
-                    id=f"protected-{row.source_id}",
-                    type="protected",
-                    title="Media added to protected list",
-                    subtitle=media_title,
-                    created_at=to_utc_isoformat(row.created_at) or "",
-                    actor_display=actor_display,
-                    media_type=row.media_type.value if row.media_type else None,
-                    media_title=media_title,
-                )
-            )
+    activity: list[DashboardActivityItem] = [
+        *media_activity[:10],
+        *system_activity[:10],
+    ]
+    activity.sort(key=lambda item: item.created_at, reverse=True)
+    activity = activity[:20]
 
     kpis = DashboardKpis(
         total_movies=movie_count,
@@ -502,6 +390,8 @@ async def get_dashboard(
         requests=request_summary,
         services=services,
         activity=activity,
+        media_activity=media_activity,
+        system_activity=system_activity,
         viewer=viewer,
         media_server_configured=media_server_configured,
         decision_summary=decision_summary,
