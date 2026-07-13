@@ -1334,7 +1334,7 @@ async def get_media_filters(
     media_type: MediaType = Query(MediaType.MOVIE),
 ) -> MediaFilterCatalogResponse:
     required_page = (
-        PageAccess.Movies if media_type is MediaType.MOVIE else PageAccess.Series
+        PageAccess.MOVIES if media_type is MediaType.MOVIE else PageAccess.SERIES
     )
     if not has_page_access(current_user, required_page):
         raise HTTPException(
