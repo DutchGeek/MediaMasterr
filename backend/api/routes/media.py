@@ -66,6 +66,7 @@ from backend.models.media import (
     SeriesServiceRefResponse,
     SeriesWithStatus,
 )
+from backend.services.decision_engine import DecisionEngine, DecisionSignals
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -122,6 +123,51 @@ def _candidate_effective_size_expr() -> Any:
         Series.size,
         0,
     )
+
+
+async def _get_auto_delete_delays(db: AsyncSession) -> tuple[int, int]:
+    settings = (await db.execute(select(GeneralSettings))).scalars().first()
+    movie_delay = settings.auto_delete_movie_delay_days if settings is not None else 14
+    series_delay = settings.auto_delete_series_delay_days if settings is not None else 7
+    return movie_delay, series_delay
+
+
+async def _get_rule_actions_by_ids(
+    db: AsyncSession, rule_ids: set[int]
+) -> dict[int, dict[str, Any] | None]:
+    if not rule_ids:
+        return {}
+    return {
+        rule.id: rule.action
+        for rule in (
+            await db.execute(select(ReclaimRule).where(ReclaimRule.id.in_(rule_ids)))
+        )
+        .scalars()
+        .all()
+    }
+
+
+def _candidate_policy_values(
+    candidate: ReclaimCandidate | None,
+    *,
+    media_type: MediaType,
+    rule_actions_by_id: dict[int, dict[str, Any] | None],
+    movie_delay_days: int,
+    series_delay_days: int,
+    now: datetime,
+) -> tuple[datetime | None, datetime | None, int | None]:
+    if candidate is None:
+        return None, None, None
+    policy = resolve_auto_delete_policy(
+        media_type=media_type,
+        matched_rule_ids=cast(list[int], candidate.matched_rule_ids or []),
+        created_at=cast(datetime, candidate.created_at),
+        rule_actions_by_id=rule_actions_by_id,
+        movie_delay_days=movie_delay_days,
+        series_delay_days=series_delay_days,
+        now=now,
+    )
+    return candidate.created_at, policy.eligible_at, policy.delay_days
 
 
 def _apply_candidate_filters(
@@ -516,12 +562,22 @@ async def get_movies(
 
     # fetch status information for all movies
     movie_ids = [m.id for m in movies]
+    movie_delay_days, series_delay_days = await _get_auto_delete_delays(db)
 
     # get candidates
     candidates_result = await db.execute(
         select(ReclaimCandidate).where(ReclaimCandidate.movie_id.in_(movie_ids))
     )
     candidates = {c.movie_id: c for c in candidates_result.scalars().all()}
+    movie_rule_actions_by_id = await _get_rule_actions_by_ids(
+        db,
+        {
+            rule_id
+            for candidate in candidates.values()
+            for rule_id in (candidate.matched_rule_ids or [])
+            if isinstance(rule_id, int)
+        },
+    )
 
     # get protected entries
     now = datetime.now(UTC)
@@ -561,6 +617,19 @@ async def get_movies(
         protection_entry = protected.get(movie.id)
         request = requests.get(movie.id)
         delete_request = delete_requests.get(movie.id)
+        candidate_created_at, candidate_eligible_at, candidate_delay_days = (
+            _candidate_policy_values(
+                candidate,
+                media_type=MediaType.MOVIE,
+                rule_actions_by_id=movie_rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+        )
+        movie_library_names = [
+            version.library_name for version in movie.versions if version.library_name
+        ]
 
         status = MediaStatusInfo(
             is_candidate=candidate is not None,
@@ -569,11 +638,21 @@ async def get_movies(
             candidate_space_bytes=candidate.estimated_space_bytes
             if candidate
             else None,
+            candidate_created_at=to_utc_isoformat(candidate_created_at),
+            candidate_eligible_at=to_utc_isoformat(candidate_eligible_at),
+            candidate_delay_days=candidate_delay_days,
             is_protected=protection_entry is not None,
             protected_reason=protection_entry.reason if protection_entry else None,
             protected_permanent=protection_entry.permanent
             if protection_entry
             else True,
+            protected_created_at=(
+                to_utc_isoformat(protection_entry.created_at) if protection_entry else None
+            ),
+            protected_expires_at=(
+                to_utc_isoformat(protection_entry.expires_at) if protection_entry else None
+            ),
+            protected_source=protection_entry.source if protection_entry else None,
             has_pending_request=request is not None,
             request_id=request.id if request else None,
             request_status=request.status if request else None,
@@ -582,6 +661,37 @@ async def get_movies(
             delete_request_id=delete_request.id if delete_request else None,
             delete_request_status=delete_request.status if delete_request else None,
             delete_request_reason=delete_request.reason if delete_request else None,
+        )
+        status.decision = DecisionEngine.evaluate(
+            DecisionSignals(
+                media_type=MediaType.MOVIE,
+                title=movie.title,
+                size_bytes=movie.size,
+                view_count=movie.view_count,
+                last_viewed_at=movie.last_viewed_at,
+                added_at=movie.added_at,
+                arr_added_at=movie.arr_added_at,
+                is_candidate=status.is_candidate,
+                candidate_reason=status.candidate_reason,
+                candidate_space_bytes=status.candidate_space_bytes,
+                candidate_created_at=candidate_created_at,
+                candidate_eligible_at=candidate_eligible_at,
+                candidate_delay_days=status.candidate_delay_days,
+                is_protected=status.is_protected,
+                protected_reason=status.protected_reason,
+                protected_permanent=status.protected_permanent,
+                protected_source=status.protected_source,
+                protected_rule_name=status.protected_rule_name,
+                protected_created_at=protection_entry.created_at if protection_entry else None,
+                protected_expires_at=protection_entry.expires_at if protection_entry else None,
+                has_pending_request=status.has_pending_request,
+                request_reason=status.request_reason,
+                has_pending_delete_request=status.has_pending_delete_request,
+                delete_request_reason=status.delete_request_reason,
+                tags=movie.arr_tags,
+                library_names=movie_library_names,
+            ),
+            now=now,
         )
 
         movie_arr_refs_result = await db.execute(
@@ -704,6 +814,7 @@ async def get_movies(
             "last_viewed_at": to_utc_isoformat(movie.last_viewed_at),
             "view_count": movie.view_count,
             "status": status,
+            "arr_tags": movie.arr_tags,
             "added_at": to_utc_isoformat(movie.added_at),
             "arr_added_at": to_utc_isoformat(movie.arr_added_at),
         }
@@ -788,6 +899,7 @@ async def get_series(
 
     # fetch status information for all series
     series_ids = [s.id for s in series_list]
+    movie_delay_days, series_delay_days = await _get_auto_delete_delays(db)
 
     # count library seasons per series (one GROUP BY query for the whole page)
     season_counts_result = await db.execute(
@@ -815,6 +927,15 @@ async def get_series(
         )
     )
     candidates = {c.series_id: c for c in candidates_result.scalars().all()}
+    series_rule_actions_by_id = await _get_rule_actions_by_ids(
+        db,
+        {
+            rule_id
+            for candidate in candidates.values()
+            for rule_id in (candidate.matched_rule_ids or [])
+            if isinstance(rule_id, int)
+        },
+    )
 
     # collect series_ids that have at least one season level candidate
     season_cands_result = await db.execute(
@@ -825,6 +946,26 @@ async def get_series(
     )
     series_with_season_cands: set[int] = {
         row[0] for row in season_cands_result.all() if row[0] is not None
+    }
+    series_child_candidate_stats_result = await db.execute(
+        select(
+            ReclaimCandidate.series_id,
+            func.count(ReclaimCandidate.id),
+            func.coalesce(func.sum(ReclaimCandidate.estimated_space_bytes), 0),
+        )
+        .where(
+            ReclaimCandidate.series_id.in_(series_ids),
+            or_(
+                ReclaimCandidate.season_id.is_not(None),
+                ReclaimCandidate.episode_id.is_not(None),
+            ),
+        )
+        .group_by(ReclaimCandidate.series_id)
+    )
+    series_child_candidate_stats: dict[int, tuple[int, int]] = {
+        int(series_id): (int(count), int(space_bytes or 0))
+        for series_id, count, space_bytes in series_child_candidate_stats_result.all()
+        if series_id is not None
     }
 
     # get protected entries
@@ -868,6 +1009,22 @@ async def get_series(
         protection_entry = protected.get(series.id)
         request = requests.get(series.id)
         delete_request = delete_requests.get(series.id)
+        candidate_created_at, candidate_eligible_at, candidate_delay_days = (
+            _candidate_policy_values(
+                candidate,
+                media_type=MediaType.SERIES,
+                rule_actions_by_id=series_rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+        )
+        child_candidate_count, child_candidate_space_bytes = series_child_candidate_stats.get(
+            series.id, (0, 0)
+        )
+        library_names = [
+            ref.library_name for ref in series.service_refs if ref.library_name
+        ]
 
         status = MediaStatusInfo(
             is_candidate=candidate is not None,
@@ -876,11 +1033,21 @@ async def get_series(
             candidate_space_bytes=candidate.estimated_space_bytes
             if candidate
             else None,
+            candidate_created_at=to_utc_isoformat(candidate_created_at),
+            candidate_eligible_at=to_utc_isoformat(candidate_eligible_at),
+            candidate_delay_days=candidate_delay_days,
             is_protected=protection_entry is not None,
             protected_reason=protection_entry.reason if protection_entry else None,
             protected_permanent=protection_entry.permanent
             if protection_entry
             else True,
+            protected_created_at=(
+                to_utc_isoformat(protection_entry.created_at) if protection_entry else None
+            ),
+            protected_expires_at=(
+                to_utc_isoformat(protection_entry.expires_at) if protection_entry else None
+            ),
+            protected_source=protection_entry.source if protection_entry else None,
             has_pending_request=request is not None,
             request_id=request.id if request else None,
             request_status=request.status if request else None,
@@ -889,6 +1056,41 @@ async def get_series(
             delete_request_id=delete_request.id if delete_request else None,
             delete_request_status=delete_request.status if delete_request else None,
             delete_request_reason=delete_request.reason if delete_request else None,
+            child_candidate_count=child_candidate_count,
+            child_candidate_space_bytes=child_candidate_space_bytes,
+        )
+        status.decision = DecisionEngine.evaluate(
+            DecisionSignals(
+                media_type=MediaType.SERIES,
+                title=series.title,
+                size_bytes=series.size,
+                view_count=series.view_count,
+                last_viewed_at=series.last_viewed_at,
+                added_at=series.added_at,
+                arr_added_at=series.arr_added_at,
+                is_candidate=status.is_candidate,
+                candidate_reason=status.candidate_reason,
+                candidate_space_bytes=status.candidate_space_bytes,
+                candidate_created_at=candidate_created_at,
+                candidate_eligible_at=candidate_eligible_at,
+                candidate_delay_days=status.candidate_delay_days,
+                is_protected=status.is_protected,
+                protected_reason=status.protected_reason,
+                protected_permanent=status.protected_permanent,
+                protected_source=status.protected_source,
+                protected_rule_name=status.protected_rule_name,
+                protected_created_at=protection_entry.created_at if protection_entry else None,
+                protected_expires_at=protection_entry.expires_at if protection_entry else None,
+                has_pending_request=status.has_pending_request,
+                request_reason=status.request_reason,
+                has_pending_delete_request=status.has_pending_delete_request,
+                delete_request_reason=status.delete_request_reason,
+                child_candidate_count=child_candidate_count,
+                child_candidate_space_bytes=child_candidate_space_bytes,
+                tags=series.arr_tags,
+                library_names=library_names,
+            ),
+            now=now,
         )
 
         series_arr_refs_result = await db.execute(
@@ -977,6 +1179,7 @@ async def get_series(
             "max_audio_channels": series.max_audio_channels,
             "subtitle_languages": series.subtitle_languages,
             "status": status,
+            "arr_tags": series.arr_tags,
             "has_season_candidates": series.id in series_with_season_cands
             and candidate is None,
             "library_season_count": season_counts.get(series.id, 0),
@@ -1018,6 +1221,7 @@ async def get_series_seasons(
         .order_by(Season.season_number)
     )
     seasons = seasons_result.scalars().all()
+    movie_delay_days, series_delay_days = await _get_auto_delete_delays(db)
 
     season_ids = [s.id for s in seasons]
     if not season_ids:
@@ -1031,6 +1235,15 @@ async def get_series_seasons(
         )
     )
     season_candidates = {c.season_id: c for c in cand_result.scalars().all()}
+    season_rule_actions_by_id = await _get_rule_actions_by_ids(
+        db,
+        {
+            rule_id
+            for candidate in season_candidates.values()
+            for rule_id in (candidate.matched_rule_ids or [])
+            if isinstance(rule_id, int)
+        },
+    )
 
     # season level protection entries
     now = datetime.now(UTC)
@@ -1099,14 +1312,30 @@ async def get_series_seasons(
         delete_req = (
             season_delete_requests.get(season.id) or whole_series_delete_request
         )
+        candidate_created_at, candidate_eligible_at, candidate_delay_days = (
+            _candidate_policy_values(
+                cand,
+                media_type=MediaType.SERIES,
+                rule_actions_by_id=season_rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+        )
         season_status = MediaStatusInfo(
             is_candidate=cand is not None,
             candidate_id=cand.id if cand else None,
             candidate_reason=cand.reason if cand else None,
             candidate_space_bytes=cand.estimated_space_bytes if cand else None,
+            candidate_created_at=to_utc_isoformat(candidate_created_at),
+            candidate_eligible_at=to_utc_isoformat(candidate_eligible_at),
+            candidate_delay_days=candidate_delay_days,
             is_protected=prot is not None,
             protected_reason=prot.reason if prot else None,
             protected_permanent=prot.permanent if prot else True,
+            protected_created_at=(to_utc_isoformat(prot.created_at) if prot else None),
+            protected_expires_at=(to_utc_isoformat(prot.expires_at) if prot else None),
+            protected_source=prot.source if prot else None,
             has_pending_request=req is not None,
             request_id=req.id if req else None,
             request_status=req.status if req else None,
@@ -1115,6 +1344,35 @@ async def get_series_seasons(
             delete_request_id=delete_req.id if delete_req else None,
             delete_request_status=delete_req.status if delete_req else None,
             delete_request_reason=delete_req.reason if delete_req else None,
+        )
+        season_status.decision = DecisionEngine.evaluate(
+            DecisionSignals(
+                media_type=MediaType.SERIES,
+                title=f"Season {season.season_number}",
+                size_bytes=season.size,
+                view_count=season.view_count or 0,
+                last_viewed_at=season.last_viewed_at,
+                added_at=season.added_at,
+                arr_added_at=season.arr_added_at,
+                is_candidate=season_status.is_candidate,
+                candidate_reason=season_status.candidate_reason,
+                candidate_space_bytes=season_status.candidate_space_bytes,
+                candidate_created_at=candidate_created_at,
+                candidate_eligible_at=candidate_eligible_at,
+                candidate_delay_days=season_status.candidate_delay_days,
+                is_protected=season_status.is_protected,
+                protected_reason=season_status.protected_reason,
+                protected_permanent=season_status.protected_permanent,
+                protected_source=season_status.protected_source,
+                protected_rule_name=season_status.protected_rule_name,
+                protected_created_at=prot.created_at if prot else None,
+                protected_expires_at=prot.expires_at if prot else None,
+                has_pending_request=season_status.has_pending_request,
+                request_reason=season_status.request_reason,
+                has_pending_delete_request=season_status.has_pending_delete_request,
+                delete_request_reason=season_status.delete_request_reason,
+            ),
+            now=now,
         )
         items.append(
             SeasonWithStatus(
@@ -1167,6 +1425,7 @@ async def get_series_episodes(
     rows = episodes_result.all()
     if not rows:
         return []
+    movie_delay_days, series_delay_days = await _get_auto_delete_delays(db)
 
     episode_ids = [row.Episode.id for row in rows]
 
@@ -1174,6 +1433,15 @@ async def get_series_episodes(
         select(ReclaimCandidate).where(ReclaimCandidate.episode_id.in_(episode_ids))
     )
     episode_candidates = {c.episode_id: c for c in cand_result.scalars().all()}
+    episode_rule_actions_by_id = await _get_rule_actions_by_ids(
+        db,
+        {
+            rule_id
+            for candidate in episode_candidates.values()
+            for rule_id in (candidate.matched_rule_ids or [])
+            if isinstance(rule_id, int)
+        },
+    )
 
     now = datetime.now(UTC)
     prot_result = await db.execute(
@@ -1264,6 +1532,68 @@ async def get_series_episodes(
             or season_delete_requests.get(season.id)
             or whole_series_delete_request
         )
+        candidate_created_at, candidate_eligible_at, candidate_delay_days = (
+            _candidate_policy_values(
+                cand,
+                media_type=MediaType.SERIES,
+                rule_actions_by_id=episode_rule_actions_by_id,
+                movie_delay_days=movie_delay_days,
+                series_delay_days=series_delay_days,
+                now=now,
+            )
+        )
+        episode_status = MediaStatusInfo(
+            is_candidate=cand is not None,
+            candidate_id=cand.id if cand else None,
+            candidate_reason=cand.reason if cand else None,
+            candidate_space_bytes=cand.estimated_space_bytes if cand else None,
+            candidate_created_at=to_utc_isoformat(candidate_created_at),
+            candidate_eligible_at=to_utc_isoformat(candidate_eligible_at),
+            candidate_delay_days=candidate_delay_days,
+            is_protected=prot is not None,
+            protected_reason=prot.reason if prot else None,
+            protected_permanent=prot.permanent if prot else True,
+            protected_created_at=(to_utc_isoformat(prot.created_at) if prot else None),
+            protected_expires_at=(to_utc_isoformat(prot.expires_at) if prot else None),
+            protected_source=prot.source if prot else None,
+            has_pending_request=req is not None,
+            request_id=req.id if req else None,
+            request_status=req.status if req else None,
+            request_reason=req.reason if req else None,
+            has_pending_delete_request=delete_req is not None,
+            delete_request_id=delete_req.id if delete_req else None,
+            delete_request_status=delete_req.status if delete_req else None,
+            delete_request_reason=delete_req.reason if delete_req else None,
+        )
+        episode_status.decision = DecisionEngine.evaluate(
+            DecisionSignals(
+                media_type=MediaType.SERIES,
+                title=episode.name or f"Episode {episode.episode_number}",
+                size_bytes=episode.size,
+                view_count=episode.view_count,
+                last_viewed_at=episode.last_viewed_at,
+                added_at=episode.air_date,
+                arr_added_at=episode.arr_added_at,
+                is_candidate=episode_status.is_candidate,
+                candidate_reason=episode_status.candidate_reason,
+                candidate_space_bytes=episode_status.candidate_space_bytes,
+                candidate_created_at=candidate_created_at,
+                candidate_eligible_at=candidate_eligible_at,
+                candidate_delay_days=episode_status.candidate_delay_days,
+                is_protected=episode_status.is_protected,
+                protected_reason=episode_status.protected_reason,
+                protected_permanent=episode_status.protected_permanent,
+                protected_source=episode_status.protected_source,
+                protected_rule_name=episode_status.protected_rule_name,
+                protected_created_at=prot.created_at if prot else None,
+                protected_expires_at=prot.expires_at if prot else None,
+                has_pending_request=episode_status.has_pending_request,
+                request_reason=episode_status.request_reason,
+                has_pending_delete_request=episode_status.has_pending_delete_request,
+                delete_request_reason=episode_status.delete_request_reason,
+            ),
+            now=now,
+        )
         items.append(
             EpisodeWithStatus(
                 id=episode.id,
@@ -1276,23 +1606,7 @@ async def get_series_episodes(
                 air_date=to_utc_isoformat(episode.air_date),
                 arr_added_at=to_utc_isoformat(episode.arr_added_at),
                 last_viewed_at=to_utc_isoformat(episode.last_viewed_at),
-                status=MediaStatusInfo(
-                    is_candidate=cand is not None,
-                    candidate_id=cand.id if cand else None,
-                    candidate_reason=cand.reason if cand else None,
-                    candidate_space_bytes=cand.estimated_space_bytes if cand else None,
-                    is_protected=prot is not None,
-                    protected_reason=prot.reason if prot else None,
-                    protected_permanent=prot.permanent if prot else True,
-                    has_pending_request=req is not None,
-                    request_id=req.id if req else None,
-                    request_status=req.status if req else None,
-                    request_reason=req.reason if req else None,
-                    has_pending_delete_request=delete_req is not None,
-                    delete_request_id=delete_req.id if delete_req else None,
-                    delete_request_status=delete_req.status if delete_req else None,
-                    delete_request_reason=delete_req.reason if delete_req else None,
-                ),
+                status=episode_status,
             )
         )
 

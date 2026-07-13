@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { get_api } from "$lib/api";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -12,11 +13,15 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { auth } from "$lib/stores/auth";
   import type {
+    EpisodeWithStatus,
     MediaItem,
     MediaType,
     MovieWithStatus,
+    SeasonWithStatus,
     SeriesWithStatus,
   } from "$lib/types/shared";
+  import DecisionBadge from "$lib/components/decision/decision-badge.svelte";
+  import DecisionTimeline from "$lib/components/decision/decision-timeline.svelte";
   import MetadataSources from "$lib/components/media/metadata-sources.svelte";
   import { Permission } from "$lib/types/shared";
   import { formatFileSize, formatRuntime } from "$lib/utils/formatters";
@@ -24,6 +29,9 @@
 
   const TMDB_POSTER_WIDTH = 342;
   const TMDB_BACKDROP_WIDTH = 780;
+  let seasons = $state<SeasonWithStatus[]>([]);
+  let episodes = $state<EpisodeWithStatus[]>([]);
+  let loadingSeriesBreakdown = $state(false);
 
   interface Props {
     open: boolean;
@@ -91,6 +99,42 @@
   );
 
   const tmdbMediaType = $derived(mediaType === "series" ? "tv" : "movie");
+
+  const groupedEpisodes = $derived.by(() => {
+    const groups = new Map<number, EpisodeWithStatus[]>();
+    for (const episode of episodes) {
+      const bucket = groups.get(episode.season_id) ?? [];
+      bucket.push(episode);
+      groups.set(episode.season_id, bucket);
+    }
+    return groups;
+  });
+
+  const loadSeriesBreakdown = async (seriesId: number) => {
+    loadingSeriesBreakdown = true;
+    try {
+      const [seasonPayload, episodePayload] = await Promise.all([
+        get_api<SeasonWithStatus[]>(`/api/media/series/${seriesId}/seasons`),
+        get_api<EpisodeWithStatus[]>(`/api/media/series/${seriesId}/episodes`),
+      ]);
+      seasons = seasonPayload;
+      episodes = episodePayload;
+    } catch {
+      seasons = [];
+      episodes = [];
+    } finally {
+      loadingSeriesBreakdown = false;
+    }
+  };
+
+  $effect(() => {
+    if (open && media && isSeries(media)) {
+      void loadSeriesBreakdown(media.id);
+      return;
+    }
+    seasons = [];
+    episodes = [];
+  });
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => !isOpen && handleClose()}>
@@ -219,6 +263,9 @@
                   {/if}
                 </div>
               {/if}
+              <div class="mt-3">
+                <DecisionBadge decision={media.status.decision} />
+              </div>
             </div>
           </div>
 
@@ -235,6 +282,98 @@
             <div class="media-dialog__header-content">
               <!-- title and status badges -->
               <div>
+
+                <div class="rounded-xl border border-border bg-card/80 p-4 space-y-4">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Decision</p>
+                    <h3 class="text-lg font-semibold text-foreground mt-1">
+                      {media.status.decision?.display_name ?? "Unknown"}
+                    </h3>
+                    <p class="text-sm text-muted-foreground mt-1">
+                      {media.status.decision?.explanation ?? "No decision explanation available yet."}
+                    </p>
+                  </div>
+
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div class="rounded-lg border border-border bg-background/60 p-3">
+                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">Why</p>
+                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.explanation ?? "Unknown"}</p>
+                    </div>
+                    <div class="rounded-lg border border-border bg-background/60 p-3">
+                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">What Next</p>
+                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.recommended_action ?? "Review manually"}</p>
+                    </div>
+                    <div class="rounded-lg border border-border bg-background/60 p-3">
+                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">When</p>
+                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.remaining_label ?? "No timer"}</p>
+                    </div>
+                    <div class="rounded-lg border border-border bg-background/60 p-3">
+                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">How Much</p>
+                      <p class="mt-1 text-sm text-foreground">
+                        {media.status.decision?.reclaimable_size_bytes != null
+                          ? formatFileSize(media.status.decision.reclaimable_size_bytes)
+                          : "Unknown"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <DecisionTimeline decision={media.status.decision} />
+                </div>
+                {#if isSeries(media)}
+                  <div class="rounded-xl border border-border bg-card/80 p-4 space-y-4">
+                    <div class="flex items-center justify-between gap-3">
+                      <div>
+                        <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Series Drill-down</p>
+                        <h3 class="text-lg font-semibold text-foreground mt-1">Seasons and Episodes</h3>
+                      </div>
+                      {#if loadingSeriesBreakdown}
+                        <p class="text-xs text-muted-foreground">Loading…</p>
+                      {/if}
+                    </div>
+
+                    <div class="space-y-4">
+                      {#each seasons as season (season.id)}
+                        <article class="rounded-lg border border-border bg-background/60 p-4 space-y-3">
+                          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <h4 class="text-base font-semibold text-foreground">Season {season.season_number}</h4>
+                              <p class="text-sm text-muted-foreground">
+                                {season.episode_count ?? 0} episodes • {formatFileSize(season.size)}
+                              </p>
+                            </div>
+                            <div class="lg:max-w-sm">
+                              <DecisionBadge decision={season.status.decision} compact={true} />
+                            </div>
+                          </div>
+
+                          {#if groupedEpisodes.get(season.id)?.length}
+                            <div class="grid gap-2 md:grid-cols-2">
+                              {#each groupedEpisodes.get(season.id)?.slice(0, 4) ?? [] as episode (episode.id)}
+                                <div class="rounded-lg border border-border bg-card/80 p-3">
+                                  <div class="min-w-0">
+                                    <p class="text-sm font-medium text-foreground truncate">
+                                      E{episode.episode_number} {episode.name ?? "Unknown"}
+                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                      {formatFileSize(episode.size)}
+                                    </p>
+                                  </div>
+                                  <div class="mt-2">
+                                    <DecisionBadge decision={episode.status.decision} compact={true} />
+                                  </div>
+                                </div>
+                              {/each}
+                            </div>
+                          {/if}
+                        </article>
+                      {/each}
+
+                      {#if !loadingSeriesBreakdown && seasons.length === 0}
+                        <p class="text-sm text-muted-foreground">No season breakdown available.</p>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
                 <div class="flex items-start justify-between gap-4 mb-2">
                   <div class="flex-1">
                     <h2

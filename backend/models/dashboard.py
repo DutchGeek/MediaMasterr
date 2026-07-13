@@ -48,6 +48,40 @@ class DashboardViewer(BaseModel):
     can_view_admin_panels: bool
 
 
+class DashboardReadyToday(BaseModel):
+    movies: int
+    tv_seasons: int
+    episodes: int
+
+
+class DashboardBlockedSummary(BaseModel):
+    protected: int
+    waiting: int
+    attention_required: int
+
+
+class DashboardOpportunity(BaseModel):
+    title: str
+    media_type: str
+    scope: str
+    reclaimable_size_bytes: int
+
+
+class DashboardLibraryBucket(BaseModel):
+    label: str
+    reclaimable_size_bytes: int
+    item_count: int
+
+
+class DashboardDecisionSummary(BaseModel):
+    recoverable_space_bytes: int
+    ready_today: DashboardReadyToday
+    blocked: DashboardBlockedSummary
+    top_opportunities: list[DashboardOpportunity]
+    libraries: list[DashboardLibraryBucket]
+    recently_reclaimable: list[DashboardOpportunity]
+
+
 class DashboardResponse(BaseModel):
     kpis: DashboardKpis
     requests: DashboardRequestsSummary
@@ -55,3 +89,4 @@ class DashboardResponse(BaseModel):
     activity: list[DashboardActivityItem]
     viewer: DashboardViewer
     media_server_configured: bool
+    decision_summary: DashboardDecisionSummary

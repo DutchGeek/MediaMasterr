@@ -547,9 +547,16 @@ export interface MediaStatusInfo {
   candidate_id: number | null;
   candidate_reason: string | null;
   candidate_space_bytes: number | null;
+  candidate_created_at: string | null;
+  candidate_eligible_at: string | null;
+  candidate_delay_days: number | null;
   is_protected: boolean;
   protected_reason: string | null;
   protected_permanent: boolean;
+  protected_created_at: string | null;
+  protected_expires_at: string | null;
+  protected_source: string | null;
+  protected_rule_name: string | null;
   has_pending_request: boolean;
   request_id: number | null;
   request_status: string | null;
@@ -558,6 +565,38 @@ export interface MediaStatusInfo {
   delete_request_id: number | null;
   delete_request_status: string | null;
   delete_request_reason: string | null;
+  child_candidate_count: number;
+  child_candidate_space_bytes: number | null;
+  decision: DecisionInfo | null;
+}
+
+export interface DecisionBadgeInfo {
+  state: string;
+  label: string;
+  icon: string;
+  tone: string;
+}
+
+export interface DecisionTimelineStep {
+  key: string;
+  label: string;
+  status: "complete" | "current" | "pending" | "blocked";
+  detail: string | null;
+  progress_percent: number | null;
+}
+
+export interface DecisionInfo {
+  state: string;
+  priority: number;
+  badge: DecisionBadgeInfo;
+  display_name: string;
+  explanation: string;
+  remaining_label: string | null;
+  remaining_seconds: number | null;
+  reclaimable_size_bytes: number | null;
+  recommended_action: string;
+  library_group: string | null;
+  timeline: DecisionTimelineStep[];
 }
 
 export interface MovieVersion {
@@ -624,6 +663,7 @@ export interface MovieWithStatus {
   last_viewed_at: string | null;
   view_count: number;
   status: MediaStatusInfo;
+  arr_tags: string[] | null;
   added_at: string | null;
   arr_added_at: string | null;
 }
@@ -685,6 +725,7 @@ export interface SeriesWithStatus {
   last_viewed_at: string | null;
   view_count: number;
   status: MediaStatusInfo;
+  arr_tags: string[] | null;
   has_season_candidates: boolean;
   library_season_count: number;
   library_episode_count: number;
@@ -1118,6 +1159,40 @@ export interface DashboardViewer {
   can_view_admin_panels: boolean;
 }
 
+export interface DashboardReadyToday {
+  movies: number;
+  tv_seasons: number;
+  episodes: number;
+}
+
+export interface DashboardBlockedSummary {
+  protected: number;
+  waiting: number;
+  attention_required: number;
+}
+
+export interface DashboardOpportunity {
+  title: string;
+  media_type: string;
+  scope: string;
+  reclaimable_size_bytes: number;
+}
+
+export interface DashboardLibraryBucket {
+  label: string;
+  reclaimable_size_bytes: number;
+  item_count: number;
+}
+
+export interface DashboardDecisionSummary {
+  recoverable_space_bytes: number;
+  ready_today: DashboardReadyToday;
+  blocked: DashboardBlockedSummary;
+  top_opportunities: DashboardOpportunity[];
+  libraries: DashboardLibraryBucket[];
+  recently_reclaimable: DashboardOpportunity[];
+}
+
 export interface DashboardResponse {
   kpis: DashboardKpis;
   requests: DashboardRequestsSummary;
@@ -1125,6 +1200,7 @@ export interface DashboardResponse {
   activity: DashboardActivityItem[];
   viewer: DashboardViewer;
   media_server_configured: boolean;
+  decision_summary: DashboardDecisionSummary;
 }
 
 export interface ProtectionStatusResponse {

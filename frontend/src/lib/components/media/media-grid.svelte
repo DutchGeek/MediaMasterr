@@ -31,6 +31,18 @@
     onViewDetails,
     onPageChange,
   }: Props = $props();
+
+  const groupedItems = $derived.by(() => {
+    const items = data?.items ?? [];
+    const groups = new Map<string, MediaItem[]>();
+    for (const media of items) {
+      const key = media.status.decision?.library_group ?? "Ungrouped";
+      const bucket = groups.get(key) ?? [];
+      bucket.push(media);
+      groups.set(key, bucket);
+    }
+    return Array.from(groups.entries()).map(([name, items]) => ({ name, items }));
+  });
 </script>
 
 <div class="w-full">
@@ -49,21 +61,28 @@
       </p>
     </div>
   {:else}
-    <!-- grid -->
-    <div
-      class="grid gap-4 mb-4"
-      style="grid-template-columns: repeat(auto-fill, minmax({posterSize}px, 1fr))"
-    >
-      {#each data.items as media (media.id)}
-        <MediaCard
-          {media}
-          {mediaType}
-          {onRequestException}
-          {onRequestDelete}
-          {onViewDetails}
-        />
-      {/each}
-    </div>
+    {#each groupedItems as group (group.name)}
+      <section class="mb-6">
+        <div class="mb-3">
+          <h2 class="text-lg font-semibold text-foreground">{group.name}</h2>
+          <p class="text-xs text-muted-foreground">{group.items.length} item{group.items.length === 1 ? "" : "s"} on this page</p>
+        </div>
+        <div
+          class="grid gap-4 mb-4"
+          style="grid-template-columns: repeat(auto-fill, minmax({posterSize}px, 1fr))"
+        >
+          {#each group.items as media (media.id)}
+            <MediaCard
+              {media}
+              {mediaType}
+              {onRequestException}
+              {onRequestDelete}
+              {onViewDetails}
+            />
+          {/each}
+        </div>
+      </section>
+    {/each}
 
     <!-- pagination -->
     {#if data.total_pages > 1}

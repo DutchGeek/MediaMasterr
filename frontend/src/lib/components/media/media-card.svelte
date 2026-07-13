@@ -17,6 +17,7 @@
   } from "$lib/types/shared";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import Badge from "$lib/components/ui/badge/badge.svelte";
+  import DecisionBadge from "$lib/components/decision/decision-badge.svelte";
 
   const TMDB_POSTER_WIDTH = 500;
 
@@ -284,9 +285,11 @@
           <p class="text-sm text-gray-300">{media.year ?? "Unknown"}</p>
         </div>
 
+        <DecisionBadge decision={media.status.decision} compact={true} />
+
         <!-- action buttons (we move them to the right if the card is wide enough) -->
         <div
-          class="flex gap-1.5 z-20 {cardWidth > REQUEST_TEXT_MIN_WIDTH
+          class="mt-3 flex gap-1.5 z-20 {cardWidth > REQUEST_TEXT_MIN_WIDTH
             ? 'justify-end'
             : 'justify-center'}"
         >

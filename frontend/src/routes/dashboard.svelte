@@ -423,6 +423,111 @@
             </article>
           </section>
 
+          <section class="grid grid-cols-1 xl:grid-cols-4 gap-4">
+            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+              <p class="text-sm text-muted-foreground">Recoverable Space</p>
+              <p class="text-3xl font-bold text-emerald-500 mt-2">
+                {formatSize(dashboard.decision_summary.recoverable_space_bytes)}
+              </p>
+              <p class="text-xs text-muted-foreground mt-2">
+                Decision engine ready to reclaim right now
+              </p>
+            </article>
+
+            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+              <p class="text-sm text-muted-foreground">Ready Today</p>
+              <div class="mt-3 space-y-2 text-sm">
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Movies</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.movies}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">TV Seasons</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.tv_seasons}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Episodes</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.episodes}</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+              <p class="text-sm text-muted-foreground">Blocked</p>
+              <div class="mt-3 space-y-2 text-sm">
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Protected</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.protected}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Waiting</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.waiting}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-muted-foreground">Attention</span>
+                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.attention_required}</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+              <p class="text-sm text-muted-foreground">Recently Reclaimable</p>
+              <div class="mt-3 space-y-2 text-sm">
+                {#each dashboard.decision_summary.recently_reclaimable.slice(0, 3) as item}
+                  <div>
+                    <p class="font-medium text-foreground truncate">{item.title}</p>
+                    <p class="text-xs text-muted-foreground">{formatSize(item.reclaimable_size_bytes)} • {item.scope}</p>
+                  </div>
+                {/each}
+                {#if dashboard.decision_summary.recently_reclaimable.length === 0}
+                  <p class="text-xs text-muted-foreground">No recent reclaim candidates</p>
+                {/if}
+              </div>
+            </article>
+          </section>
+
+          <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <article class="bg-card rounded-lg border border-border p-5">
+              <h2 class="text-lg font-semibold text-foreground mb-4">Top Opportunities</h2>
+              <div class="space-y-3">
+                {#each dashboard.decision_summary.top_opportunities as opportunity}
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-medium text-foreground truncate">{opportunity.title}</p>
+                      <p class="text-xs text-muted-foreground">{opportunity.scope} • {capitalizeFirstLetter(opportunity.media_type)}</p>
+                    </div>
+                    <span class="shrink-0 text-sm font-semibold text-emerald-500">
+                      {formatSize(opportunity.reclaimable_size_bytes)}
+                    </span>
+                  </div>
+                {/each}
+                {#if dashboard.decision_summary.top_opportunities.length === 0}
+                  <p class="text-sm text-muted-foreground">No reclaim opportunities available.</p>
+                {/if}
+              </div>
+            </article>
+
+            <article class="bg-card rounded-lg border border-border p-5">
+              <h2 class="text-lg font-semibold text-foreground mb-4">Libraries</h2>
+              <div class="space-y-3">
+                {#each dashboard.decision_summary.libraries as library}
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-medium text-foreground truncate">{library.label}</p>
+                      <p class="text-xs text-muted-foreground">{library.item_count} reclaimable item{library.item_count === 1 ? "" : "s"}</p>
+                    </div>
+                    <span class="shrink-0 text-sm font-semibold text-primary">
+                      {formatSize(library.reclaimable_size_bytes)}
+                    </span>
+                  </div>
+                {/each}
+                {#if dashboard.decision_summary.libraries.length === 0}
+                  <p class="text-sm text-muted-foreground">No grouped reclaimable libraries yet.</p>
+                {/if}
+              </div>
+            </article>
+          </section>
+
           <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <!-- movies -->
             <article

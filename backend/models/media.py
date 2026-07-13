@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -255,10 +256,17 @@ class MediaStatusInfo(BaseModel):
     candidate_id: int | None = None
     candidate_reason: str | None = None
     candidate_space_bytes: int | None = None
+    candidate_created_at: str | None = None
+    candidate_eligible_at: str | None = None
+    candidate_delay_days: int | None = None
 
     is_protected: bool = False
     protected_reason: str | None = None
     protected_permanent: bool = True
+    protected_created_at: str | None = None
+    protected_expires_at: str | None = None
+    protected_source: str | None = None
+    protected_rule_name: str | None = None
 
     has_pending_request: bool = False
     request_id: int | None = None
@@ -269,6 +277,38 @@ class MediaStatusInfo(BaseModel):
     delete_request_id: int | None = None
     delete_request_status: str | None = None
     delete_request_reason: str | None = None
+    child_candidate_count: int = 0
+    child_candidate_space_bytes: int | None = None
+    decision: DecisionInfo | None = None
+
+
+class DecisionBadgeInfo(BaseModel):
+    state: str
+    label: str
+    icon: str
+    tone: str
+
+
+class DecisionTimelineStep(BaseModel):
+    key: str
+    label: str
+    status: Literal["complete", "current", "pending", "blocked"]
+    detail: str | None = None
+    progress_percent: int | None = None
+
+
+class DecisionInfo(BaseModel):
+    state: str
+    priority: int
+    badge: DecisionBadgeInfo
+    display_name: str
+    explanation: str
+    remaining_label: str | None = None
+    remaining_seconds: int | None = None
+    reclaimable_size_bytes: int | None = None
+    recommended_action: str
+    library_group: str | None = None
+    timeline: list[DecisionTimelineStep] = Field(default_factory=list)
 
 
 class ArrRefResponse(BaseModel):
@@ -342,6 +382,7 @@ class MovieWithStatus(BaseModel):
 
     # status
     status: MediaStatusInfo
+    arr_tags: list[str] | None = None
 
     # timestamps
     added_at: str | None
@@ -429,6 +470,7 @@ class SeriesWithStatus(BaseModel):
 
     # status
     status: MediaStatusInfo
+    arr_tags: list[str] | None = None
     # true when at least one season (but not the whole series) is a reclaim candidate
     has_season_candidates: bool = False
     # number of seasons actually present in the library
