@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.service_manager import service_manager
@@ -29,6 +29,8 @@ class QueryEngineSpec:
     media_type: MediaType
     search: str | None = None
     candidates_only: bool = False
+    monitored: bool | None = None
+    media_status: str | None = None
     imported_filter_ids: list[int] | None = None
     decision_filter_ids: list[int] | None = None
     smart_filter_ids: list[int] | None = None
@@ -127,38 +129,25 @@ def _apply_imported_filter(
     return query, count_query
 
 
-def _apply_decision_clause(
-    *,
-    query: Any,
-    count_query: Any,
-    media_type: MediaType,
-    field: str,
-    operator: str,
-    value: Any,
-) -> tuple[Any, Any]:
-    model = Movie if media_type is MediaType.MOVIE else Series
-    op = operator.lower()
-
-    if field == "decision.state":
-        state = str(value or "").strip().lower()
-        if state == "safe_to_delete":
-            filter_clause = (
-                ReclaimCandidate.movie_id == Movie.id
-                if media_type is MediaType.MOVIE
-                else ReclaimCandidate.series_id == Series.id
-            )
-            query = query.join(ReclaimCandidate, filter_clause).distinct()
-            count_query = count_query.join(ReclaimCandidate, filter_clause).distinct()
-        elif state == "protected":
-            filter_clause = (
-                ProtectedMedia.movie_id == Movie.id
-                if media_type is MediaType.MOVIE
-                else ProtectedMedia.series_id == Series.id
-            )
-            query = query.join(ProtectedMedia, filter_clause).distinct()
-            count_query = count_query.join(ProtectedMedia, filter_clause).distinct()
-        elif state == "waiting":
-            filter_clause = and_(
+def _decision_state_expression(media_type: MediaType, state: str) -> Any | None:
+    normalized = state.strip().lower()
+    if not normalized:
+        return None
+    if normalized == "safe_to_delete":
+        return exists().where(
+            (ReclaimCandidate.movie_id == Movie.id)
+            if media_type is MediaType.MOVIE
+            else (ReclaimCandidate.series_id == Series.id)
+        )
+    if normalized == "protected":
+        return exists().where(
+            (ProtectedMedia.movie_id == Movie.id)
+            if media_type is MediaType.MOVIE
+            else (ProtectedMedia.series_id == Series.id)
+        )
+    if normalized == "waiting":
+        return exists().where(
+            and_(
                 ProtectionRequest.status == ProtectionRequestStatus.PENDING,
                 (
                     ProtectionRequest.movie_id == Movie.id
@@ -166,65 +155,151 @@ def _apply_decision_clause(
                     else ProtectionRequest.series_id == Series.id
                 ),
             )
-            query = query.join(ProtectionRequest, filter_clause).distinct()
-            count_query = count_query.join(ProtectionRequest, filter_clause).distinct()
-        elif state == "unwatched":
-            query = query.where(model.view_count <= 0, model.last_viewed_at.is_(None))
-            count_query = count_query.where(
-                model.view_count <= 0, model.last_viewed_at.is_(None)
-            )
-        elif state == "watching":
-            cutoff = datetime.now(UTC) - timedelta(days=14)
-            query = query.where(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
-            count_query = count_query.where(
-                model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff
-            )
-        return query, count_query
+        )
+    if normalized == "unwatched":
+        model = Movie if media_type is MediaType.MOVIE else Series
+        return and_(model.view_count <= 0, model.last_viewed_at.is_(None))
+    if normalized == "watching":
+        model = Movie if media_type is MediaType.MOVIE else Series
+        cutoff = datetime.now(UTC) - timedelta(days=14)
+        return and_(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
+    return None
+
+
+def _decision_clause_expression(
+    *,
+    media_type: MediaType,
+    field: str,
+    operator: str,
+    value: Any,
+) -> Any | None:
+    model = Movie if media_type is MediaType.MOVIE else Series
+    op = operator.lower().strip()
+    field = field.strip()
+
+    if field == "decision.state":
+        return _decision_state_expression(media_type, str(value or ""))
 
     if field == "media.size":
         try:
             parsed = int(value)
         except Exception:
-            return query, count_query
+            return None
         if op in {"greater_than", ">", ">="}:
-            query = query.where(model.size.is_not(None), model.size >= parsed)
-            count_query = count_query.where(model.size.is_not(None), model.size >= parsed)
-        elif op in {"less_than", "<", "<="}:
-            query = query.where(model.size.is_not(None), model.size <= parsed)
-            count_query = count_query.where(model.size.is_not(None), model.size <= parsed)
-        return query, count_query
+            return model.size.is_not(None) & (model.size >= parsed)
+        if op in {"less_than", "<", "<="}:
+            return model.size.is_not(None) & (model.size <= parsed)
+        if op in {"equals", "="}:
+            return model.size == parsed
+        if op in {"not_equals", "!=", "<>"}:
+            return model.size != parsed
+        return None
 
     if field == "media.last_watched_days":
         try:
             parsed_days = int(value)
         except Exception:
-            return query, count_query
+            return None
         cutoff = datetime.now(UTC) - timedelta(days=parsed_days)
         if op in {"greater_than", ">"}:
-            query = query.where(model.last_viewed_at.is_not(None), model.last_viewed_at <= cutoff)
-            count_query = count_query.where(model.last_viewed_at.is_not(None), model.last_viewed_at <= cutoff)
-        elif op in {"less_than", "<"}:
-            query = query.where(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
-            count_query = count_query.where(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
-        return query, count_query
+            return and_(model.last_viewed_at.is_not(None), model.last_viewed_at <= cutoff)
+        if op in {"less_than", "<"}:
+            return and_(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
+        if op in {"exists"}:
+            return model.last_viewed_at.is_not(None)
+        if op in {"does_not_exist", "not_exists"}:
+            return model.last_viewed_at.is_(None)
+        return None
 
     if field == "media.library_group":
         token = str(value or "").strip().lower()
-        if token:
-            clause = _arr_tag_clause(media_type, token)
-            query = query.where(clause)
-            count_query = count_query.where(clause)
-        return query, count_query
+        if not token:
+            return None
+        clause = _arr_tag_clause(media_type, token)
+        if op in {"not_equals", "does_not_contain", "does_not_exist"}:
+            return ~clause
+        return clause
 
     if field == "media.title":
         token = str(value or "").strip()
-        if token:
-            clause = model.title.ilike(f"%{token}%")
-            query = query.where(clause)
-            count_query = count_query.where(clause)
-        return query, count_query
+        if not token:
+            return None
+        if op in {"equals", "="}:
+            return model.title == token
+        if op in {"not_equals", "!=", "<>"}:
+            return model.title != token
+        if op in {"starts_with"}:
+            return model.title.ilike(f"{token}%")
+        if op in {"ends_with"}:
+            return model.title.ilike(f"%{token}")
+        if op in {"exists"}:
+            return model.title.is_not(None)
+        if op in {"does_not_exist", "not_exists"}:
+            return model.title.is_(None)
+        return model.title.ilike(f"%{token}%")
 
-    return query, count_query
+    return None
+
+
+def _normalize_definition_nodes(raw_definition: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(raw_definition, Mapping):
+        return []
+    if isinstance(raw_definition.get("clauses"), list):
+        nodes = raw_definition["clauses"]
+    else:
+        nodes = raw_definition.get("children") if isinstance(raw_definition.get("children"), list) else []
+    normalized: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        node_type = str(node.get("type") or "condition").lower()
+        if node_type == "group":
+            normalized.append(
+                {
+                    "type": "group",
+                    "combinator": str(node.get("combinator") or "and").lower(),
+                    "clauses": _normalize_definition_nodes(node),
+                }
+            )
+        else:
+            normalized.append(
+                {
+                    "type": "condition",
+                    "field": node.get("field"),
+                    "operator": node.get("operator"),
+                    "value": node.get("value"),
+                }
+            )
+    return normalized
+
+
+def _definition_expression(media_type: MediaType, definition: Mapping[str, Any] | None) -> Any | None:
+    if not isinstance(definition, Mapping):
+        return None
+    combinator = str(definition.get("combinator") or "and").lower()
+    nodes = _normalize_definition_nodes(definition)
+    if not nodes:
+        return None
+
+    expressions: list[Any] = []
+    for node in nodes:
+        if node.get("type") == "group":
+            child_expr = _definition_expression(media_type, node)
+            if child_expr is not None:
+                expressions.append(child_expr)
+            continue
+        clause_expr = _decision_clause_expression(
+            media_type=media_type,
+            field=str(node.get("field") or ""),
+            operator=str(node.get("operator") or ""),
+            value=node.get("value"),
+        )
+        if clause_expr is not None:
+            expressions.append(clause_expr)
+
+    if not expressions:
+        return None
+    return and_(*expressions) if combinator != "or" else or_(*expressions)
 
 
 async def sync_imported_arr_filters(db: AsyncSession) -> None:
@@ -409,6 +484,16 @@ async def apply_spec(
         query = query.join(ReclaimCandidate, relation_clause).distinct()
         count_query = count_query.join(ReclaimCandidate, relation_clause).distinct()
 
+    if spec.monitored is not None:
+        query = query.where(model.is_monitored.is_(spec.monitored))
+        count_query = count_query.where(model.is_monitored.is_(spec.monitored))
+
+    if spec.media_status:
+        status = spec.media_status.strip().lower()
+        if status:
+            query = query.where(func.lower(model.status) == status)  # type: ignore[name-defined]
+            count_query = count_query.where(func.lower(model.status) == status)  # type: ignore[name-defined]
+
     imported_ids = [int(v) for v in (spec.imported_filter_ids or [])]
     if imported_ids:
         imported_filters = (
@@ -486,26 +571,9 @@ async def apply_spec(
             )
         ).scalars().all()
         for decision_filter in decision_filters:
-            definition = decision_filter.definition or {}
-            combinator = str(definition.get("combinator") or "and").lower()
-            clauses = definition.get("clauses") if isinstance(definition.get("clauses"), list) else []
-            if combinator == "or":
-                # OR compositing is not trivial with multi-join clauses; apply sequentially for now.
-                # This still preserves user intent for majority of simple clauses.
-                pass
-            for clause in clauses:
-                if not isinstance(clause, Mapping):
-                    continue
-                field = str(clause.get("field") or "").strip()
-                operator = str(clause.get("operator") or "").strip()
-                value = clause.get("value")
-                query, count_query = _apply_decision_clause(
-                    query=query,
-                    count_query=count_query,
-                    media_type=media_type,
-                    field=field,
-                    operator=operator,
-                    value=value,
-                )
+                expr = _definition_expression(media_type, decision_filter.definition)
+                if expr is not None:
+                    query = query.where(expr)
+                    count_query = count_query.where(expr)
 
     return query, count_query

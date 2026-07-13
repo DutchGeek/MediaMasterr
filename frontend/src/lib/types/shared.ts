@@ -1223,15 +1223,25 @@ export interface MediaFilterCatalogResponse {
   smart: MediaFilterOptionResponse[];
 }
 
-export interface QueryFilterClause {
+export interface QueryFilterCondition {
+  type: "condition";
   field: string;
   operator: string;
   value?: string | number | boolean | null;
 }
 
-export interface QueryFilterDefinition {
+export interface QueryFilterGroup {
+  type: "group";
   combinator: "and" | "or";
-  clauses: QueryFilterClause[];
+  clauses: QueryFilterNode[];
+}
+
+export type QueryFilterNode = QueryFilterCondition | QueryFilterGroup;
+
+export interface QueryFilterDefinition {
+  type: "group";
+  combinator: "and" | "or";
+  clauses: QueryFilterNode[];
 }
 
 export interface QueryFilterResponse {
@@ -1258,6 +1268,12 @@ export interface SmartFilterUpsertRequest {
   decision_filter_ids: number[];
   search?: string | null;
   candidates_only: boolean;
+  sort_by: string;
+  sort_order: "asc" | "desc";
+  per_page: number;
+  poster_size: number;
+  view_mode: string;
+  page: number;
 }
 
 export interface ProtectionStatusResponse {

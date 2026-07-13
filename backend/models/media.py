@@ -552,14 +552,25 @@ class MediaFilterCatalogResponse(BaseModel):
 
 
 class QueryFilterClause(BaseModel):
+    type: Literal["condition"] = "condition"
     field: str
     operator: str
     value: str | int | float | bool | None = None
 
 
+class QueryFilterGroup(BaseModel):
+    type: Literal["group"] = "group"
+    combinator: Literal["and", "or"] = "and"
+    clauses: list["QueryFilterNode"] = Field(default_factory=list)
+
+
+QueryFilterNode = QueryFilterClause | QueryFilterGroup
+
+
 class QueryFilterDefinition(BaseModel):
-    combinator: str = "and"
-    clauses: list[QueryFilterClause] = Field(default_factory=list)
+    type: Literal["group"] = "group"
+    combinator: Literal["and", "or"] = "and"
+    clauses: list[QueryFilterNode] = Field(default_factory=list)
 
 
 class DecisionFilterUpsertRequest(BaseModel):
@@ -575,6 +586,12 @@ class SmartFilterUpsertRequest(BaseModel):
     decision_filter_ids: list[int] = Field(default_factory=list)
     search: str | None = None
     candidates_only: bool = False
+    sort_by: str = "title"
+    sort_order: Literal["asc", "desc"] = "asc"
+    per_page: int = 25
+    poster_size: int = 150
+    view_mode: str = "grid"
+    page: int = 1
 
 
 class QueryFilterResponse(BaseModel):
@@ -586,6 +603,10 @@ class QueryFilterResponse(BaseModel):
     provider_service: str | None = None
     provider_filter_id: str | None = None
     definition: dict[str, Any]
+
+
+QueryFilterGroup.model_rebuild()
+QueryFilterDefinition.model_rebuild()
 
 
 @dataclass(slots=True)
