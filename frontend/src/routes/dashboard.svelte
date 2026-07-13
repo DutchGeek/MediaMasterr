@@ -265,6 +265,14 @@
     window.location.hash = `#${item.target_path}`;
   };
 
+  const openQuery = (
+    route: "/movies" | "/series",
+    params: Record<string, string>,
+  ) => {
+    const q = new URLSearchParams(params).toString();
+    window.location.hash = `#${route}${q ? `?${q}` : ""}`;
+  };
+
   // determine if we should show last sync info for a service
   // (only for emby, plex, jellyfin for now since those are the only ones that uses the main sync)
   const shouldShowServiceSync = (serviceType: string) =>
@@ -442,7 +450,12 @@
           </section>
 
           <section class="grid grid-cols-1 xl:grid-cols-4 gap-4">
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+            <button
+              type="button"
+              class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1 cursor-pointer text-left"
+              onclick={() =>
+                openQuery("/movies", { decision_state: "safe_to_delete" })}
+            >
               <p class="text-sm text-muted-foreground">Recoverable Space</p>
               <p class="text-3xl font-bold text-emerald-500 mt-2">
                 {formatSize(dashboard.decision_summary.recoverable_space_bytes)}
@@ -450,9 +463,14 @@
               <p class="text-xs text-muted-foreground mt-2">
                 Decision engine ready to reclaim right now
               </p>
-            </article>
+            </button>
 
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+            <button
+              type="button"
+              class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1 cursor-pointer text-left"
+              onclick={() =>
+                openQuery("/series", { decision_state: "safe_to_delete" })}
+            >
               <p class="text-sm text-muted-foreground">Ready Today</p>
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex items-center justify-between">
@@ -468,9 +486,13 @@
                   <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.episodes}</span>
                 </div>
               </div>
-            </article>
+            </button>
 
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+            <button
+              type="button"
+              class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1 cursor-pointer text-left"
+              onclick={() => openQuery("/series", { decision_state: "waiting" })}
+            >
               <p class="text-sm text-muted-foreground">Blocked</p>
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex items-center justify-between">
@@ -486,7 +508,7 @@
                   <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.attention_required}</span>
                 </div>
               </div>
-            </article>
+            </button>
 
             <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
               <p class="text-sm text-muted-foreground">Recently Reclaimable</p>

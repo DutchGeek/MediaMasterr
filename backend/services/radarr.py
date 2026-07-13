@@ -239,6 +239,29 @@ class RadarrClient:
             tags.append(ArrTag(id=tag_id, label=label))
         return tags
 
+    async def get_saved_filters(self) -> list[dict[str, Any]]:
+        """Fetch saved filter definitions configured in Radarr."""
+        _, data = await self._make_request("GET", "filter", timeout=60)
+        if not isinstance(data, list):
+            return []
+
+        saved: list[dict[str, Any]] = []
+        for entry in data:
+            if not isinstance(entry, Mapping):
+                continue
+            filter_id = as_int(entry.get("id"))
+            name = _as_optional_str(entry.get("name"))
+            if filter_id is None or name is None:
+                continue
+            saved.append(
+                {
+                    "id": str(filter_id),
+                    "name": name,
+                    "raw": dict(entry),
+                }
+            )
+        return saved
+
     async def get_all_tag_details(self) -> dict[str, list[int]]:
         """Get all tags with their associated movie IDs in a single call.
 

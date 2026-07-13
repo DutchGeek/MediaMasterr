@@ -1,6 +1,6 @@
 ﻿<script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
-  import { get_api } from "$lib/api";
+  import { get_api, post_api, put_api, delete_api } from "$lib/api";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -12,7 +12,11 @@
   import Search from "@lucide/svelte/icons/search";
   import {
     ProtectionRequestStatus,
+    type DecisionFilterUpsertRequest,
     type MediaFilterCatalogResponse,
+    type QueryFilterClause,
+    type QueryFilterResponse,
+    type SmartFilterUpsertRequest,
     MediaType,
     type DeleteRequest,
     type ProtectionRequest,
@@ -56,15 +60,17 @@
     `${_prefix}_candidates_only`,
     false,
   );
-  const ALL_IMPORTED_FILTERS = "__all_imported__";
-  const ALL_DECISION_FILTERS = "__all_decisions__";
-  const _importedFilterStore = createFilterState<string>(
-    `${_prefix}_imported_filter`,
-    ALL_IMPORTED_FILTERS,
+  const _importedFilterStore = createFilterState<number[]>(
+    `${_prefix}_imported_filter_ids`,
+    [],
   );
-  const _decisionFilterStore = createFilterState<string>(
-    `${_prefix}_decision_filter`,
-    ALL_DECISION_FILTERS,
+  const _decisionFilterStore = createFilterState<number[]>(
+    `${_prefix}_decision_filter_ids`,
+    [],
+  );
+  const _smartFilterStore = createFilterState<number[]>(
+    `${_prefix}_smart_filter_ids`,
+    [],
   );
 
   let loading = $state(true);
@@ -79,8 +85,18 @@
   let sortBy = $state(_sortByStore.getInitial());
   let sortOrder = $state(_sortOrderStore.getInitial());
   let candidatesOnly = $state(_candidatesOnlyStore.getInitial());
-  let importedFilter = $state(_importedFilterStore.getInitial());
-  let decisionFilter = $state(_decisionFilterStore.getInitial());
+  let importedFilterIds = $state<number[]>(_importedFilterStore.getInitial());
+  let decisionFilterIds = $state<number[]>(_decisionFilterStore.getInitial());
+  let smartFilterIds = $state<number[]>(_smartFilterStore.getInitial());
+  let filterSearch = $state("");
+  let filterBuilderName = $state("");
+  let filterBuilderClauses = $state<QueryFilterClause[]>([
+    { field: "decision.state", operator: "equals", value: "safe_to_delete" },
+  ]);
+  let smartFilterName = $state("");
+  let editingDecisionFilterId = $state<number | null>(null);
+  let editingSmartFilterId = $state<number | null>(null);
+  let collapsedImportedGroups = $state<Record<string, boolean>>({});
   let currentPage = $state(1);
   let pendingOpenMediaId = $state<number | null>(null);
 
@@ -137,8 +153,9 @@
   $effect(() => _sortByStore.save(sortBy));
   $effect(() => _sortOrderStore.save(sortOrder));
   $effect(() => _candidatesOnlyStore.save(candidatesOnly));
-  $effect(() => _importedFilterStore.save(importedFilter));
-  $effect(() => _decisionFilterStore.save(decisionFilter));
+  $effect(() => _importedFilterStore.save(importedFilterIds));
+  $effect(() => _decisionFilterStore.save(decisionFilterIds));
+  $effect(() => _smartFilterStore.save(smartFilterIds));
 
   // watch for changes in sortBy, sortOrder, candidatesOnly, and perPage to reload
   $effect(() => {
@@ -146,8 +163,9 @@
     sortOrder;
     candidatesOnly;
     perPage;
-    importedFilter;
-    decisionFilter;
+    importedFilterIds;
+    decisionFilterIds;
+    smartFilterIds;
     if (mounted) {
       loadMedia(1);
     }
@@ -198,11 +216,14 @@
       if (candidatesOnly) {
         params.append("candidates_only", "true");
       }
-      if (importedFilter && importedFilter !== ALL_IMPORTED_FILTERS) {
-        params.append("arr_tag", importedFilter);
+      for (const id of importedFilterIds) {
+        params.append("arr_filter_ids", id.toString());
       }
-      if (decisionFilter && decisionFilter !== ALL_DECISION_FILTERS) {
-        params.append("decision_state", decisionFilter);
+      for (const id of decisionFilterIds) {
+        params.append("decision_filter_ids", id.toString());
+      }
+      for (const id of smartFilterIds) {
+        params.append("smart_filter_ids", id.toString());
       }
 
       const data = await get_api<
@@ -245,6 +266,178 @@
   const handlePageChange = (page: number) => {
     currentPage = page;
     loadMedia(page);
+  };
+
+  const toggleFilterSelection = (
+    source: "imported" | "decision" | "smart",
+    filterId: number,
+  ) => {
+    const mutate = (values: number[]) =>
+      values.includes(filterId)
+        ? values.filter((id) => id !== filterId)
+        : [...values, filterId];
+    if (source === "imported") importedFilterIds = mutate(importedFilterIds);
+    else if (source === "decision") decisionFilterIds = mutate(decisionFilterIds);
+    else smartFilterIds = mutate(smartFilterIds);
+  };
+
+  const clearAllFilters = () => {
+    importedFilterIds = [];
+    decisionFilterIds = [];
+    smartFilterIds = [];
+  };
+
+  const selectedFilterOptions = $derived.by(() => {
+    const all = [
+      ...(filterCatalog?.imported ?? []),
+      ...(filterCatalog?.native ?? []),
+      ...(filterCatalog?.smart ?? []),
+    ];
+    const selectedIds = new Set([
+      ...importedFilterIds,
+      ...decisionFilterIds,
+      ...smartFilterIds,
+    ]);
+    return all.filter((option) => {
+      const id = option.filter_id;
+      return typeof id === "number" && selectedIds.has(id);
+    });
+  });
+
+  const saveDecisionFilter = async () => {
+    const payload: DecisionFilterUpsertRequest = {
+      name: filterBuilderName.trim() || "Decision Filter",
+      media_type: mediaType,
+      definition: {
+        combinator: "and",
+        clauses: filterBuilderClauses,
+      },
+    };
+    try {
+      if (editingDecisionFilterId) {
+        await put_api<QueryFilterResponse>(
+          `/api/media/query/decision-filters/${editingDecisionFilterId}`,
+          payload,
+        );
+      } else {
+        await post_api<QueryFilterResponse>(
+          "/api/media/query/decision-filters",
+          payload,
+        );
+      }
+      editingDecisionFilterId = null;
+      filterBuilderName = "";
+      await loadFilterCatalog();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to save decision filter");
+    }
+  };
+
+  const saveSmartFilter = async () => {
+    const payload: SmartFilterUpsertRequest = {
+      name: smartFilterName.trim() || "Smart Filter",
+      media_type: mediaType,
+      arr_filter_ids: importedFilterIds,
+      decision_filter_ids: decisionFilterIds,
+      search: searchQuery.trim() || null,
+      candidates_only: candidatesOnly,
+    };
+    try {
+      if (editingSmartFilterId) {
+        await put_api<QueryFilterResponse>(
+          `/api/media/query/smart-filters/${editingSmartFilterId}`,
+          payload,
+        );
+      } else {
+        await post_api<QueryFilterResponse>("/api/media/query/smart-filters", payload);
+      }
+      editingSmartFilterId = null;
+      smartFilterName = "";
+      await loadFilterCatalog();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to save smart filter");
+    }
+  };
+
+  const filteredImportedOptions = $derived.by(() => {
+    const q = filterSearch.trim().toLowerCase();
+    const options = filterCatalog?.imported ?? [];
+    if (!q) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(q));
+  });
+
+  const groupedImportedOptions = $derived.by(() => {
+    const grouped = new Map<string, typeof filteredImportedOptions>();
+    for (const option of filteredImportedOptions) {
+      const group = option.group || "Imported";
+      const bucket = grouped.get(group) ?? [];
+      bucket.push(option);
+      grouped.set(group, bucket);
+    }
+    return Array.from(grouped.entries()).map(([group, options]) => ({
+      group,
+      options,
+    }));
+  });
+
+  const addBuilderClause = () => {
+    filterBuilderClauses = [
+      ...filterBuilderClauses,
+      { field: "decision.state", operator: "equals", value: "protected" },
+    ];
+  };
+
+  const removeBuilderClause = (index: number) => {
+    filterBuilderClauses = filterBuilderClauses.filter((_, i) => i !== index);
+  };
+
+  const editDecisionFilter = (option: NonNullable<MediaFilterCatalogResponse["native"][number]>) => {
+    if (!option.filter_id) return;
+    editingDecisionFilterId = option.filter_id;
+    filterBuilderName = option.label;
+    const definition = option.definition as { clauses?: QueryFilterClause[] } | null;
+    filterBuilderClauses =
+      definition?.clauses && definition.clauses.length > 0
+        ? definition.clauses
+        : [{ field: "decision.state", operator: "equals", value: "safe_to_delete" }];
+  };
+
+  const deleteDecisionFilter = async (filterId: number) => {
+    try {
+      await delete_api(`/api/media/query/decision-filters/${filterId}`);
+      decisionFilterIds = decisionFilterIds.filter((id) => id !== filterId);
+      if (editingDecisionFilterId === filterId) editingDecisionFilterId = null;
+      await loadFilterCatalog();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to delete decision filter");
+    }
+  };
+
+  const editSmartFilter = (option: NonNullable<MediaFilterCatalogResponse["smart"][number]>) => {
+    if (!option.filter_id) return;
+    editingSmartFilterId = option.filter_id;
+    smartFilterName = option.label;
+    const definition = option.definition as {
+      arr_filter_ids?: number[];
+      decision_filter_ids?: number[];
+      search?: string | null;
+      candidates_only?: boolean;
+    } | null;
+    importedFilterIds = definition?.arr_filter_ids ?? [];
+    decisionFilterIds = definition?.decision_filter_ids ?? [];
+    searchQuery = definition?.search ?? "";
+    candidatesOnly = Boolean(definition?.candidates_only);
+  };
+
+  const deleteSmartFilter = async (filterId: number) => {
+    try {
+      await delete_api(`/api/media/query/smart-filters/${filterId}`);
+      smartFilterIds = smartFilterIds.filter((id) => id !== filterId);
+      if (editingSmartFilterId === filterId) editingSmartFilterId = null;
+      await loadFilterCatalog();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to delete smart filter");
+    }
   };
 
   // when user clicks on a media card to view details
@@ -426,47 +619,139 @@
         </label>
 
         <div class="flex flex-1 flex-col gap-2 md:flex-row">
-          <Select.Root type="single" bind:value={importedFilter}>
-            <Select.Trigger class="w-full bg-card text-card-foreground">
-              {#if importedFilter && importedFilter !== ALL_IMPORTED_FILTERS}
-                {filterCatalog?.imported.find((item) => item.key === importedFilter)
-                  ?.label ?? "Imported Filter"}
-              {:else}
-                ARR Filters
-              {/if}
-            </Select.Trigger>
-            <Select.Content class="bg-card">
-              <Select.Item value={ALL_IMPORTED_FILTERS} label="All imported filters" class="text-card-foreground">
-                All imported filters
-              </Select.Item>
-              {#each filterCatalog?.imported ?? [] as option}
-                <Select.Item value={option.key} label={option.label} class="text-card-foreground">
-                  {option.group} • {option.label}
-                </Select.Item>
+          <div class="w-full rounded-md border border-border bg-card p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-card-foreground">ARR Filters</p>
+              <div class="flex items-center gap-2 text-xs">
+                <button class="cursor-pointer text-muted-foreground hover:text-foreground" onclick={() => (importedFilterIds = (filterCatalog?.imported ?? []).map((f) => f.filter_id ?? -1).filter((v) => v > 0))}>Select All</button>
+                <button class="cursor-pointer text-muted-foreground hover:text-foreground" onclick={() => (importedFilterIds = [])}>Clear All</button>
+              </div>
+            </div>
+            <Input
+              type="text"
+              placeholder="Search Filters"
+              value={filterSearch}
+              oninput={(event) => (filterSearch = (event.target as HTMLInputElement).value)}
+              class="h-8 bg-background"
+            />
+            <div class="max-h-36 overflow-y-auto space-y-1 pr-1">
+              {#each groupedImportedOptions as importedGroup}
+                <div class="rounded border border-border/60 p-2">
+                  <button
+                    class="mb-2 w-full text-left text-xs text-muted-foreground cursor-pointer"
+                    onclick={() =>
+                      (collapsedImportedGroups = {
+                        ...collapsedImportedGroups,
+                        [importedGroup.group]: !collapsedImportedGroups[importedGroup.group],
+                      })}
+                  >
+                    {collapsedImportedGroups[importedGroup.group] ? "+" : "-"}
+                    {" "}{importedGroup.group}
+                  </button>
+                  {#if !collapsedImportedGroups[importedGroup.group]}
+                    <div class="space-y-1">
+                      {#each importedGroup.options as option}
+                        {#if option.filter_id}
+                          <label class="flex items-center gap-2 text-sm text-card-foreground">
+                            <input
+                              type="checkbox"
+                              checked={importedFilterIds.includes(option.filter_id)}
+                              onchange={() => toggleFilterSelection("imported", option.filter_id!)}
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               {/each}
-            </Select.Content>
-          </Select.Root>
+            </div>
+          </div>
 
-          <Select.Root type="single" bind:value={decisionFilter}>
-            <Select.Trigger class="w-full bg-card text-card-foreground">
-              {#if decisionFilter && decisionFilter !== ALL_DECISION_FILTERS}
-                {filterCatalog?.native.find((item) => item.key === decisionFilter)
-                  ?.label ?? "Decision Filter"}
-              {:else}
-                Decision Filters
-              {/if}
-            </Select.Trigger>
-            <Select.Content class="bg-card">
-              <Select.Item value={ALL_DECISION_FILTERS} label="All decision filters" class="text-card-foreground">
-                All decision filters
-              </Select.Item>
+          <div class="w-full rounded-md border border-border bg-card p-3 space-y-2">
+            <p class="text-sm font-medium text-card-foreground">Decision Filters</p>
+            <div class="max-h-36 overflow-y-auto space-y-1 pr-1">
               {#each filterCatalog?.native ?? [] as option}
-                <Select.Item value={option.key} label={option.label} class="text-card-foreground">
-                  {option.label}
-                </Select.Item>
+                {#if option.filter_id}
+                  <label class="flex items-center gap-2 text-sm text-card-foreground">
+                    <input
+                      type="checkbox"
+                      checked={decisionFilterIds.includes(option.filter_id)}
+                      onchange={() => toggleFilterSelection("decision", option.filter_id!)}
+                    />
+                    <span>{option.label}</span>
+                    <button class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => editDecisionFilter(option)}>edit</button>
+                    <button class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => deleteDecisionFilter(option.filter_id!)}>delete</button>
+                  </label>
+                {/if}
               {/each}
-            </Select.Content>
-          </Select.Root>
+            </div>
+          </div>
+        </div>
+
+        {#if selectedFilterOptions.length > 0}
+          <div class="flex flex-wrap items-center gap-2">
+            {#each selectedFilterOptions as filter}
+              {#if filter.filter_id}
+                <button
+                  class="rounded-full border border-border px-3 py-1 text-xs text-foreground cursor-pointer hover:bg-secondary/50"
+                  onclick={() => {
+                    if (filter.kind === "imported_arr") toggleFilterSelection("imported", filter.filter_id!);
+                    else if (filter.kind === "smart") toggleFilterSelection("smart", filter.filter_id!);
+                    else toggleFilterSelection("decision", filter.filter_id!);
+                  }}
+                >
+                  {filter.label}
+                </button>
+              {/if}
+            {/each}
+            <button class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={clearAllFilters}>x Clear All</button>
+          </div>
+        {/if}
+
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div class="rounded-md border border-border bg-card p-3 space-y-2">
+            <p class="text-sm font-medium text-card-foreground">Decision Filter Builder</p>
+            <Input type="text" placeholder="Save As (e.g. Ready To Delete)" value={filterBuilderName} oninput={(e) => (filterBuilderName = (e.target as HTMLInputElement).value)} class="h-8 bg-background" />
+            {#each filterBuilderClauses as clause, index}
+              <div class="grid grid-cols-12 gap-2 items-center">
+                <Input class="col-span-4 h-8 bg-background" value={clause.field} oninput={(e) => (filterBuilderClauses[index].field = (e.target as HTMLInputElement).value)} />
+                <Input class="col-span-3 h-8 bg-background" value={clause.operator} oninput={(e) => (filterBuilderClauses[index].operator = (e.target as HTMLInputElement).value)} />
+                <Input class="col-span-4 h-8 bg-background" value={String(clause.value ?? "")} oninput={(e) => (filterBuilderClauses[index].value = (e.target as HTMLInputElement).value)} />
+                <button class="col-span-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => removeBuilderClause(index)}>x</button>
+              </div>
+            {/each}
+            <div class="flex items-center gap-2">
+              <button class="rounded border border-border px-2 py-1 text-xs cursor-pointer" onclick={addBuilderClause}>Add Rule</button>
+              <button class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground cursor-pointer" onclick={saveDecisionFilter}>Save Decision Filter</button>
+            </div>
+          </div>
+
+          <div class="rounded-md border border-border bg-card p-3 space-y-2">
+            <p class="text-sm font-medium text-card-foreground">Smart Filters</p>
+            <Input type="text" placeholder="Save As (e.g. Weekly Cleanup)" value={smartFilterName} oninput={(e) => (smartFilterName = (e.target as HTMLInputElement).value)} class="h-8 bg-background" />
+            <div class="text-xs text-muted-foreground">Current selection combines ARR + Decision + Search + Candidates toggle.</div>
+            <div class="flex items-center gap-2">
+              <button class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground cursor-pointer" onclick={saveSmartFilter}>Save Smart Filter</button>
+            </div>
+            <div class="max-h-28 overflow-y-auto space-y-1 pr-1">
+              {#each filterCatalog?.smart ?? [] as option}
+                {#if option.filter_id}
+                  <label class="flex items-center gap-2 text-sm text-card-foreground">
+                    <input
+                      type="checkbox"
+                      checked={smartFilterIds.includes(option.filter_id)}
+                      onchange={() => toggleFilterSelection("smart", option.filter_id!)}
+                    />
+                    <span>{option.label}</span>
+                    <button class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => editSmartFilter(option)}>edit</button>
+                    <button class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => deleteSmartFilter(option.filter_id!)}>delete</button>
+                  </label>
+                {/if}
+              {/each}
+            </div>
+          </div>
         </div>
 
         <!-- per page + poster size -->

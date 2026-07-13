@@ -539,11 +539,53 @@ class MediaFilterOptionResponse(BaseModel):
     label: str
     group: str
     read_only: bool = False
+    source: str | None = None
+    kind: str | None = None
+    filter_id: int | None = None
+    definition: dict[str, Any] | None = None
 
 
 class MediaFilterCatalogResponse(BaseModel):
     imported: list[MediaFilterOptionResponse]
     native: list[MediaFilterOptionResponse]
+    smart: list[MediaFilterOptionResponse] = Field(default_factory=list)
+
+
+class QueryFilterClause(BaseModel):
+    field: str
+    operator: str
+    value: str | int | float | bool | None = None
+
+
+class QueryFilterDefinition(BaseModel):
+    combinator: str = "and"
+    clauses: list[QueryFilterClause] = Field(default_factory=list)
+
+
+class DecisionFilterUpsertRequest(BaseModel):
+    name: str
+    media_type: MediaType
+    definition: QueryFilterDefinition
+
+
+class SmartFilterUpsertRequest(BaseModel):
+    name: str
+    media_type: MediaType
+    arr_filter_ids: list[int] = Field(default_factory=list)
+    decision_filter_ids: list[int] = Field(default_factory=list)
+    search: str | None = None
+    candidates_only: bool = False
+
+
+class QueryFilterResponse(BaseModel):
+    id: int
+    name: str
+    kind: str
+    media_type: MediaType | None
+    read_only: bool
+    provider_service: str | None = None
+    provider_filter_id: str | None = None
+    definition: dict[str, Any]
 
 
 @dataclass(slots=True)

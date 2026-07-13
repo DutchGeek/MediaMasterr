@@ -27,6 +27,7 @@ from backend.database.models import (
     MovieVersion,
     ProtectedMedia,
     ProtectionRequest,
+    QueryFilter,
     ReclaimCandidate,
     ReclaimHistory,
     ReclaimRule,
@@ -56,6 +57,7 @@ from backend.models.media import (
     CandidateLibraryRef,
     CandidateOperationQueuedResponse,
     CandidatesPresenceResponse,
+    DecisionFilterUpsertRequest,
     DeleteCandidatesRequest,
     EpisodeWithStatus,
     MediaStatusInfo,
@@ -67,13 +69,16 @@ from backend.models.media import (
     PaginatedCandidatesResponse,
     PaginatedMediaResponse,
     PaginatedReclaimHistoryResponse,
+    QueryFilterResponse,
     ReclaimHistoryAttributes,
     ReclaimHistoryEntry,
     SeasonWithStatus,
     SeriesServiceRefResponse,
     SeriesWithStatus,
+    SmartFilterUpsertRequest,
 )
 from backend.services.decision_engine import DecisionEngine, DecisionSignals
+from backend.services.query_engine import QueryEngineSpec, apply_spec, get_filter_catalog
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -175,6 +180,63 @@ def _candidate_policy_values(
         now=now,
     )
     return candidate.created_at, policy.eligible_at, policy.delay_days
+
+
+def _apply_legacy_decision_state(
+    *,
+    query: Any,
+    count_query: Any,
+    media_type: MediaType,
+    decision_state: str | None,
+) -> tuple[Any, Any]:
+    if not decision_state:
+        return query, count_query
+
+    if media_type is MediaType.MOVIE:
+        if decision_state == "safe_to_delete":
+            query = query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
+            count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
+        elif decision_state == "protected":
+            query = query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
+            count_query = count_query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
+        elif decision_state == "waiting":
+            clause = and_(
+                ProtectionRequest.movie_id == Movie.id,
+                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+            )
+            query = query.join(ProtectionRequest, clause).distinct()
+            count_query = count_query.join(ProtectionRequest, clause).distinct()
+        elif decision_state == "unwatched":
+            query = query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
+            count_query = count_query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
+        elif decision_state == "watching":
+            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=14)
+            query = query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff)
+            count_query = count_query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff)
+        return query, count_query
+
+    if decision_state == "safe_to_delete":
+        query = query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
+        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
+    elif decision_state == "protected":
+        query = query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
+        count_query = count_query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
+    elif decision_state == "waiting":
+        clause = and_(
+            ProtectionRequest.series_id == Series.id,
+            ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+        )
+        query = query.join(ProtectionRequest, clause).distinct()
+        count_query = count_query.join(ProtectionRequest, clause).distinct()
+    elif decision_state == "unwatched":
+        query = query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
+        count_query = count_query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
+    elif decision_state == "watching":
+        cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=14)
+        query = query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff)
+        count_query = count_query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff)
+
+    return query, count_query
 
 
 def _apply_candidate_filters(
@@ -515,6 +577,9 @@ async def get_movies(
     candidates_only: bool = Query(False),
     arr_tag: str | None = Query(None, max_length=100),
     decision_state: str | None = Query(None, max_length=50),
+    arr_filter_ids: list[int] = Query(default_factory=list),
+    decision_filter_ids: list[int] = Query(default_factory=list),
+    smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> PaginatedMediaResponse:
     """
     Get all movies with status information.
@@ -530,6 +595,9 @@ async def get_movies(
         if isinstance(decision_state, str) and decision_state.strip()
         else None
     )
+    arr_filter_ids = [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
+    decision_filter_ids = [int(v) for v in decision_filter_ids] if isinstance(decision_filter_ids, list) else []
+    smart_filter_ids = [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
     # build base query
     query = (
         select(Movie)
@@ -540,56 +608,37 @@ async def get_movies(
         select(func.count()).select_from(Movie).where(Movie.removed_at.is_(None))
     )
 
-    # apply search filter
-    if search:
-        search_term = f"%{search}%"
-        query = query.where(Movie.title.ilike(search_term))
-        count_query = count_query.where(Movie.title.ilike(search_term))
-
     if arr_tag:
-        query = query.where(Movie.arr_tags.like(f'%"{arr_tag}"%'))
-        count_query = count_query.where(Movie.arr_tags.like(f'%"{arr_tag}"%'))
+        legacy = await db.scalar(
+            select(QueryFilter.id).where(
+                QueryFilter.kind == "imported_arr",
+                QueryFilter.media_type == MediaType.MOVIE,
+                QueryFilter.name == arr_tag,
+                QueryFilter.enabled.is_(True),
+            )
+        )
+        if legacy is not None:
+            arr_filter_ids.append(int(legacy))
 
-    # apply candidates filter
-    # Note: use distinct() to guard against row multiplication if a movie ever ends up
-    # with more than one ReclaimCandidate row (this should really not ever happen)
-    if candidates_only:
-        query = query.join(
-            ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id
-        ).distinct()
-        count_query = count_query.join(
-            ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id
-        ).distinct()
-
-    if decision_state == "safe_to_delete":
-        query = query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
-        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
-    elif decision_state == "protected":
-        query = query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
-        count_query = count_query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
-    elif decision_state == "waiting":
-        query = query.join(
-            ProtectionRequest,
-            and_(
-                ProtectionRequest.movie_id == Movie.id,
-                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-            ),
-        ).distinct()
-        count_query = count_query.join(
-            ProtectionRequest,
-            and_(
-                ProtectionRequest.movie_id == Movie.id,
-                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-            ),
-        ).distinct()
-    elif decision_state == "unwatched":
-        query = query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
-        count_query = count_query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
-    elif decision_state == "watching":
-        recent_cutoff = datetime.now(UTC).replace(microsecond=0)
-        recent_cutoff = recent_cutoff - timedelta(days=14)
-        query = query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= recent_cutoff)
-        count_query = count_query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= recent_cutoff)
+    query, count_query = await apply_spec(
+        db,
+        spec=QueryEngineSpec(
+            media_type=MediaType.MOVIE,
+            search=search,
+            candidates_only=candidates_only,
+            imported_filter_ids=arr_filter_ids,
+            decision_filter_ids=decision_filter_ids,
+            smart_filter_ids=smart_filter_ids,
+        ),
+        query=query,
+        count_query=count_query,
+    )
+    query, count_query = _apply_legacy_decision_state(
+        query=query,
+        count_query=count_query,
+        media_type=MediaType.MOVIE,
+        decision_state=decision_state,
+    )
 
     # apply sorting
     order_column = getattr(Movie, sort_by)
@@ -894,6 +943,9 @@ async def get_series(
     candidates_only: bool = Query(False),
     arr_tag: str | None = Query(None, max_length=100),
     decision_state: str | None = Query(None, max_length=50),
+    arr_filter_ids: list[int] = Query(default_factory=list),
+    decision_filter_ids: list[int] = Query(default_factory=list),
+    smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> PaginatedMediaResponse:
     """
     Get all series with status information.
@@ -909,6 +961,9 @@ async def get_series(
         if isinstance(decision_state, str) and decision_state.strip()
         else None
     )
+    arr_filter_ids = [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
+    decision_filter_ids = [int(v) for v in decision_filter_ids] if isinstance(decision_filter_ids, list) else []
+    smart_filter_ids = [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
     # build base query
     query = (
         select(Series)
@@ -919,60 +974,37 @@ async def get_series(
         select(func.count()).select_from(Series).where(Series.removed_at.is_(None))
     )
 
-    # apply search filter
-    if search:
-        search_term = f"%{search}%"
-        query = query.where(Series.title.ilike(search_term))
-        count_query = count_query.where(Series.title.ilike(search_term))
-
     if arr_tag:
-        query = query.where(Series.arr_tags.like(f'%"{arr_tag}"%'))
-        count_query = count_query.where(Series.arr_tags.like(f'%"{arr_tag}"%'))
-
-    # apply candidates filter
-    # Note: we're using distinct() to avoid row multiplication when a series has multiple
-    # season level candidates (each shares the same series_id)
-    if candidates_only:
-        query = query.join(
-            ReclaimCandidate, ReclaimCandidate.series_id == Series.id
-        ).distinct()
-        count_query = count_query.join(
-            ReclaimCandidate, ReclaimCandidate.series_id == Series.id
-        ).distinct()
-
-    if decision_state == "safe_to_delete":
-        query = query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
-        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
-    elif decision_state == "protected":
-        query = query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
-        count_query = count_query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
-    elif decision_state == "waiting":
-        query = query.join(
-            ProtectionRequest,
-            and_(
-                ProtectionRequest.series_id == Series.id,
-                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-            ),
-        ).distinct()
-        count_query = count_query.join(
-            ProtectionRequest,
-            and_(
-                ProtectionRequest.series_id == Series.id,
-                ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-            ),
-        ).distinct()
-    elif decision_state == "unwatched":
-        query = query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
-        count_query = count_query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
-    elif decision_state == "watching":
-        recent_cutoff = datetime.now(UTC).replace(microsecond=0)
-        recent_cutoff = recent_cutoff - timedelta(days=14)
-        query = query.where(
-            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff
+        legacy = await db.scalar(
+            select(QueryFilter.id).where(
+                QueryFilter.kind == "imported_arr",
+                QueryFilter.media_type == MediaType.SERIES,
+                QueryFilter.name == arr_tag,
+                QueryFilter.enabled.is_(True),
+            )
         )
-        count_query = count_query.where(
-            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= recent_cutoff
-        )
+        if legacy is not None:
+            arr_filter_ids.append(int(legacy))
+
+    query, count_query = await apply_spec(
+        db,
+        spec=QueryEngineSpec(
+            media_type=MediaType.SERIES,
+            search=search,
+            candidates_only=candidates_only,
+            imported_filter_ids=arr_filter_ids,
+            decision_filter_ids=decision_filter_ids,
+            smart_filter_ids=smart_filter_ids,
+        ),
+        query=query,
+        count_query=count_query,
+    )
+    query, count_query = _apply_legacy_decision_state(
+        query=query,
+        count_query=count_query,
+        media_type=MediaType.SERIES,
+        decision_state=decision_state,
+    )
 
     # apply sorting
     order_column = getattr(Series, sort_by)
@@ -1309,49 +1341,208 @@ async def get_media_filters(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"{required_page.value.replace('_', ' ').title()} page access required",
         )
-    model = Movie if media_type is MediaType.MOVIE else Series
-    provider_label = "Radarr" if media_type is MediaType.MOVIE else "Sonarr"
+    return await get_filter_catalog(
+        db,
+        current_user=current_user,
+        media_type=media_type,
+    )
+
+
+def _query_filter_to_response(row: QueryFilter) -> QueryFilterResponse:
+    return QueryFilterResponse(
+        id=row.id,
+        name=row.name,
+        kind=row.kind,
+        media_type=row.media_type,
+        read_only=row.read_only,
+        provider_service=row.provider_service.value if row.provider_service else None,
+        provider_filter_id=row.provider_filter_id,
+        definition=row.definition or {},
+    )
+
+
+@router.get("/query/decision-filters", response_model=list[QueryFilterResponse])
+async def list_decision_filters(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = Query(MediaType.MOVIE),
+) -> list[QueryFilterResponse]:
     rows = (
         await db.execute(
-            select(model.arr_tags).where(
-                model.removed_at.is_(None), model.arr_tags.is_not(None)
+            select(QueryFilter).where(
+                QueryFilter.kind == "decision",
+                QueryFilter.user_id == current_user.id,
+                QueryFilter.media_type == media_type,
+                QueryFilter.enabled.is_(True),
             )
         )
-    ).all()
-    imported_labels: set[str] = set()
-    for (raw_tags,) in rows:
-        if isinstance(raw_tags, list):
-            for tag in raw_tags:
-                if isinstance(tag, str) and tag.strip():
-                    imported_labels.add(tag.strip())
+    ).scalars().all()
+    return [_query_filter_to_response(row) for row in rows]
 
-    imported = [
-        MediaFilterOptionResponse(
-            key=label,
-            label=label,
-            group=f"Imported from {provider_label}",
-            read_only=True,
+
+@router.post("/query/decision-filters", response_model=QueryFilterResponse)
+async def create_decision_filter(
+    payload: DecisionFilterUpsertRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> QueryFilterResponse:
+    row = QueryFilter(
+        name=payload.name.strip() or "Decision Filter",
+        kind="decision",
+        user_id=current_user.id,
+        media_type=payload.media_type,
+        read_only=False,
+        definition=payload.definition.model_dump(),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _query_filter_to_response(row)
+
+
+@router.put("/query/decision-filters/{filter_id}", response_model=QueryFilterResponse)
+async def update_decision_filter(
+    filter_id: int,
+    payload: DecisionFilterUpsertRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> QueryFilterResponse:
+    row = (
+        await db.execute(
+            select(QueryFilter).where(
+                QueryFilter.id == filter_id,
+                QueryFilter.kind == "decision",
+                QueryFilter.user_id == current_user.id,
+            )
         )
-        for label in sorted(imported_labels)
-    ]
-    native = [
-        MediaFilterOptionResponse(
-            key="safe_to_delete", label="Safe To Delete", group="MediaMasterr"
-        ),
-        MediaFilterOptionResponse(
-            key="protected", label="Protected", group="MediaMasterr"
-        ),
-        MediaFilterOptionResponse(
-            key="waiting", label="Waiting", group="MediaMasterr"
-        ),
-        MediaFilterOptionResponse(
-            key="watching", label="Watching", group="MediaMasterr"
-        ),
-        MediaFilterOptionResponse(
-            key="unwatched", label="Unwatched", group="MediaMasterr"
-        ),
-    ]
-    return MediaFilterCatalogResponse(imported=imported, native=native)
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Decision filter not found")
+    row.name = payload.name.strip() or row.name
+    row.media_type = payload.media_type
+    row.definition = payload.definition.model_dump()
+    await db.commit()
+    await db.refresh(row)
+    return _query_filter_to_response(row)
+
+
+@router.delete("/query/decision-filters/{filter_id}")
+async def delete_decision_filter(
+    filter_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    row = (
+        await db.execute(
+            select(QueryFilter).where(
+                QueryFilter.id == filter_id,
+                QueryFilter.kind == "decision",
+                QueryFilter.user_id == current_user.id,
+            )
+        )
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Decision filter not found")
+    row.enabled = False
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/query/smart-filters", response_model=list[QueryFilterResponse])
+async def list_smart_filters(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType = Query(MediaType.MOVIE),
+) -> list[QueryFilterResponse]:
+    rows = (
+        await db.execute(
+            select(QueryFilter).where(
+                QueryFilter.kind == "smart",
+                QueryFilter.user_id == current_user.id,
+                QueryFilter.media_type == media_type,
+                QueryFilter.enabled.is_(True),
+            )
+        )
+    ).scalars().all()
+    return [_query_filter_to_response(row) for row in rows]
+
+
+@router.post("/query/smart-filters", response_model=QueryFilterResponse)
+async def create_smart_filter(
+    payload: SmartFilterUpsertRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> QueryFilterResponse:
+    row = QueryFilter(
+        name=payload.name.strip() or "Smart Filter",
+        kind="smart",
+        user_id=current_user.id,
+        media_type=payload.media_type,
+        read_only=False,
+        definition={
+            "arr_filter_ids": payload.arr_filter_ids,
+            "decision_filter_ids": payload.decision_filter_ids,
+            "search": payload.search,
+            "candidates_only": payload.candidates_only,
+        },
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _query_filter_to_response(row)
+
+
+@router.put("/query/smart-filters/{filter_id}", response_model=QueryFilterResponse)
+async def update_smart_filter(
+    filter_id: int,
+    payload: SmartFilterUpsertRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> QueryFilterResponse:
+    row = (
+        await db.execute(
+            select(QueryFilter).where(
+                QueryFilter.id == filter_id,
+                QueryFilter.kind == "smart",
+                QueryFilter.user_id == current_user.id,
+            )
+        )
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Smart filter not found")
+    row.name = payload.name.strip() or row.name
+    row.media_type = payload.media_type
+    row.definition = {
+        "arr_filter_ids": payload.arr_filter_ids,
+        "decision_filter_ids": payload.decision_filter_ids,
+        "search": payload.search,
+        "candidates_only": payload.candidates_only,
+    }
+    await db.commit()
+    await db.refresh(row)
+    return _query_filter_to_response(row)
+
+
+@router.delete("/query/smart-filters/{filter_id}")
+async def delete_smart_filter(
+    filter_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    row = (
+        await db.execute(
+            select(QueryFilter).where(
+                QueryFilter.id == filter_id,
+                QueryFilter.kind == "smart",
+                QueryFilter.user_id == current_user.id,
+            )
+        )
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Smart filter not found")
+    row.enabled = False
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/series/{series_id}/seasons", response_model=list[SeasonWithStatus])

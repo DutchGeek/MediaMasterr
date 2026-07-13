@@ -1211,11 +1211,53 @@ export interface MediaFilterOptionResponse {
   label: string;
   group: string;
   read_only: boolean;
+  source?: string | null;
+  kind?: string | null;
+  filter_id?: number | null;
+  definition?: Record<string, any> | null;
 }
 
 export interface MediaFilterCatalogResponse {
   imported: MediaFilterOptionResponse[];
   native: MediaFilterOptionResponse[];
+  smart: MediaFilterOptionResponse[];
+}
+
+export interface QueryFilterClause {
+  field: string;
+  operator: string;
+  value?: string | number | boolean | null;
+}
+
+export interface QueryFilterDefinition {
+  combinator: "and" | "or";
+  clauses: QueryFilterClause[];
+}
+
+export interface QueryFilterResponse {
+  id: number;
+  name: string;
+  kind: "imported_arr" | "decision" | "smart" | string;
+  media_type: MediaType | null;
+  read_only: boolean;
+  provider_service?: string | null;
+  provider_filter_id?: string | null;
+  definition: Record<string, any>;
+}
+
+export interface DecisionFilterUpsertRequest {
+  name: string;
+  media_type: MediaType;
+  definition: QueryFilterDefinition;
+}
+
+export interface SmartFilterUpsertRequest {
+  name: string;
+  media_type: MediaType;
+  arr_filter_ids: number[];
+  decision_filter_ids: number[];
+  search?: string | null;
+  candidates_only: boolean;
 }
 
 export interface ProtectionStatusResponse {

@@ -378,6 +378,61 @@ class GeneralSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), init=False
     )
+
+
+class QueryFilter(Base):
+    """Unified query/filter object used for imported ARR filters and user filters."""
+
+    __tablename__ = "query_filters"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_service",
+            "provider_config_id",
+            "provider_filter_id",
+            name="uq_query_filters_provider_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(
+        String(32), default="decision", index=True
+    )  # imported_arr | decision | smart
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        default=None,
+        index=True,
+    )
+    media_type: Mapped[MediaType | None] = mapped_column(
+        Enum(MediaType), default=None, index=True
+    )
+    read_only: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # provider linkage for imported ARR filters
+    provider_service: Mapped[Service | None] = mapped_column(
+        Enum(Service), default=None, index=True
+    )
+    provider_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("service_configs.id", ondelete="CASCADE"),
+        default=None,
+        index=True,
+    )
+    provider_filter_id: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    # canonical query definition payload
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        init=False,
+    )
     updated_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
