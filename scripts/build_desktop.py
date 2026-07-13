@@ -30,7 +30,7 @@ SPEC_FILE = REPO_ROOT / f"{OUTPUT_NAME}.spec"
 PLATFORM = platform.system()
 if PLATFORM == "Windows":
     EXE_SUFFIX = ".exe"
-    ICON: Path | None = FRONTEND_DIR / "static" / "favicon.ico"
+    ICON: Path | None = FRONTEND_DIR / "static" / "branding" / "favicon.ico"
     USE_UPX = True
 elif PLATFORM == "Darwin":
     EXE_SUFFIX = ""

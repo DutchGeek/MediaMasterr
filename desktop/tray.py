@@ -28,7 +28,7 @@ def create_icon(server: "ReclaimerServer") -> PystrayIcon:
     def quit_app(_icon: PystrayIcon, _item: pystray.MenuItem) -> None:
         server.stop()
 
-    icon_image = Image.open(_resource("frontend/static/favicon.ico"))
+    icon_image = Image.open(_resource("frontend/static/branding/favicon.ico"))
     menu = pystray.Menu(
         pystray.MenuItem("Open MediaMasterr", open_browser, default=True),
         pystray.Menu.SEPARATOR,

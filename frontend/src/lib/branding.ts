@@ -6,12 +6,12 @@ export const BRANDING = {
   accentColor: "#5658f3",
   assets: {
     logo: "/branding/logo.svg",
-    faviconSvg: "/branding/favicon.svg",
-    faviconPng: "/branding/favicon.png",
+    faviconSvg: "/branding/favicon.ico",
+    faviconPng: "/branding/favicon-32x32.png",
     appleTouchIcon: "/branding/apple-touch-icon.png",
     androidChrome192: "/branding/android-chrome-192x192.png",
     androidChrome512: "/branding/android-chrome-512x512.png",
-    manifest: "/branding/manifest.webmanifest",
+    manifest: "/branding/site.webmanifest",
     openGraphImage: "/branding/logo.png",
   },
 } as const;

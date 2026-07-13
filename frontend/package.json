@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "sync:branding": "node ./scripts/sync-branding.mjs",
+    "precheck": "npm run sync:branding",
+    "pretest": "npm run sync:branding",
+    "prebuild": "npm run sync:branding",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
