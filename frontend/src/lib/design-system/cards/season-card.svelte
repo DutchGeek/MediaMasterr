@@ -21,16 +21,20 @@
   const subtitle = $derived.by(() => {
     const episodeCount = item.episodes?.length ?? 0;
     const fallback = item.subtitle ?? "Season";
-    return episodeCount > 0 ? `${fallback} • ${episodeCount} episodes` : fallback;
+    return episodeCount > 0
+      ? `${fallback} • ${episodeCount} episodes`
+      : fallback;
   });
 </script>
 
 <MediaCardShell
   posterUrl={item.posterUrl}
   title={item.title}
-  subtitle={subtitle}
+  {subtitle}
   lifecycleState={item.lifecycleState}
-  recommendationText={item.recommendation?.risk ? `Risk ${item.recommendation.risk}` : "Season Action"}
+  recommendationText={item.recommendation?.risk
+    ? `Risk ${item.recommendation.risk}`
+    : "Season Action"}
   recommendationSeverity={item.recommendationSeverity}
   recommendationSummary={item.recommendation?.message}
   healthSignals={item.healthSignals ?? []}

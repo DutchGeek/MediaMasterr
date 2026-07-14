@@ -24,7 +24,9 @@
   title={item.title}
   subtitle={item.subtitle}
   lifecycleState={item.lifecycleState}
-  recommendationText={item.recommendation?.risk ? `Risk ${item.recommendation.risk}` : "Recommendation"}
+  recommendationText={item.recommendation?.risk
+    ? `Risk ${item.recommendation.risk}`
+    : "Recommendation"}
   recommendationSeverity={item.recommendationSeverity}
   recommendationSummary={item.recommendation?.message}
   healthSignals={item.healthSignals ?? []}

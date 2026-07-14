@@ -29,9 +29,11 @@
 <MediaCardShell
   posterUrl={item.posterUrl}
   title={item.title}
-  subtitle={subtitle}
+  {subtitle}
   lifecycleState={item.lifecycleState}
-  recommendationText={item.recommendation?.risk ? `Risk ${item.recommendation.risk}` : "Episode"}
+  recommendationText={item.recommendation?.risk
+    ? `Risk ${item.recommendation.risk}`
+    : "Episode"}
   recommendationSeverity={item.recommendationSeverity}
   recommendationSummary={item.recommendation?.message}
   healthSignals={item.healthSignals ?? []}

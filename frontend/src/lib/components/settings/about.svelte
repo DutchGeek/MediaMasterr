@@ -102,36 +102,52 @@
         <table class="w-full min-w-[540px] text-sm">
           <tbody>
             <tr class="border-b border-border/50">
-              <td class="px-3 py-2 text-muted-foreground">MediaMasterr Version</td>
+              <td class="px-3 py-2 text-muted-foreground"
+                >MediaMasterr Version</td
+              >
               <td class="px-3 py-2 text-foreground">{versionInfo.version}</td>
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Commit SHA</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.commit_sha ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.commit_sha ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Short SHA</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.short_sha ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.short_sha ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Build Timestamp</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.build_timestamp ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.build_timestamp ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Release Channel</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.release_channel ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.release_channel ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Docker Tag</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.docker_tag ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.docker_tag ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Docker Image</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.docker_image ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.docker_image ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">OCI Revision</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.oci_revision ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.oci_revision ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">OCI Source</td>
@@ -152,21 +168,33 @@
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">OCI Version</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.oci_version ?? "n/a"}</td>
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.oci_version ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Docker Digest</td>
               <td class="px-3 py-2 text-foreground">
-                {versionInfo.docker_digest ?? versionInfo.container_digest ?? "n/a"}
+                {versionInfo.docker_digest ??
+                  versionInfo.container_digest ??
+                  "n/a"}
               </td>
             </tr>
             <tr class="border-b border-border/50">
-              <td class="px-3 py-2 text-muted-foreground">Workflow Build Number</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.workflow_run_number ?? "n/a"}</td>
+              <td class="px-3 py-2 text-muted-foreground"
+                >Workflow Build Number</td
+              >
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.workflow_run_number ?? "n/a"}</td
+              >
             </tr>
             <tr class="border-b border-border/50">
-              <td class="px-3 py-2 text-muted-foreground">Workflow Run Attempt</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.workflow_run_attempt ?? "n/a"}</td>
+              <td class="px-3 py-2 text-muted-foreground"
+                >Workflow Run Attempt</td
+              >
+              <td class="px-3 py-2 text-foreground"
+                >{versionInfo.workflow_run_attempt ?? "n/a"}</td
+              >
             </tr>
             <tr>
               <td class="px-3 py-2 text-muted-foreground">GitHub Repository</td>
@@ -209,11 +237,11 @@
       <article>
         <h2>Documentation</h2>
         <a
-          href="https://jessielw.github.io/MediaMasterr/"
+          href="https://dutchgeek.github.io/MediaMasterr/"
           target="_blank"
           rel="noopener noreferrer"
           class="text-primary underline"
-          >https://jessielw.github.io/MediaMasterr/</a
+          >https://dutchgeek.github.io/MediaMasterr/</a
         >
       </article>
 
@@ -223,7 +251,7 @@
         <p class="text-sm">
           For questions, troubleshooting, or just to chat with the community,
           check out our <a
-            href="https://github.com/jessielw/MediaMasterr/discussions"
+            href="https://github.com/DutchGeek/MediaMasterr/discussions"
             target="_blank"
             rel="noopener noreferrer"
             class="text-primary underline"

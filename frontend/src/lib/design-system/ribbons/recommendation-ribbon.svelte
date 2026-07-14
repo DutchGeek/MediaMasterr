@@ -1,6 +1,9 @@
 <script lang="ts">
   import { cn } from "$lib/utils.js";
-  import type { RecommendationSeverity, RibbonPosition } from "$lib/design-system/model/types";
+  import type {
+    RecommendationSeverity,
+    RibbonPosition,
+  } from "$lib/design-system/model/types";
 
   let {
     text,

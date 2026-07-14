@@ -19,7 +19,11 @@ export type LifecycleState =
   | "candidate"
   | "deleted";
 
-export type RecommendationSeverity = "healthy" | "information" | "action" | "problem";
+export type RecommendationSeverity =
+  | "healthy"
+  | "information"
+  | "action"
+  | "problem";
 
 export type RibbonPosition =
   | "top_left"

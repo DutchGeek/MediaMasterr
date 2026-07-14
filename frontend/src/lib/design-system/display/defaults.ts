@@ -32,14 +32,19 @@ export const BASE_DEFAULT_CONFIG: DisplayProfileConfig = {
   ],
 };
 
-const withOverrides = (overrides: Partial<DisplayProfileConfig>): DisplayProfileConfig => ({
+const withOverrides = (
+  overrides: Partial<DisplayProfileConfig>,
+): DisplayProfileConfig => ({
   ...BASE_DEFAULT_CONFIG,
   ...overrides,
-  visibleMetadata: overrides.visibleMetadata ?? BASE_DEFAULT_CONFIG.visibleMetadata,
+  visibleMetadata:
+    overrides.visibleMetadata ?? BASE_DEFAULT_CONFIG.visibleMetadata,
   visibleFields: overrides.visibleFields ?? BASE_DEFAULT_CONFIG.visibleFields,
 });
 
-export const moduleDefaults = (moduleId: DisplayModuleId): DisplayProfileConfig => {
+export const moduleDefaults = (
+  moduleId: DisplayModuleId,
+): DisplayProfileConfig => {
   if (moduleId === "operations") {
     return withOverrides({
       sorting: "risk",
@@ -53,7 +58,13 @@ export const moduleDefaults = (moduleId: DisplayModuleId): DisplayProfileConfig 
       sorting: "progress",
       grouping: "state",
       posterSize: 170,
-      visibleFields: ["progress", "ratio", "seed_days", "tracker", "filesystem"],
+      visibleFields: [
+        "progress",
+        "ratio",
+        "seed_days",
+        "tracker",
+        "filesystem",
+      ],
     });
   }
   if (moduleId === "sonarr") {

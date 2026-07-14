@@ -75,7 +75,12 @@
         style={`width:${Math.round(posterSize * 0.58)}px;height:${posterSize}px`}
       >
         {#if posterUrl}
-          <img src={posterUrl} alt={title} class="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={posterUrl}
+            alt={title}
+            class="h-full w-full object-cover"
+            loading="lazy"
+          />
         {:else}
           <div class="absolute inset-0 flex items-center justify-center">
             <Images class="size-10 text-muted-foreground/60" />
@@ -94,7 +99,9 @@
       <div class="min-w-0 flex-1 space-y-2">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="min-w-0">
-            <p class="truncate text-base font-semibold text-foreground">{title}</p>
+            <p class="truncate text-base font-semibold text-foreground">
+              {title}
+            </p>
             {#if subtitle}
               <p class="truncate text-sm text-muted-foreground">{subtitle}</p>
             {/if}
@@ -105,7 +112,9 @@
         </div>
 
         {#if recommendationSummary}
-          <p class="line-clamp-2 rounded-xl border border-border/70 bg-background/70 px-2.5 py-2 text-xs text-muted-foreground">
+          <p
+            class="line-clamp-2 rounded-xl border border-border/70 bg-background/70 px-2.5 py-2 text-xs text-muted-foreground"
+          >
             {recommendationSummary}
           </p>
         {/if}

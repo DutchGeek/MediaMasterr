@@ -1,7 +1,10 @@
 <script lang="ts">
   import CollectionCard from "$lib/design-system/cards/collection-card.svelte";
   import MovieCard from "$lib/design-system/cards/movie-card.svelte";
-  import type { MovieCollectionObject, MovieObject } from "$lib/design-system/model/types";
+  import type {
+    MovieCollectionObject,
+    MovieObject,
+  } from "$lib/design-system/model/types";
 
   let {
     collection,

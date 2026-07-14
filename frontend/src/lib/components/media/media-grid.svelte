@@ -42,7 +42,10 @@
       bucket.push(media);
       groups.set(key, bucket);
     }
-    return Array.from(groups.entries()).map(([name, items]) => ({ name, items }));
+    return Array.from(groups.entries()).map(([name, items]) => ({
+      name,
+      items,
+    }));
   });
 </script>
 
@@ -65,8 +68,13 @@
     {#each groupedItems as group (group.name)}
       <section class="mb-6">
         <div class="mb-3">
-          <h2 class="text-lg font-semibold text-foreground">{formatLibraryDisplayName(group.name)}</h2>
-          <p class="text-xs text-muted-foreground">{group.items.length} item{group.items.length === 1 ? "" : "s"} on this page</p>
+          <h2 class="text-lg font-semibold text-foreground">
+            {formatLibraryDisplayName(group.name)}
+          </h2>
+          <p class="text-xs text-muted-foreground">
+            {group.items.length} item{group.items.length === 1 ? "" : "s"} on this
+            page
+          </p>
         </div>
         <div
           class="grid gap-4 mb-4"

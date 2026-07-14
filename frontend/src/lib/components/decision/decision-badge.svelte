@@ -70,17 +70,25 @@
 
 {#if decision}
   {@const Icon = iconFor(decision.badge.icon)}
-  <div class={`rounded-xl border px-3 py-2 backdrop-blur-sm ${toneClass(decision.badge.tone)}`}>
+  <div
+    class={`rounded-xl border px-3 py-2 backdrop-blur-sm ${toneClass(decision.badge.tone)}`}
+  >
     <div class="flex items-center gap-2">
       <Icon class="size-4 shrink-0" />
       <div class="min-w-0 flex-1">
-        <p class="text-[11px] uppercase tracking-[0.18em] opacity-80">{decision.badge.label}</p>
+        <p class="text-[11px] uppercase tracking-[0.18em] opacity-80">
+          {decision.badge.label}
+        </p>
         {#if !compact}
-          <p class="text-sm font-semibold line-clamp-1">{decision.display_name}</p>
+          <p class="text-sm font-semibold line-clamp-1">
+            {decision.display_name}
+          </p>
         {/if}
       </div>
     </div>
-    <p class={`mt-1 ${compact ? "text-xs" : "text-sm"} line-clamp-2 opacity-90`}>
+    <p
+      class={`mt-1 ${compact ? "text-xs" : "text-sm"} line-clamp-2 opacity-90`}
+    >
       {decision.explanation}
     </p>
     {#if decision.reclaimable_size_bytes != null || decision.remaining_label}

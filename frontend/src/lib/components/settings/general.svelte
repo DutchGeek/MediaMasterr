@@ -716,9 +716,9 @@
         <div>
           <h3 class="font-semibold text-foreground">Post Action Webhooks</h3>
           <p class="text-muted-foreground text-sm">
-            Notify Autopulse or a custom endpoint after MediaMasterr successfully
-            deletes or moves media. Failures are logged but do not roll back the
-            reclaim action.
+            Notify Autopulse or a custom endpoint after MediaMasterr
+            successfully deletes or moves media. Failures are logged but do not
+            roll back the reclaim action.
           </p>
         </div>
         <Button size="sm" class="cursor-pointer gap-2" onclick={addWebhook}>
@@ -1040,8 +1040,8 @@
       </div>
       <p class="text-muted-foreground text-sm mb-3">
         Keep an auto-synced "Leaving Soon" row on enabled Plex, Jellyfin, and
-        Emby servers. MediaMasterr updates these collections after each candidate
-        scan and removes stale entries automatically.
+        Emby servers. MediaMasterr updates these collections after each
+        candidate scan and removes stale entries automatically.
       </p>
 
       {#if leavingSoonEnabled}

@@ -90,14 +90,16 @@
     loading = true;
     error = "";
     try {
-      const [health, version, servicesPayload, taskPayload] = await Promise.all([
-        get_api<HealthResponse>("/api/info/health"),
-        get_api<VersionResponse>("/api/info/version"),
-        get_api<Record<string, ServiceInstance | { instances?: ServiceInstance[] }>>(
-          "/api/settings/services",
-        ),
-        get_api<TasksResponse>("/api/tasks/tasks"),
-      ]);
+      const [health, version, servicesPayload, taskPayload] = await Promise.all(
+        [
+          get_api<HealthResponse>("/api/info/health"),
+          get_api<VersionResponse>("/api/info/version"),
+          get_api<
+            Record<string, ServiceInstance | { instances?: ServiceInstance[] }>
+          >("/api/settings/services"),
+          get_api<TasksResponse>("/api/tasks/tasks"),
+        ],
+      );
 
       backendStatus = health.status === "ok" ? "healthy" : "degraded";
       databaseStatus = "healthy";
@@ -119,7 +121,11 @@
       providers = knownProviders.map((providerKey) => {
         const payload = servicesPayload[providerKey];
         let instance: ServiceInstance | null = null;
-        if (payload && "instances" in payload && Array.isArray(payload.instances)) {
+        if (
+          payload &&
+          "instances" in payload &&
+          Array.isArray(payload.instances)
+        ) {
           instance = payload.instances[0] ?? null;
         } else if (payload && "enabled" in payload) {
           instance = payload as ServiceInstance;
@@ -172,33 +178,43 @@
   <div class="max-w-7xl mx-auto space-y-6">
     <div>
       <h1 class="text-3xl font-bold text-foreground">System</h1>
-      <p class="text-muted-foreground">Operations Center for runtime health, providers, jobs, and diagnostics.</p>
+      <p class="text-muted-foreground">
+        Operations Center for runtime health, providers, jobs, and diagnostics.
+      </p>
     </div>
 
     {#if error}
-      <div class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+      <div
+        class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+      >
         {error}
       </div>
     {/if}
 
     {#if loading}
-      <div class="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">Loading Operations Center...</div>
+      <div
+        class="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground"
+      >
+        Loading Operations Center...
+      </div>
     {:else}
       <section class="bg-card rounded-lg border border-border p-5">
-        <h2 class="text-lg font-semibold text-foreground mb-4">System Health</h2>
+        <h2 class="text-lg font-semibold text-foreground mb-4">
+          System Health
+        </h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-          {#each [
-            { label: "Backend Status", value: backendStatus },
-            { label: "Database Status", value: databaseStatus },
-            { label: "Scheduler Status", value: schedulerStatus },
-            { label: "Decision Engine", value: decisionEngineStatus },
-            { label: "Event Engine", value: eventEngineStatus },
-          ] as health}
-            <article class="rounded-lg border border-border bg-background/40 p-3">
+          {#each [{ label: "Backend Status", value: backendStatus }, { label: "Database Status", value: databaseStatus }, { label: "Scheduler Status", value: schedulerStatus }, { label: "Decision Engine", value: decisionEngineStatus }, { label: "Event Engine", value: eventEngineStatus }] as health}
+            <article
+              class="rounded-lg border border-border bg-background/40 p-3"
+            >
               <p class="text-xs text-muted-foreground">{health.label}</p>
               <div class="mt-2 flex items-center gap-2">
-                <span class={`inline-block size-2.5 rounded-full ${statusClass(health.value)}`}></span>
-                <span class="text-sm font-medium text-foreground">{statusLabel(health.value)}</span>
+                <span
+                  class={`inline-block size-2.5 rounded-full ${statusClass(health.value)}`}
+                ></span>
+                <span class="text-sm font-medium text-foreground"
+                  >{statusLabel(health.value)}</span
+                >
               </div>
             </article>
           {/each}
@@ -208,28 +224,63 @@
           </article>
           <article class="rounded-lg border border-border bg-background/40 p-3">
             <p class="text-xs text-muted-foreground">Uptime</p>
-            <p class="mt-2 text-sm font-medium text-foreground">{uptimeLabel}</p>
+            <p class="mt-2 text-sm font-medium text-foreground">
+              {uptimeLabel}
+            </p>
           </article>
         </div>
       </section>
 
       <section class="bg-card rounded-lg border border-border p-5">
-        <h2 class="text-lg font-semibold text-foreground mb-4">Provider Health</h2>
+        <h2 class="text-lg font-semibold text-foreground mb-4">
+          Provider Health
+        </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {#each providers as provider}
-            <article class="rounded-lg border border-border bg-background/40 p-4">
+            <article
+              class="rounded-lg border border-border bg-background/40 p-4"
+            >
               <div class="flex items-center justify-between gap-2">
-                <h3 class="text-sm font-semibold text-foreground">{provider.name}</h3>
-                <span class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${provider.status === "healthy" ? "bg-green-500/20 text-green-500" : provider.status === "degraded" ? "bg-yellow-500/20 text-yellow-500" : "bg-destructive/20 text-destructive"}`}>
+                <h3 class="text-sm font-semibold text-foreground">
+                  {provider.name}
+                </h3>
+                <span
+                  class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${provider.status === "healthy" ? "bg-green-500/20 text-green-500" : provider.status === "degraded" ? "bg-yellow-500/20 text-yellow-500" : "bg-destructive/20 text-destructive"}`}
+                >
                   {statusLabel(provider.status)}
                 </span>
               </div>
               <dl class="mt-3 space-y-1 text-xs">
-                <div class="flex justify-between gap-2"><dt class="text-muted-foreground">Connected</dt><dd class="text-foreground">{provider.connected ? "Yes" : "No"}</dd></div>
-                <div class="flex justify-between gap-2"><dt class="text-muted-foreground">Version</dt><dd class="text-foreground">{provider.version}</dd></div>
-                <div class="flex justify-between gap-2"><dt class="text-muted-foreground">Last Sync</dt><dd class="text-foreground">{provider.lastSync ? formatDistanceToNow(provider.lastSync) : "Unknown"}</dd></div>
-                <div class="flex justify-between gap-2"><dt class="text-muted-foreground">Response Time</dt><dd class="text-foreground">{provider.responseTime}</dd></div>
-                <div class="flex justify-between gap-2"><dt class="text-muted-foreground">Last Successful Sync</dt><dd class="text-foreground">{provider.lastSuccessfulSync ? formatDistanceToNow(provider.lastSuccessfulSync) : "Unknown"}</dd></div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Connected</dt>
+                  <dd class="text-foreground">
+                    {provider.connected ? "Yes" : "No"}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Version</dt>
+                  <dd class="text-foreground">{provider.version}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Last Sync</dt>
+                  <dd class="text-foreground">
+                    {provider.lastSync
+                      ? formatDistanceToNow(provider.lastSync)
+                      : "Unknown"}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Response Time</dt>
+                  <dd class="text-foreground">{provider.responseTime}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Last Successful Sync</dt>
+                  <dd class="text-foreground">
+                    {provider.lastSuccessfulSync
+                      ? formatDistanceToNow(provider.lastSuccessfulSync)
+                      : "Unknown"}
+                  </dd>
+                </div>
               </dl>
             </article>
           {/each}
@@ -239,18 +290,61 @@
       <section class="bg-card rounded-lg border border-border p-5">
         <h2 class="text-lg font-semibold text-foreground mb-4">Maintenance</h2>
         <div class="flex flex-wrap gap-2">
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("sync_media", "Refresh All Providers")}>Refresh All Providers</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("scan_cleanup_candidates", "Recalculate Decision Engine")}>Recalculate Decision Engine</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("sync_linked_data", "Recalculate Event Engine")}>Recalculate Event Engine</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("sync_linked_data", "Refresh Metadata")}>Refresh Metadata</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("weekly_house_keeping", "Clear Cache")}>Clear Cache</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("scan_cleanup_candidates", "Rebuild Statistics")}>Rebuild Statistics</button>
-          <button class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40" onclick={() => runMaintenanceAction("sync_media", "Reload Configuration")}>Reload Configuration</button>
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction("sync_media", "Refresh All Providers")}
+            >Refresh All Providers</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction(
+                "scan_cleanup_candidates",
+                "Recalculate Decision Engine",
+              )}>Recalculate Decision Engine</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction(
+                "sync_linked_data",
+                "Recalculate Event Engine",
+              )}>Recalculate Event Engine</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction("sync_linked_data", "Refresh Metadata")}
+            >Refresh Metadata</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction("weekly_house_keeping", "Clear Cache")}
+            >Clear Cache</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction(
+                "scan_cleanup_candidates",
+                "Rebuild Statistics",
+              )}>Rebuild Statistics</button
+          >
+          <button
+            class="rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-secondary/40"
+            onclick={() =>
+              runMaintenanceAction("sync_media", "Reload Configuration")}
+            >Reload Configuration</button
+          >
         </div>
       </section>
 
       <section class="bg-card rounded-lg border border-border p-5">
-        <h2 class="text-lg font-semibold text-foreground mb-4">Scheduled Jobs</h2>
+        <h2 class="text-lg font-semibold text-foreground mb-4">
+          Scheduled Jobs
+        </h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[720px] text-sm">
             <thead class="text-left text-muted-foreground">
@@ -263,14 +357,28 @@
             </thead>
             <tbody>
               {#if tasks.length === 0}
-                <tr><td colspan="4" class="py-4 text-center text-muted-foreground">No jobs available.</td></tr>
+                <tr
+                  ><td
+                    colspan="4"
+                    class="py-4 text-center text-muted-foreground"
+                    >No jobs available.</td
+                  ></tr
+                >
               {:else}
                 {#each tasks as task}
                   <tr class="border-b border-border/60">
                     <td class="py-2 text-foreground">{task.name}</td>
                     <td class="py-2 text-foreground">{task.status}</td>
-                    <td class="py-2 text-muted-foreground">{task.last_run ? formatDistanceToNow(task.last_run) : "Never"}</td>
-                    <td class="py-2 text-muted-foreground">{task.next_run ? formatDistanceToNow(task.next_run) : "Manual"}</td>
+                    <td class="py-2 text-muted-foreground"
+                      >{task.last_run
+                        ? formatDistanceToNow(task.last_run)
+                        : "Never"}</td
+                    >
+                    <td class="py-2 text-muted-foreground"
+                      >{task.next_run
+                        ? formatDistanceToNow(task.next_run)
+                        : "Manual"}</td
+                    >
                   </tr>
                 {/each}
               {/if}
@@ -290,14 +398,37 @@
         </article>
 
         <article class="bg-card rounded-lg border border-border p-5">
-          <h2 class="text-lg font-semibold text-foreground mb-3">Diagnostics</h2>
+          <h2 class="text-lg font-semibold text-foreground mb-3">
+            Diagnostics
+          </h2>
           <dl class="space-y-2 text-sm">
-            <div class="flex justify-between"><dt class="text-muted-foreground">Program</dt><dd class="text-foreground">{programName}</dd></div>
-            <div class="flex justify-between"><dt class="text-muted-foreground">Database Size</dt><dd class="text-foreground">Unknown</dd></div>
-            <div class="flex justify-between"><dt class="text-muted-foreground">Cached Objects</dt><dd class="text-foreground">Unknown</dd></div>
-            <div class="flex justify-between"><dt class="text-muted-foreground">Memory Usage</dt><dd class="text-foreground">Unknown</dd></div>
-            <div class="flex justify-between"><dt class="text-muted-foreground">Running Jobs</dt><dd class="text-foreground">{tasks.filter((t) => t.status.toLowerCase() === "running").length}</dd></div>
-            <div class="flex justify-between"><dt class="text-muted-foreground">Queue Sizes</dt><dd class="text-foreground">Derived from task statuses</dd></div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Program</dt>
+              <dd class="text-foreground">{programName}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Database Size</dt>
+              <dd class="text-foreground">Unknown</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Cached Objects</dt>
+              <dd class="text-foreground">Unknown</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Memory Usage</dt>
+              <dd class="text-foreground">Unknown</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Running Jobs</dt>
+              <dd class="text-foreground">
+                {tasks.filter((t) => t.status.toLowerCase() === "running")
+                  .length}
+              </dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Queue Sizes</dt>
+              <dd class="text-foreground">Derived from task statuses</dd>
+            </div>
           </dl>
         </article>
       </section>

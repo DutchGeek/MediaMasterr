@@ -77,7 +77,9 @@
     loadingDetail = true;
     error = "";
     try {
-      detail = await get_api<CorrelationDetail>(`/api/correlation/torrents/${torrentId}`);
+      detail = await get_api<CorrelationDetail>(
+        `/api/correlation/torrents/${torrentId}`,
+      );
     } catch (err: any) {
       detail = null;
       error = err?.message ?? "Failed to load relationships.";
@@ -120,7 +122,8 @@
       <div>
         <h1 class="text-3xl font-bold text-foreground">Media Relationships</h1>
         <p class="text-sm text-muted-foreground">
-          Read-only media correlation across download, Arr, media-server, watch, and protection data.
+          Read-only media correlation across download, Arr, media-server, watch,
+          and protection data.
         </p>
       </div>
     </div>
@@ -133,7 +136,9 @@
       <ErrorBox {error} />
     {:else}
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-        <section class="rounded-lg border border-border bg-card overflow-hidden">
+        <section
+          class="rounded-lg border border-border bg-card overflow-hidden"
+        >
           <div class="px-4 py-3 border-b border-border flex items-center gap-2">
             <Database class="size-4 text-primary" />
             <h2 class="font-semibold text-foreground">Torrents</h2>
@@ -150,7 +155,10 @@
               <tbody>
                 {#if torrents.length === 0}
                   <tr>
-                    <td colspan="3" class="px-3 py-8 text-center text-muted-foreground">
+                    <td
+                      colspan="3"
+                      class="px-3 py-8 text-center text-muted-foreground"
+                    >
                       No torrents found.
                     </td>
                   </tr>
@@ -167,7 +175,9 @@
                           {torrent.name}
                         </button>
                       </td>
-                      <td class="px-3 py-2">{asDisplayValue(torrent.category)}</td>
+                      <td class="px-3 py-2"
+                        >{asDisplayValue(torrent.category)}</td
+                      >
                       <td class="px-3 py-2">{asDisplayValue(torrent.state)}</td>
                     </tr>
                   {/each}
@@ -179,25 +189,41 @@
 
         <section class="space-y-4">
           {#if loadingDetail}
-            <div class="flex justify-center py-8 rounded-lg border border-border bg-card">
+            <div
+              class="flex justify-center py-8 rounded-lg border border-border bg-card"
+            >
               <Spinner class="w-10 h-10 text-primary" />
             </div>
           {:else if detail}
-            <article class="rounded-lg border border-border bg-card p-4 space-y-3">
+            <article
+              class="rounded-lg border border-border bg-card p-4 space-y-3"
+            >
               <h2 class="font-semibold text-foreground">Linked Objects</h2>
               <div class="grid gap-2 sm:grid-cols-2">
                 {#each summaryRows as row}
-                  <div class="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-                    <p class="text-xs uppercase tracking-wide text-muted-foreground">{row[0]}</p>
-                    <p class="text-sm text-foreground break-words">{asDisplayValue(row[1])}</p>
+                  <div
+                    class="rounded-md border border-border/60 bg-muted/20 px-3 py-2"
+                  >
+                    <p
+                      class="text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      {row[0]}
+                    </p>
+                    <p class="text-sm text-foreground break-words">
+                      {asDisplayValue(row[1])}
+                    </p>
                   </div>
                 {/each}
               </div>
             </article>
 
-            <article class="rounded-lg border border-border bg-card overflow-hidden">
+            <article
+              class="rounded-lg border border-border bg-card overflow-hidden"
+            >
               <div class="px-4 py-3 border-b border-border">
-                <h2 class="font-semibold text-foreground">Normalized Correlation Nodes</h2>
+                <h2 class="font-semibold text-foreground">
+                  Normalized Correlation Nodes
+                </h2>
               </div>
               <div class="overflow-x-auto">
                 <table class="w-full min-w-[760px] text-sm">
@@ -214,14 +240,22 @@
                     {#each detail.nodes as node}
                       <tr class="border-t border-border/60 align-top">
                         <td class="px-3 py-2 text-foreground">{node.label}</td>
-                        <td class="px-3 py-2 break-words">{asDisplayValue(node.value)}</td>
+                        <td class="px-3 py-2 break-words"
+                          >{asDisplayValue(node.value)}</td
+                        >
                         <td class="px-3 py-2">
-                          <span class={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${nodeBadgeClass(node.status)}`}>
+                          <span
+                            class={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${nodeBadgeClass(node.status)}`}
+                          >
                             {node.status}
                           </span>
                         </td>
-                        <td class="px-3 py-2">{asDisplayValue(node.provider)}</td>
-                        <td class="px-3 py-2 break-words">{asDisplayValue(node.path)}</td>
+                        <td class="px-3 py-2"
+                          >{asDisplayValue(node.provider)}</td
+                        >
+                        <td class="px-3 py-2 break-words"
+                          >{asDisplayValue(node.path)}</td
+                        >
                       </tr>
                     {/each}
                   </tbody>

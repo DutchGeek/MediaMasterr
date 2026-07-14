@@ -6,7 +6,10 @@
   import Activity from "@lucide/svelte/icons/activity";
   import Tv from "@lucide/svelte/icons/tv";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
-  import type { HealthSignal, HealthSignalKind } from "$lib/design-system/model/types";
+  import type {
+    HealthSignal,
+    HealthSignalKind,
+  } from "$lib/design-system/model/types";
 
   let {
     items = [],

@@ -28,7 +28,9 @@
     {#each decision.timeline as step, index (step.key)}
       <div class="flex gap-3">
         <div class="flex flex-col items-center shrink-0">
-          <span class={`mt-0.5 size-3 rounded-full border ${stepTone(step.status)}`}></span>
+          <span
+            class={`mt-0.5 size-3 rounded-full border ${stepTone(step.status)}`}
+          ></span>
           {#if index < decision.timeline.length - 1}
             <span class="mt-1 h-full min-h-6 w-px bg-border"></span>
           {/if}

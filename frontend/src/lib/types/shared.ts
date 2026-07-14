@@ -91,10 +91,7 @@ export interface MediaIdentityListResponse {
   total: number;
 }
 
-export type FilesystemAccessMode =
-  | "discovery"
-  | "assisted"
-  | "automated";
+export type FilesystemAccessMode = "discovery" | "assisted" | "automated";
 
 export interface OperationsCard {
   key: string;

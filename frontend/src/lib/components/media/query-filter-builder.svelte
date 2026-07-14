@@ -25,9 +25,7 @@
   ];
 
   let { node = $bindable(), level = 0, onDelete = null }: Props = $props();
-  let currentCondition = $derived(
-    node.type === "condition" ? node : null,
-  );
+  let currentCondition = $derived(node.type === "condition" ? node : null);
   let currentGroup = $derived(node.type === "group" ? node : null);
 
   const ensureGroup = () => {
@@ -56,10 +54,7 @@
     };
   };
 
-  const updateCondition = (
-    key: keyof QueryFilterCondition,
-    value: string,
-  ) => {
+  const updateCondition = (key: keyof QueryFilterCondition, value: string) => {
     if (node.type !== "condition") return;
     node = {
       ...node,
@@ -69,10 +64,14 @@
 </script>
 
 {#if node.type === "condition"}
-  <div class="rounded-lg border border-border/60 bg-background/80 p-3 space-y-3">
+  <div
+    class="rounded-lg border border-border/60 bg-background/80 p-3 space-y-3"
+  >
     <div class="flex items-start justify-between gap-2">
       <div>
-        <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <p
+          class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        >
           Rule
         </p>
         <p class="text-sm text-card-foreground">
@@ -95,15 +94,22 @@
         class="h-8 bg-card"
         value={currentCondition?.field ?? ""}
         placeholder="Field"
-        oninput={(event) => updateCondition("field", (event.target as HTMLInputElement).value)}
+        oninput={(event) =>
+          updateCondition("field", (event.target as HTMLInputElement).value)}
       />
       <Select.Root type="single" bind:value={currentCondition!.operator}>
         <Select.Trigger class="h-8 bg-card text-card-foreground">
-          {conditionOperators.find((option) => option.value === currentCondition?.operator)?.label ?? currentCondition?.operator}
+          {conditionOperators.find(
+            (option) => option.value === currentCondition?.operator,
+          )?.label ?? currentCondition?.operator}
         </Select.Trigger>
         <Select.Content class="bg-card">
           {#each conditionOperators as option}
-            <Select.Item value={option.value} label={option.label} class="text-card-foreground">
+            <Select.Item
+              value={option.value}
+              label={option.label}
+              class="text-card-foreground"
+            >
               {option.label}
             </Select.Item>
           {/each}
@@ -113,7 +119,8 @@
         class="h-8 bg-card"
         value={String(currentCondition?.value ?? "")}
         placeholder="Value"
-        oninput={(event) => updateCondition("value", (event.target as HTMLInputElement).value)}
+        oninput={(event) =>
+          updateCondition("value", (event.target as HTMLInputElement).value)}
       />
     </div>
 
@@ -128,15 +135,17 @@
     </div>
   </div>
 {:else if currentGroup}
-  <div class={`rounded-xl border border-border/70 bg-card/80 p-3 space-y-3 ${level > 0 ? "ml-4" : ""}`}>
+  <div
+    class={`rounded-xl border border-border/70 bg-card/80 p-3 space-y-3 ${level > 0 ? "ml-4" : ""}`}
+  >
     <div class="flex items-center justify-between gap-2">
       <div>
-        <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <p
+          class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        >
           Group
         </p>
-        <p class="text-sm text-card-foreground">
-          Combine rules using AND / OR
-        </p>
+        <p class="text-sm text-card-foreground">Combine rules using AND / OR</p>
       </div>
       <div class="flex items-center gap-2">
         <Select.Root type="single" bind:value={currentGroup!.combinator}>
@@ -167,7 +176,11 @@
     <div class="space-y-3">
       {#each currentGroup.clauses as clause, index (index)}
         <div class="space-y-2">
-          <Self bind:node={currentGroup.clauses[index]} level={level + 1} onDelete={() => removeClause(index)} />
+          <Self
+            bind:node={currentGroup.clauses[index]}
+            level={level + 1}
+            onDelete={() => removeClause(index)}
+          />
         </div>
       {/each}
     </div>
@@ -177,7 +190,12 @@
         type="button"
         class="rounded border border-border px-2 py-1 text-xs cursor-pointer hover:bg-secondary/50"
         onclick={() =>
-          addClause({ type: "condition", field: "", operator: "equals", value: "" })}
+          addClause({
+            type: "condition",
+            field: "",
+            operator: "equals",
+            value: "",
+          })}
       >
         Add rule
       </button>

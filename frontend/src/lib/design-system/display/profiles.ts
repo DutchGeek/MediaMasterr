@@ -6,7 +6,8 @@ import type {
   ModuleDisplayState,
 } from "$lib/design-system/display/types";
 
-const keyFor = (moduleId: DisplayModuleId): string => `mediamasterr_display_profile_${moduleId}`;
+const keyFor = (moduleId: DisplayModuleId): string =>
+  `mediamasterr_display_profile_${moduleId}`;
 
 const cloneConfig = (config: DisplayProfileConfig): DisplayProfileConfig => ({
   ...config,
@@ -27,7 +28,9 @@ const buildFallback = (moduleId: DisplayModuleId): ModuleDisplayState => {
   };
 };
 
-export const loadModuleDisplayState = (moduleId: DisplayModuleId): ModuleDisplayState => {
+export const loadModuleDisplayState = (
+  moduleId: DisplayModuleId,
+): ModuleDisplayState => {
   try {
     const raw = localStorage.getItem(keyFor(moduleId));
     if (!raw) return buildFallback(moduleId);
@@ -36,10 +39,16 @@ export const loadModuleDisplayState = (moduleId: DisplayModuleId): ModuleDisplay
       return buildFallback(moduleId);
     }
     const merged = buildFallback(moduleId);
-    const custom = parsed.presets.filter((item) => !item.builtIn).map(clonePreset);
+    const custom = parsed.presets
+      .filter((item) => !item.builtIn)
+      .map(clonePreset);
     merged.presets = [...merged.presets, ...custom];
-    const exists = merged.presets.some((item) => item.id === parsed.activePresetId);
-    merged.activePresetId = exists ? parsed.activePresetId : merged.activePresetId;
+    const exists = merged.presets.some(
+      (item) => item.id === parsed.activePresetId,
+    );
+    merged.activePresetId = exists
+      ? parsed.activePresetId
+      : merged.activePresetId;
     return merged;
   } catch {
     return buildFallback(moduleId);
@@ -53,7 +62,9 @@ export const saveModuleDisplayState = (
   localStorage.setItem(keyFor(moduleId), JSON.stringify(state));
 };
 
-export const resetModuleDisplayState = (moduleId: DisplayModuleId): ModuleDisplayState => {
+export const resetModuleDisplayState = (
+  moduleId: DisplayModuleId,
+): ModuleDisplayState => {
   const fallback = buildFallback(moduleId);
   saveModuleDisplayState(moduleId, fallback);
   return fallback;
@@ -67,7 +78,9 @@ export const updatePresetConfig = (
   return {
     ...state,
     presets: state.presets.map((item) =>
-      item.id === presetId ? { ...item, config: cloneConfig(nextConfig) } : item,
+      item.id === presetId
+        ? { ...item, config: cloneConfig(nextConfig) }
+        : item,
     ),
   };
 };
@@ -122,14 +135,18 @@ export const createPreset = (
   };
 };
 
-export const deletePreset = (state: ModuleDisplayState, presetId: string): ModuleDisplayState => {
+export const deletePreset = (
+  state: ModuleDisplayState,
+  presetId: string,
+): ModuleDisplayState => {
   const target = state.presets.find((item) => item.id === presetId);
   if (!target || target.builtIn) return state;
   const presets = state.presets.filter((item) => item.id !== presetId);
   const fallbackId = presets[0]?.id ?? "default";
   return {
     ...state,
-    activePresetId: state.activePresetId === presetId ? fallbackId : state.activePresetId,
+    activePresetId:
+      state.activePresetId === presetId ? fallbackId : state.activePresetId,
     presets,
   };
 };

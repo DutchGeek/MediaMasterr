@@ -455,8 +455,8 @@
           applications,
           <strong>Seerr</strong>, and <strong>Tautulli</strong>
           <i>(if desired)</i> before running your first sync. This helps
-          MediaMasterr build a complete view of your media, requests, and playback
-          history.
+          MediaMasterr build a complete view of your media, requests, and
+          playback history.
           <br />
           <br />
           <i

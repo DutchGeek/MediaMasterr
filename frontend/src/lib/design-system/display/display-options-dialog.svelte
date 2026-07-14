@@ -31,7 +31,10 @@
     onSave?: (config: DisplayProfileConfig, state: ModuleDisplayState) => void;
   } = $props();
 
-  let profileState: ModuleDisplayState = $state({ activePresetId: "default", presets: [] });
+  let profileState: ModuleDisplayState = $state({
+    activePresetId: "default",
+    presets: [],
+  });
   let draft: DisplayProfileConfig | null = $state(null);
 
   const allFields: DisplayField[] = [
@@ -49,10 +52,15 @@
   ];
 
   const activePreset = $derived.by(
-    () => profileState.presets.find((item) => item.id === profileState.activePresetId) ?? null,
+    () =>
+      profileState.presets.find(
+        (item) => item.id === profileState.activePresetId,
+      ) ?? null,
   );
 
-  const effectiveConfig = $derived.by(() => draft ?? activePreset?.config ?? null);
+  const effectiveConfig = $derived.by(
+    () => draft ?? activePreset?.config ?? null,
+  );
 
   const previewObject = $derived.by((): MovieObject => {
     const config = effectiveConfig;
@@ -70,9 +78,21 @@
         risk: "low",
       },
       healthSignals: [
-        { kind: "protected", label: "Protected", explanation: "This media is user protected." },
-        { kind: "filesystem_verified", label: "FS Verified", explanation: "Path mapping and file checks passed." },
-        { kind: "torrent_active", label: "Torrent Active", explanation: "Torrent is currently active." },
+        {
+          kind: "protected",
+          label: "Protected",
+          explanation: "This media is user protected.",
+        },
+        {
+          kind: "filesystem_verified",
+          label: "FS Verified",
+          explanation: "Path mapping and file checks passed.",
+        },
+        {
+          kind: "torrent_active",
+          label: "Torrent Active",
+          explanation: "Torrent is currently active.",
+        },
       ],
       quickActions: [
         { id: "open", label: "Open" },
@@ -112,7 +132,10 @@
     draft = { ...target, visibleMetadata: Array.from(set) };
   };
 
-  const setDraftValue = <K extends keyof DisplayProfileConfig>(key: K, value: DisplayProfileConfig[K]): void => {
+  const setDraftValue = <K extends keyof DisplayProfileConfig>(
+    key: K,
+    value: DisplayProfileConfig[K],
+  ): void => {
     const target = ensureDraft();
     draft = { ...target, [key]: value };
   };
@@ -120,7 +143,11 @@
   const saveChanges = (): void => {
     const target = effectiveConfig;
     if (!target) return;
-    profileState = updatePresetConfig(profileState, profileState.activePresetId, target);
+    profileState = updatePresetConfig(
+      profileState,
+      profileState.activePresetId,
+      target,
+    );
     saveModuleDisplayState(moduleId, profileState);
     onSave?.(target, profileState);
     open = false;
@@ -177,7 +204,8 @@
     <Dialog.Header>
       <Dialog.Title>Display Options</Dialog.Title>
       <Dialog.Description>
-        Module profile: {moduleId}. Changes are isolated per module and persist independently.
+        Module profile: {moduleId}. Changes are isolated per module and persist
+        independently.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -185,54 +213,109 @@
       <div class="space-y-4 rounded-2xl border border-border/70 bg-card p-4">
         <div class="grid gap-3 md:grid-cols-3">
           <div class="space-y-2">
-            <div class="text-xs uppercase tracking-wide text-muted-foreground">Preset</div>
-            <Select.Root type="single" value={profileState.activePresetId} onValueChange={(value) => { profileState = { ...profileState, activePresetId: value }; draft = null; }}>
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">
+              Preset
+            </div>
+            <Select.Root
+              type="single"
+              value={profileState.activePresetId}
+              onValueChange={(value) => {
+                profileState = { ...profileState, activePresetId: value };
+                draft = null;
+              }}
+            >
               <Select.Trigger class="bg-background text-card-foreground">
                 {activePreset?.name ?? "Select preset"}
               </Select.Trigger>
               <Select.Content class="bg-card">
                 {#each profileState.presets as preset}
-                  <Select.Item value={preset.id} label={preset.name} class="text-card-foreground">{preset.name}</Select.Item>
+                  <Select.Item
+                    value={preset.id}
+                    label={preset.name}
+                    class="text-card-foreground">{preset.name}</Select.Item
+                  >
                 {/each}
               </Select.Content>
             </Select.Root>
           </div>
 
           <div class="space-y-2">
-            <div class="text-xs uppercase tracking-wide text-muted-foreground">View mode</div>
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">
+              View mode
+            </div>
             <Select.Root
               type="single"
               value={effectiveConfig?.viewMode ?? "cards"}
-              onValueChange={(value) => setDraftValue("viewMode", value as DisplayProfileConfig["viewMode"])}
+              onValueChange={(value) =>
+                setDraftValue(
+                  "viewMode",
+                  value as DisplayProfileConfig["viewMode"],
+                )}
             >
-              <Select.Trigger class="bg-background text-card-foreground">{effectiveConfig?.viewMode ?? "cards"}</Select.Trigger>
+              <Select.Trigger class="bg-background text-card-foreground"
+                >{effectiveConfig?.viewMode ?? "cards"}</Select.Trigger
+              >
               <Select.Content class="bg-card">
-                <Select.Item value="cards" label="Cards" class="text-card-foreground">Cards</Select.Item>
-                <Select.Item value="context_grid" label="Context Grid" class="text-card-foreground">Context Grid</Select.Item>
-                <Select.Item value="diagnostics" label="Diagnostics" class="text-card-foreground">Diagnostics</Select.Item>
+                <Select.Item
+                  value="cards"
+                  label="Cards"
+                  class="text-card-foreground">Cards</Select.Item
+                >
+                <Select.Item
+                  value="context_grid"
+                  label="Context Grid"
+                  class="text-card-foreground">Context Grid</Select.Item
+                >
+                <Select.Item
+                  value="diagnostics"
+                  label="Diagnostics"
+                  class="text-card-foreground">Diagnostics</Select.Item
+                >
               </Select.Content>
             </Select.Root>
           </div>
 
           <div class="space-y-2">
-            <div class="text-xs uppercase tracking-wide text-muted-foreground">Card density</div>
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">
+              Card density
+            </div>
             <Select.Root
               type="single"
               value={effectiveConfig?.cardDensity ?? "comfortable"}
-              onValueChange={(value) => setDraftValue("cardDensity", value as DisplayProfileConfig["cardDensity"])}
+              onValueChange={(value) =>
+                setDraftValue(
+                  "cardDensity",
+                  value as DisplayProfileConfig["cardDensity"],
+                )}
             >
-              <Select.Trigger class="bg-background text-card-foreground">{effectiveConfig?.cardDensity ?? "comfortable"}</Select.Trigger>
+              <Select.Trigger class="bg-background text-card-foreground"
+                >{effectiveConfig?.cardDensity ?? "comfortable"}</Select.Trigger
+              >
               <Select.Content class="bg-card">
-                <Select.Item value="comfortable" label="Comfortable" class="text-card-foreground">Comfortable</Select.Item>
-                <Select.Item value="compact" label="Compact" class="text-card-foreground">Compact</Select.Item>
-                <Select.Item value="dense" label="Dense" class="text-card-foreground">Dense</Select.Item>
+                <Select.Item
+                  value="comfortable"
+                  label="Comfortable"
+                  class="text-card-foreground">Comfortable</Select.Item
+                >
+                <Select.Item
+                  value="compact"
+                  label="Compact"
+                  class="text-card-foreground">Compact</Select.Item
+                >
+                <Select.Item
+                  value="dense"
+                  label="Dense"
+                  class="text-card-foreground">Dense</Select.Item
+                >
               </Select.Content>
             </Select.Root>
           </div>
         </div>
 
         <div class="space-y-2">
-          <div class="text-xs uppercase tracking-wide text-muted-foreground">Poster size</div>
+          <div class="text-xs uppercase tracking-wide text-muted-foreground">
+            Poster size
+          </div>
           <input
             type="range"
             min="120"
@@ -248,22 +331,81 @@
         </div>
 
         <div class="grid gap-3 md:grid-cols-2">
-          <label class="flex items-center gap-2 text-sm text-foreground"><input type="checkbox" checked={effectiveConfig?.visibleBadges ?? true} onchange={(event) => setDraftValue("visibleBadges", (event.currentTarget as HTMLInputElement).checked)} />Visible badges</label>
-          <label class="flex items-center gap-2 text-sm text-foreground"><input type="checkbox" checked={effectiveConfig?.visibleRibbons ?? true} onchange={(event) => setDraftValue("visibleRibbons", (event.currentTarget as HTMLInputElement).checked)} />Visible ribbons</label>
-          <label class="flex items-center gap-2 text-sm text-foreground"><input type="checkbox" checked={effectiveConfig?.visibleHealthStrip ?? true} onchange={(event) => setDraftValue("visibleHealthStrip", (event.currentTarget as HTMLInputElement).checked)} />Health strip</label>
-          <label class="flex items-center gap-2 text-sm text-foreground"><input type="checkbox" checked={effectiveConfig?.hoverActions ?? true} onchange={(event) => setDraftValue("hoverActions", (event.currentTarget as HTMLInputElement).checked)} />Hover actions</label>
-          <label class="flex items-center gap-2 text-sm text-foreground"><input type="checkbox" checked={effectiveConfig?.quickActions ?? true} onchange={(event) => setDraftValue("quickActions", (event.currentTarget as HTMLInputElement).checked)} />Quick actions</label>
+          <label class="flex items-center gap-2 text-sm text-foreground"
+            ><input
+              type="checkbox"
+              checked={effectiveConfig?.visibleBadges ?? true}
+              onchange={(event) =>
+                setDraftValue(
+                  "visibleBadges",
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            />Visible badges</label
+          >
+          <label class="flex items-center gap-2 text-sm text-foreground"
+            ><input
+              type="checkbox"
+              checked={effectiveConfig?.visibleRibbons ?? true}
+              onchange={(event) =>
+                setDraftValue(
+                  "visibleRibbons",
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            />Visible ribbons</label
+          >
+          <label class="flex items-center gap-2 text-sm text-foreground"
+            ><input
+              type="checkbox"
+              checked={effectiveConfig?.visibleHealthStrip ?? true}
+              onchange={(event) =>
+                setDraftValue(
+                  "visibleHealthStrip",
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            />Health strip</label
+          >
+          <label class="flex items-center gap-2 text-sm text-foreground"
+            ><input
+              type="checkbox"
+              checked={effectiveConfig?.hoverActions ?? true}
+              onchange={(event) =>
+                setDraftValue(
+                  "hoverActions",
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            />Hover actions</label
+          >
+          <label class="flex items-center gap-2 text-sm text-foreground"
+            ><input
+              type="checkbox"
+              checked={effectiveConfig?.quickActions ?? true}
+              onchange={(event) =>
+                setDraftValue(
+                  "quickActions",
+                  (event.currentTarget as HTMLInputElement).checked,
+                )}
+            />Quick actions</label
+          >
         </div>
 
         <div class="space-y-2">
-          <div class="text-xs uppercase tracking-wide text-muted-foreground">Visible metadata</div>
+          <div class="text-xs uppercase tracking-wide text-muted-foreground">
+            Visible metadata
+          </div>
           <div class="flex flex-wrap gap-2">
             {#each ["title", "subtitle", "provider", "state", "space"] as field}
-              <label class="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 text-xs">
+              <label
+                class="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 text-xs"
+              >
                 <input
                   type="checkbox"
-                  checked={effectiveConfig?.visibleMetadata.includes(field) ?? false}
-                  onchange={(event) => toggleMetadata(field, (event.currentTarget as HTMLInputElement).checked)}
+                  checked={effectiveConfig?.visibleMetadata.includes(field) ??
+                    false}
+                  onchange={(event) =>
+                    toggleMetadata(
+                      field,
+                      (event.currentTarget as HTMLInputElement).checked,
+                    )}
                 />
                 {field}
               </label>
@@ -272,14 +414,21 @@
         </div>
 
         <div class="space-y-2">
-          <div class="text-xs uppercase tracking-wide text-muted-foreground">Visible fields</div>
+          <div class="text-xs uppercase tracking-wide text-muted-foreground">
+            Visible fields
+          </div>
           <div class="grid gap-2 md:grid-cols-2">
             {#each allFields as field}
               <label class="flex items-center gap-2 text-xs text-foreground">
                 <input
                   type="checkbox"
-                  checked={effectiveConfig?.visibleFields.includes(field) ?? false}
-                  onchange={(event) => toggleField(field, (event.currentTarget as HTMLInputElement).checked)}
+                  checked={effectiveConfig?.visibleFields.includes(field) ??
+                    false}
+                  onchange={(event) =>
+                    toggleField(
+                      field,
+                      (event.currentTarget as HTMLInputElement).checked,
+                    )}
                 />
                 {field.replaceAll("_", " ")}
               </label>
@@ -288,32 +437,101 @@
         </div>
 
         <div class="flex flex-wrap gap-2 border-t border-border/70 pt-3">
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={addPreset}>Create</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={renameActivePreset}>Rename</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={duplicateActivePreset}>Duplicate</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={deleteActivePreset}>Delete</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={resetPreset}>Reset</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs" onclick={resetToDefaults}>Reset to Defaults</button>
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={addPreset}>Create</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={renameActivePreset}>Rename</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={duplicateActivePreset}>Duplicate</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={deleteActivePreset}>Delete</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={resetPreset}>Reset</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs"
+            onclick={resetToDefaults}>Reset to Defaults</button
+          >
         </div>
       </div>
 
       <div class="space-y-3 rounded-2xl border border-border/70 bg-card p-4">
-        <div class="text-xs uppercase tracking-wide text-muted-foreground">Live preview</div>
-        <MovieCard item={previewObject} posterSize={effectiveConfig?.posterSize ?? 176} />
-        <div class="rounded-xl border border-border/70 bg-background/70 p-3 text-xs text-muted-foreground">
-          <p>Timeline: {(effectiveConfig?.visibleFields.includes("timeline") ?? false) ? "Visible" : "Hidden"}</p>
-          <p>Recommendation Summary: {(effectiveConfig?.visibleFields.includes("recommendation_summary") ?? false) ? "Visible" : "Hidden"}</p>
-          <p>Risk: {(effectiveConfig?.visibleFields.includes("risk") ?? false) ? "Visible" : "Hidden"}</p>
-          <p>Filesystem: {(effectiveConfig?.visibleFields.includes("filesystem") ?? false) ? "Visible" : "Hidden"}</p>
-          <p>Progress: {(effectiveConfig?.visibleFields.includes("progress") ?? false) ? "Visible" : "Hidden"}</p>
+        <div class="text-xs uppercase tracking-wide text-muted-foreground">
+          Live preview
+        </div>
+        <MovieCard
+          item={previewObject}
+          posterSize={effectiveConfig?.posterSize ?? 176}
+        />
+        <div
+          class="rounded-xl border border-border/70 bg-background/70 p-3 text-xs text-muted-foreground"
+        >
+          <p>
+            Timeline: {(effectiveConfig?.visibleFields.includes("timeline") ??
+            false)
+              ? "Visible"
+              : "Hidden"}
+          </p>
+          <p>
+            Recommendation Summary: {(effectiveConfig?.visibleFields.includes(
+              "recommendation_summary",
+            ) ?? false)
+              ? "Visible"
+              : "Hidden"}
+          </p>
+          <p>
+            Risk: {(effectiveConfig?.visibleFields.includes("risk") ?? false)
+              ? "Visible"
+              : "Hidden"}
+          </p>
+          <p>
+            Filesystem: {(effectiveConfig?.visibleFields.includes(
+              "filesystem",
+            ) ?? false)
+              ? "Visible"
+              : "Hidden"}
+          </p>
+          <p>
+            Progress: {(effectiveConfig?.visibleFields.includes("progress") ??
+            false)
+              ? "Visible"
+              : "Hidden"}
+          </p>
         </div>
       </div>
     </div>
 
     <Dialog.Footer>
-      <button type="button" class="rounded-full border border-border px-4 py-2 text-sm" onclick={cancelChanges}>Cancel</button>
-      <button type="button" class="rounded-full border border-border px-4 py-2 text-sm" onclick={resetToDefaults}>Reset to Defaults</button>
-      <button type="button" class="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground" onclick={saveChanges}>Save</button>
+      <button
+        type="button"
+        class="rounded-full border border-border px-4 py-2 text-sm"
+        onclick={cancelChanges}>Cancel</button
+      >
+      <button
+        type="button"
+        class="rounded-full border border-border px-4 py-2 text-sm"
+        onclick={resetToDefaults}>Reset to Defaults</button
+      >
+      <button
+        type="button"
+        class="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground"
+        onclick={saveChanges}>Save</button
+      >
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -97,11 +97,13 @@
   };
 
   const loadConfig = async () => {
-    const [definitionPayload, configPayload, statusPayload] = await Promise.all([
-      get_api<ProtectionProviderDefinition>("/api/protection/provider"),
-      get_api<ProtectionConfig>("/api/protection/config"),
-      get_api<ProtectionStatus>("/api/protection/status"),
-    ]);
+    const [definitionPayload, configPayload, statusPayload] = await Promise.all(
+      [
+        get_api<ProtectionProviderDefinition>("/api/protection/provider"),
+        get_api<ProtectionConfig>("/api/protection/config"),
+        get_api<ProtectionStatus>("/api/protection/status"),
+      ],
+    );
     providerDefinition = definitionPayload;
     config = configPayload;
     form = {
@@ -194,7 +196,9 @@
       <label class="space-y-1 block">
         <span class="text-sm text-muted-foreground">Authentication Method</span>
         <input
-          value={providerDefinition ? formatAuthType(providerDefinition.authentication.type) : "Web Login"}
+          value={providerDefinition
+            ? formatAuthType(providerDefinition.authentication.type)
+            : "Web Login"}
           disabled
           class="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-foreground"
         />
@@ -205,7 +209,8 @@
           <span class="text-sm text-muted-foreground">{field.label}</span>
           <input
             value={getFieldValue(field.name)}
-            oninput={(event) => setFieldValue(field.name, event.currentTarget.value)}
+            oninput={(event) =>
+              setFieldValue(field.name, event.currentTarget.value)}
             type={inputTypeForField(field)}
             class="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
             placeholder={placeholderForField(field)}
@@ -221,9 +226,13 @@
         <span class="text-muted-foreground">Provider</span>
         <span class="text-foreground">{status?.provider ?? "Reclaimerr"}</span>
         <span class="text-muted-foreground">Authentication</span>
-        <span class="text-foreground">{status?.authenticated ? "Authenticated" : "Not Authenticated"}</span>
+        <span class="text-foreground"
+          >{status?.authenticated ? "Authenticated" : "Not Authenticated"}</span
+        >
         <span class="text-muted-foreground">Version</span>
-        <span class="text-foreground">{status?.provider_version || "Unknown"}</span>
+        <span class="text-foreground"
+          >{status?.provider_version || "Unknown"}</span
+        >
         <span class="text-muted-foreground">Last Login</span>
         <span class="text-foreground">{status?.last_login || "Never"}</span>
         <span class="text-muted-foreground">Last Sync</span>
@@ -242,13 +251,21 @@
   </div>
 
   <div class="flex flex-wrap items-center gap-3">
-    <Button onclick={testConnection} disabled={saving || syncing} class="cursor-pointer gap-2">
+    <Button
+      onclick={testConnection}
+      disabled={saving || syncing}
+      class="cursor-pointer gap-2"
+    >
       {#if testStatus === "loading"}
         <Spinner class="size-4" />
       {/if}
       Test Connection
     </Button>
-    <Button onclick={save} disabled={saving || syncing} class="cursor-pointer gap-2">
+    <Button
+      onclick={save}
+      disabled={saving || syncing}
+      class="cursor-pointer gap-2"
+    >
       {#if saving}
         <Spinner class="size-4" />
       {:else}

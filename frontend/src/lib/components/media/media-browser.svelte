@@ -125,9 +125,7 @@
       storedPosterSize = legacyPosterSize;
     }
   }
-  let posterSize = $state(
-    parseInt(storedPosterSize ?? "150"),
-  );
+  let posterSize = $state(parseInt(storedPosterSize ?? "150"));
   $effect(() => {
     localStorage.setItem(POSTER_SIZE_KEY, posterSize.toString());
   });
@@ -188,7 +186,9 @@
 
   $effect(() => {
     if (!pendingOpenMediaId || !mediaData) return;
-    const match = mediaData.items.find((item) => item.id === pendingOpenMediaId);
+    const match = mediaData.items.find(
+      (item) => item.id === pendingOpenMediaId,
+    );
     if (match) {
       selectedMedia = match;
       showDetailDialog = true;
@@ -292,7 +292,8 @@
         ? values.filter((id) => id !== filterId)
         : [...values, filterId];
     if (source === "imported") importedFilterIds = mutate(importedFilterIds);
-    else if (source === "decision") decisionFilterIds = mutate(decisionFilterIds);
+    else if (source === "decision")
+      decisionFilterIds = mutate(decisionFilterIds);
     else smartFilterIds = mutate(smartFilterIds);
   };
 
@@ -392,7 +393,10 @@
           payload,
         );
       } else {
-        await post_api<QueryFilterResponse>("/api/media/query/smart-filters", payload);
+        await post_api<QueryFilterResponse>(
+          "/api/media/query/smart-filters",
+          payload,
+        );
       }
       editingSmartFilterId = null;
       smartFilterName = "";
@@ -430,7 +434,9 @@
     }));
   });
 
-  const editDecisionFilter = (option: NonNullable<MediaFilterCatalogResponse["native"][number]>) => {
+  const editDecisionFilter = (
+    option: NonNullable<MediaFilterCatalogResponse["native"][number]>,
+  ) => {
     openDecisionFilterEditor(option);
   };
 
@@ -445,7 +451,9 @@
     }
   };
 
-  const editSmartFilter = (option: NonNullable<MediaFilterCatalogResponse["smart"][number]>) => {
+  const editSmartFilter = (
+    option: NonNullable<MediaFilterCatalogResponse["smart"][number]>,
+  ) => {
     if (!option.filter_id) return;
     editingSmartFilterId = option.filter_id;
     smartFilterName = option.label;
@@ -479,7 +487,9 @@
     showFilterManager = true;
   };
 
-  const applySmartFilter = (option: NonNullable<MediaFilterCatalogResponse["smart"][number]>) => {
+  const applySmartFilter = (
+    option: NonNullable<MediaFilterCatalogResponse["smart"][number]>,
+  ) => {
     const definition = option.definition as {
       arr_filter_ids?: number[];
       decision_filter_ids?: number[];
@@ -628,12 +638,16 @@
     </div>
 
     <!-- filters and search -->
-    <div class="space-y-3 rounded-2xl border border-border bg-card/70 p-3 md:p-4">
+    <div
+      class="space-y-3 rounded-2xl border border-border bg-card/70 p-3 md:p-4"
+    >
       <div class="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div class="space-y-3">
           <div class="flex flex-col gap-2 lg:flex-row">
             <div class="relative flex-1">
-              <Search class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search
+                class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 type="text"
                 placeholder={searchPlaceholder}
@@ -645,12 +659,18 @@
 
             <div class="flex gap-2">
               <Select.Root type="single" bind:value={sortBy}>
-                <Select.Trigger class="min-w-40 bg-background text-card-foreground">
+                <Select.Trigger
+                  class="min-w-40 bg-background text-card-foreground"
+                >
                   {sortByOptions.find((opt) => opt.value === sortBy)?.label}
                 </Select.Trigger>
                 <Select.Content class="bg-card">
                   {#each sortByOptions as option}
-                    <Select.Item value={option.value} label={option.label} class="text-card-foreground">
+                    <Select.Item
+                      value={option.value}
+                      label={option.label}
+                      class="text-card-foreground"
+                    >
                       {option.label}
                     </Select.Item>
                   {/each}
@@ -658,28 +678,46 @@
               </Select.Root>
 
               <Select.Root type="single" bind:value={sortOrder}>
-                <Select.Trigger class="min-w-32 bg-background text-card-foreground">
+                <Select.Trigger
+                  class="min-w-32 bg-background text-card-foreground"
+                >
                   {sortOrder === "asc" ? "Ascending" : "Descending"}
                 </Select.Trigger>
                 <Select.Content class="bg-card">
-                  <Select.Item value="asc" label="Ascending" class="text-card-foreground">Ascending</Select.Item>
-                  <Select.Item value="desc" label="Descending" class="text-card-foreground">Descending</Select.Item>
+                  <Select.Item
+                    value="asc"
+                    label="Ascending"
+                    class="text-card-foreground">Ascending</Select.Item
+                  >
+                  <Select.Item
+                    value="desc"
+                    label="Descending"
+                    class="text-card-foreground">Descending</Select.Item
+                  >
                 </Select.Content>
               </Select.Root>
             </div>
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
-            <label class="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 cursor-pointer">
+            <label
+              class="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 cursor-pointer"
+            >
               <Switch bind:checked={candidatesOnly} class="cursor-pointer" />
-              <span class="text-sm text-muted-foreground">Reclaim candidates only</span>
+              <span class="text-sm text-muted-foreground"
+                >Reclaim candidates only</span
+              >
             </label>
 
             <div class="flex flex-wrap gap-2">
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger>
                   {#snippet child({ props })}
-                    <button {...props} type="button" class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer">
+                    <button
+                      {...props}
+                      type="button"
+                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
+                    >
                       ARR Filters
                     </button>
                   {/snippet}
@@ -687,13 +725,23 @@
                 <DropdownMenu.Content align="start" class="w-72">
                   <DropdownMenu.Label>Imported filters</DropdownMenu.Label>
                   <DropdownMenu.Separator />
-                  <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); openFilterManager("arr"); }}>
+                  <DropdownMenu.Item
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      openFilterManager("arr");
+                    }}
+                  >
                     Manage filters...
                   </DropdownMenu.Item>
                   <DropdownMenu.Separator />
                   {#each filterCatalog?.imported ?? [] as option}
                     {#if option.filter_id}
-                      <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); toggleFilterSelection("imported", option.filter_id!); }}>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          toggleFilterSelection("imported", option.filter_id!);
+                        }}
+                      >
                         {option.label}
                         {#if importedFilterIds.includes(option.filter_id)}
                           <span class="ml-auto text-xs text-primary">On</span>
@@ -707,7 +755,11 @@
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger>
                   {#snippet child({ props })}
-                    <button {...props} type="button" class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer">
+                    <button
+                      {...props}
+                      type="button"
+                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
+                    >
                       Decision Filters
                     </button>
                   {/snippet}
@@ -715,13 +767,23 @@
                 <DropdownMenu.Content align="start" class="w-72">
                   <DropdownMenu.Label>Decision filters</DropdownMenu.Label>
                   <DropdownMenu.Separator />
-                  <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); openFilterManager("decision"); }}>
+                  <DropdownMenu.Item
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      openFilterManager("decision");
+                    }}
+                  >
                     Manage decision filters...
                   </DropdownMenu.Item>
                   <DropdownMenu.Separator />
                   {#each filterCatalog?.native ?? [] as option}
                     {#if option.filter_id}
-                      <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); toggleFilterSelection("decision", option.filter_id!); }}>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          toggleFilterSelection("decision", option.filter_id!);
+                        }}
+                      >
                         {option.label}
                         {#if decisionFilterIds.includes(option.filter_id)}
                           <span class="ml-auto text-xs text-primary">On</span>
@@ -735,7 +797,11 @@
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger>
                   {#snippet child({ props })}
-                    <button {...props} type="button" class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer">
+                    <button
+                      {...props}
+                      type="button"
+                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
+                    >
                       Smart Filters
                     </button>
                   {/snippet}
@@ -743,13 +809,23 @@
                 <DropdownMenu.Content align="start" class="w-80">
                   <DropdownMenu.Label>Smart filters</DropdownMenu.Label>
                   <DropdownMenu.Separator />
-                  <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); openSmartFilterDialog(); }}>
+                  <DropdownMenu.Item
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      openSmartFilterDialog();
+                    }}
+                  >
                     Save current view...
                   </DropdownMenu.Item>
                   <DropdownMenu.Separator />
                   {#each filterCatalog?.smart ?? [] as option}
                     {#if option.filter_id}
-                      <DropdownMenu.Item onSelect={(event) => { event.preventDefault(); applySmartFilter(option); }}>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          applySmartFilter(option);
+                        }}
+                      >
                         {option.label}
                       </DropdownMenu.Item>
                     {/if}
@@ -767,8 +843,10 @@
                     type="button"
                     class="rounded-full border border-border/70 px-3 py-1 text-xs text-foreground hover:bg-secondary/50 cursor-pointer"
                     onclick={() => {
-                      if (filter.kind === "imported_arr") toggleFilterSelection("imported", filter.filter_id!);
-                      else if (filter.kind === "smart") toggleFilterSelection("smart", filter.filter_id!);
+                      if (filter.kind === "imported_arr")
+                        toggleFilterSelection("imported", filter.filter_id!);
+                      else if (filter.kind === "smart")
+                        toggleFilterSelection("smart", filter.filter_id!);
                       else toggleFilterSelection("decision", filter.filter_id!);
                     }}
                   >
@@ -776,7 +854,11 @@
                   </button>
                 {/if}
               {/each}
-              <button type="button" class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={clearAllFilters}>
+              <button
+                type="button"
+                class="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                onclick={clearAllFilters}
+              >
                 Clear all
               </button>
             </div>
@@ -784,22 +866,43 @@
         </div>
 
         <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Select.Root type="single" value={perPage.toString()} onValueChange={(v) => { const n = parseInt(v); perPage = n; _perPageStore.save(n); }}>
+          <Select.Root
+            type="single"
+            value={perPage.toString()}
+            onValueChange={(v) => {
+              const n = parseInt(v);
+              perPage = n;
+              _perPageStore.save(n);
+            }}
+          >
             <Select.Trigger class="bg-background text-card-foreground">
               {perPage} / page
             </Select.Trigger>
             <Select.Content class="bg-card">
               {#each PER_PAGE_OPTIONS as option}
-                <Select.Item value={option.toString()} label={option.toString()} class="text-card-foreground">
+                <Select.Item
+                  value={option.toString()}
+                  label={option.toString()}
+                  class="text-card-foreground"
+                >
                   {option}
                 </Select.Item>
               {/each}
             </Select.Content>
           </Select.Root>
 
-          <label class="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2">
+          <label
+            class="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2"
+          >
             <LayoutGrid class="size-4 shrink-0 text-muted-foreground" />
-            <input type="range" min="100" max="300" step="10" bind:value={posterSize} class="w-28 accent-primary cursor-pointer" />
+            <input
+              type="range"
+              min="100"
+              max="300"
+              step="10"
+              bind:value={posterSize}
+              class="w-28 accent-primary cursor-pointer"
+            />
           </label>
         </div>
       </div>
@@ -821,10 +924,14 @@
 </div>
 
 <Dialog.Root bind:open={showFilterManager}>
-  <Dialog.Content class="flex max-h-[90vh] flex-col sm:max-w-4xl border-ring border-2">
+  <Dialog.Content
+    class="flex max-h-[90vh] flex-col sm:max-w-4xl border-ring border-2"
+  >
     <Dialog.Header>
       <Dialog.Title>
-        {filterManagerMode === "arr" ? "Manage ARR Filters" : "Manage Decision Filters"}
+        {filterManagerMode === "arr"
+          ? "Manage ARR Filters"
+          : "Manage Decision Filters"}
       </Dialog.Title>
       <Dialog.Description>
         {filterManagerMode === "arr"
@@ -840,14 +947,26 @@
             type="text"
             placeholder="Search filters"
             value={filterSearch}
-            oninput={(event) => (filterSearch = (event.target as HTMLInputElement).value)}
+            oninput={(event) =>
+              (filterSearch = (event.target as HTMLInputElement).value)}
             class="bg-background"
           />
           <div class="flex gap-2 text-xs">
-            <button type="button" class="rounded border border-border px-2 py-1 cursor-pointer" onclick={() => (importedFilterIds = (filterCatalog?.imported ?? []).map((filter) => filter.filter_id ?? -1).filter((id) => id > 0))}>
+            <button
+              type="button"
+              class="rounded border border-border px-2 py-1 cursor-pointer"
+              onclick={() =>
+                (importedFilterIds = (filterCatalog?.imported ?? [])
+                  .map((filter) => filter.filter_id ?? -1)
+                  .filter((id) => id > 0))}
+            >
               Select all
             </button>
-            <button type="button" class="rounded border border-border px-2 py-1 cursor-pointer" onclick={() => (importedFilterIds = [])}>
+            <button
+              type="button"
+              class="rounded border border-border px-2 py-1 cursor-pointer"
+              onclick={() => (importedFilterIds = [])}
+            >
               Clear
             </button>
           </div>
@@ -856,16 +975,39 @@
         <div class="space-y-3">
           {#each groupedImportedOptions as importedGroup}
             <div class="rounded-xl border border-border/70 bg-card/60 p-3">
-              <button type="button" class="mb-3 flex w-full items-center justify-between text-left text-sm font-medium text-card-foreground" onclick={() => (collapsedImportedGroups = { ...collapsedImportedGroups, [importedGroup.group]: !collapsedImportedGroups[importedGroup.group] })}>
+              <button
+                type="button"
+                class="mb-3 flex w-full items-center justify-between text-left text-sm font-medium text-card-foreground"
+                onclick={() =>
+                  (collapsedImportedGroups = {
+                    ...collapsedImportedGroups,
+                    [importedGroup.group]:
+                      !collapsedImportedGroups[importedGroup.group],
+                  })}
+              >
                 <span>{importedGroup.group}</span>
-                <span class="text-xs text-muted-foreground">{collapsedImportedGroups[importedGroup.group] ? "Show" : "Hide"}</span>
+                <span class="text-xs text-muted-foreground"
+                  >{collapsedImportedGroups[importedGroup.group]
+                    ? "Show"
+                    : "Hide"}</span
+                >
               </button>
               {#if !collapsedImportedGroups[importedGroup.group]}
                 <div class="grid gap-2 sm:grid-cols-2">
                   {#each importedGroup.options as option}
                     {#if option.filter_id}
-                      <label class="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm text-card-foreground">
-                        <input type="checkbox" checked={importedFilterIds.includes(option.filter_id)} onchange={() => toggleFilterSelection("imported", option.filter_id!)} />
+                      <label
+                        class="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm text-card-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={importedFilterIds.includes(option.filter_id)}
+                          onchange={() =>
+                            toggleFilterSelection(
+                              "imported",
+                              option.filter_id!,
+                            )}
+                        />
                         <span>{option.label}</span>
                       </label>
                     {/if}
@@ -882,10 +1024,15 @@
               type="text"
               placeholder="Filter name"
               value={filterBuilderName}
-              oninput={(event) => (filterBuilderName = (event.target as HTMLInputElement).value)}
+              oninput={(event) =>
+                (filterBuilderName = (event.target as HTMLInputElement).value)}
               class="min-w-64 flex-1 bg-background"
             />
-            <button type="button" class="rounded border border-border px-3 py-2 text-sm cursor-pointer" onclick={() => openDecisionFilterEditor()}>
+            <button
+              type="button"
+              class="rounded border border-border px-3 py-2 text-sm cursor-pointer"
+              onclick={() => openDecisionFilterEditor()}
+            >
               New filter
             </button>
           </div>
@@ -893,24 +1040,45 @@
           <QueryFilterBuilder bind:node={filterBuilderDefinition} />
 
           <div class="flex flex-wrap justify-end gap-2">
-            <button type="button" class="rounded border border-border px-3 py-2 text-sm cursor-pointer" onclick={() => (filterBuilderDefinition = defaultDecisionDefinition())}>
+            <button
+              type="button"
+              class="rounded border border-border px-3 py-2 text-sm cursor-pointer"
+              onclick={() =>
+                (filterBuilderDefinition = defaultDecisionDefinition())}
+            >
               Reset builder
             </button>
-            <button type="button" class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground cursor-pointer" onclick={saveDecisionFilter}>
+            <button
+              type="button"
+              class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground cursor-pointer"
+              onclick={saveDecisionFilter}
+            >
               Save decision filter
             </button>
           </div>
 
           <div class="space-y-2">
-            <p class="text-sm font-medium text-card-foreground">Saved decision filters</p>
+            <p class="text-sm font-medium text-card-foreground">
+              Saved decision filters
+            </p>
             <div class="grid gap-2">
               {#each filterCatalog?.native ?? [] as option}
                 {#if option.filter_id}
-                  <div class="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm">
-                    <button type="button" class="flex-1 text-left text-card-foreground" onclick={() => editDecisionFilter(option)}>
+                  <div
+                    class="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm"
+                  >
+                    <button
+                      type="button"
+                      class="flex-1 text-left text-card-foreground"
+                      onclick={() => editDecisionFilter(option)}
+                    >
                       {option.label}
                     </button>
-                    <button type="button" class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => deleteDecisionFilter(option.filter_id!)}>
+                    <button
+                      type="button"
+                      class="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                      onclick={() => deleteDecisionFilter(option.filter_id!)}
+                    >
                       Delete
                     </button>
                   </div>
@@ -925,11 +1093,14 @@
 </Dialog.Root>
 
 <Dialog.Root bind:open={showSmartFilterDialog}>
-  <Dialog.Content class="flex max-h-[90vh] flex-col sm:max-w-3xl border-ring border-2">
+  <Dialog.Content
+    class="flex max-h-[90vh] flex-col sm:max-w-3xl border-ring border-2"
+  >
     <Dialog.Header>
       <Dialog.Title>Save Smart Filter</Dialog.Title>
       <Dialog.Description>
-        Save the current search, filter, sort, poster size, and pagination state for quick reuse.
+        Save the current search, filter, sort, poster size, and pagination state
+        for quick reuse.
       </Dialog.Description>
     </Dialog.Header>
 
@@ -938,11 +1109,14 @@
         type="text"
         placeholder="Smart filter name"
         value={smartFilterName}
-        oninput={(event) => (smartFilterName = (event.target as HTMLInputElement).value)}
+        oninput={(event) =>
+          (smartFilterName = (event.target as HTMLInputElement).value)}
         class="bg-background"
       />
 
-      <div class="grid gap-2 rounded-xl border border-border/70 bg-card/60 p-3 text-sm text-muted-foreground">
+      <div
+        class="grid gap-2 rounded-xl border border-border/70 bg-card/60 p-3 text-sm text-muted-foreground"
+      >
         <div>Search: {searchQuery.trim() || "None"}</div>
         <div>Sort: {sortBy} / {sortOrder}</div>
         <div>Page size: {perPage}</div>
@@ -951,19 +1125,35 @@
       </div>
 
       <div class="space-y-2">
-        <p class="text-sm font-medium text-card-foreground">Existing smart filters</p>
+        <p class="text-sm font-medium text-card-foreground">
+          Existing smart filters
+        </p>
         <div class="grid gap-2">
           {#each filterCatalog?.smart ?? [] as option}
             {#if option.filter_id}
-              <div class="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm">
-                <button type="button" class="flex-1 text-left text-card-foreground" onclick={() => applySmartFilter(option)}>
+              <div
+                class="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm"
+              >
+                <button
+                  type="button"
+                  class="flex-1 text-left text-card-foreground"
+                  onclick={() => applySmartFilter(option)}
+                >
                   {option.label}
                 </button>
                 <div class="flex gap-2">
-                  <button type="button" class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => editSmartFilter(option)}>
+                  <button
+                    type="button"
+                    class="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                    onclick={() => editSmartFilter(option)}
+                  >
                     Edit
                   </button>
-                  <button type="button" class="text-xs text-muted-foreground hover:text-foreground cursor-pointer" onclick={() => deleteSmartFilter(option.filter_id!)}>
+                  <button
+                    type="button"
+                    class="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                    onclick={() => deleteSmartFilter(option.filter_id!)}
+                  >
                     Delete
                   </button>
                 </div>
@@ -975,10 +1165,18 @@
     </div>
 
     <Dialog.Footer class="px-4 pb-4">
-      <button type="button" class="rounded border border-border px-3 py-2 text-sm cursor-pointer" onclick={() => (showSmartFilterDialog = false)}>
+      <button
+        type="button"
+        class="rounded border border-border px-3 py-2 text-sm cursor-pointer"
+        onclick={() => (showSmartFilterDialog = false)}
+      >
         Cancel
       </button>
-      <button type="button" class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground cursor-pointer" onclick={saveSmartFilter}>
+      <button
+        type="button"
+        class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground cursor-pointer"
+        onclick={saveSmartFilter}
+      >
         Save smart filter
       </button>
     </Dialog.Footer>

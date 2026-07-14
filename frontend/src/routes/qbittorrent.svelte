@@ -12,7 +12,10 @@
     type MovieObject,
   } from "$lib/design-system";
   import { formatFileSize } from "$lib/utils/formatters";
-  import { formatTorrentEta, formatTorrentProgress } from "$lib/qbittorrent/view.js";
+  import {
+    formatTorrentEta,
+    formatTorrentProgress,
+  } from "$lib/qbittorrent/view.js";
 
   interface QBittorrentMetrics {
     active_downloads: number;
@@ -59,7 +62,9 @@
     loading = true;
     error = "";
     try {
-      overview = await get_api<QBittorrentOverviewResponse>("/api/qbittorrent/overview");
+      overview = await get_api<QBittorrentOverviewResponse>(
+        "/api/qbittorrent/overview",
+      );
     } catch (err: any) {
       error = err?.message ?? "Failed to load qBittorrent data.";
     } finally {
@@ -70,7 +75,8 @@
   const stateRisk = (state: string): "low" | "medium" | "high" => {
     const lowered = state.toLowerCase();
     if (lowered.includes("error") || lowered.includes("stalled")) return "high";
-    if (lowered.startsWith("paused") || lowered.includes("queued")) return "medium";
+    if (lowered.startsWith("paused") || lowered.includes("queued"))
+      return "medium";
     return "low";
   };
 
@@ -82,7 +88,8 @@
   };
 
   const lifecycleForTorrent = (torrent: QBittorrentTorrentItem) => {
-    if (torrent.progress >= 1 && torrent.ratio >= 1) return "protected" as const;
+    if (torrent.progress >= 1 && torrent.ratio >= 1)
+      return "protected" as const;
     if (torrent.progress >= 1) return "imported" as const;
     return "requested" as const;
   };
@@ -93,7 +100,10 @@
       const key = torrent.category?.trim() || "uncategorized";
       map.set(key, (map.get(key) ?? 0) + 1);
     }
-    return Array.from(map.entries()).map(([category, count]) => ({ category, count }));
+    return Array.from(map.entries()).map(([category, count]) => ({
+      category,
+      count,
+    }));
   });
 
   const collectionCards = $derived.by(() => {
@@ -105,7 +115,8 @@
       lifecycleState: "imported" as const,
       recommendationSeverity: "information" as const,
       recommendation: {
-        message: "Category keeps visual grouping while details remain in drawer.",
+        message:
+          "Category keeps visual grouping while details remain in drawer.",
         confidence: 0.99,
         risk: "low" as const,
       },
@@ -139,7 +150,8 @@
           confidence: 0.97,
           risk: stateRisk(torrent.state),
           recoverableBytes: torrent.size,
-          explanation: "Media-first torrent card with transfer state as recommendation context.",
+          explanation:
+            "Media-first torrent card with transfer state as recommendation context.",
         },
         healthSignals: [
           {
@@ -168,7 +180,9 @@
   const drawerSections = $derived.by((): DetailsDrawerSection[] => {
     const currentAsset = selectedAsset;
     if (!currentAsset) return [];
-    const torrent = (overview?.torrents ?? []).find((row) => row.name === currentAsset.id);
+    const torrent = (overview?.torrents ?? []).find(
+      (row) => row.name === currentAsset.id,
+    );
     if (!torrent) return [];
     return [
       {
@@ -176,9 +190,18 @@
         title: "Lifecycle Timeline",
         rows: [
           { key: "Queued", value: "Observed" },
-          { key: "Downloading", value: torrent.progress < 1 ? "Active" : "Complete" },
-          { key: "Imported", value: torrent.progress >= 1 ? "Complete" : "Pending" },
-          { key: "Protected", value: torrent.ratio >= 1 ? "Eligible" : "Not yet" },
+          {
+            key: "Downloading",
+            value: torrent.progress < 1 ? "Active" : "Complete",
+          },
+          {
+            key: "Imported",
+            value: torrent.progress >= 1 ? "Complete" : "Pending",
+          },
+          {
+            key: "Protected",
+            value: torrent.ratio >= 1 ? "Eligible" : "Not yet",
+          },
         ],
       },
       {
@@ -203,7 +226,10 @@
         id: "torrent",
         title: "Torrent",
         rows: [
-          { key: "Download", value: `${formatFileSize(torrent.download_speed)}/s` },
+          {
+            key: "Download",
+            value: `${formatFileSize(torrent.download_speed)}/s`,
+          },
           { key: "Upload", value: `${formatFileSize(torrent.upload_speed)}/s` },
           { key: "Ratio", value: torrent.ratio.toFixed(2) },
           { key: "Tracker", value: torrent.tracker || "n/a" },
@@ -235,17 +261,25 @@
 
 <div class="p-2.5 md:p-8">
   <div class="mx-auto max-w-7xl space-y-6">
-    <div class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10">
+    <div
+      class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10"
+    >
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">Transfer Workspace</p>
-          <h1 class="text-4xl font-black tracking-tight text-foreground">qBittorrent</h1>
+          <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">
+            Transfer Workspace
+          </p>
+          <h1 class="text-4xl font-black tracking-tight text-foreground">
+            qBittorrent
+          </h1>
           <p class="mt-2 text-sm text-muted-foreground">
-            Media-first torrent assets with context on the card and diagnostics in the drawer.
+            Media-first torrent assets with context on the card and diagnostics
+            in the drawer.
           </p>
           {#if overview}
             <p class="mt-2 text-xs text-muted-foreground">
-              App {overview.app_version} • API {overview.webapi_version} • {overview.torrents.length} assets
+              App {overview.app_version} • API {overview.webapi_version} • {overview
+                .torrents.length} assets
             </p>
           {/if}
         </div>
@@ -260,11 +294,15 @@
     </div>
 
     {#if loading}
-      <div class="rounded-xl border border-border bg-card p-6 text-muted-foreground">
+      <div
+        class="rounded-xl border border-border bg-card p-6 text-muted-foreground"
+      >
         Loading qBittorrent workspace...
       </div>
     {:else if error}
-      <div class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive">
+      <div
+        class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive"
+      >
         {error}
       </div>
     {:else}
@@ -275,7 +313,9 @@
             <CollectionCard
               {item}
               selected={selectedCategory === item.id}
-              onSelect={() => (selectedCategory = selectedCategory === item.id ? null : item.id)}
+              onSelect={() =>
+                (selectedCategory =
+                  selectedCategory === item.id ? null : item.id)}
               {posterSize}
             />
           {/each}
@@ -309,4 +349,8 @@
   }}
 />
 
-<MediaDetailsDrawer bind:open={drawerOpen} item={selectedAsset} sections={drawerSections} />
+<MediaDetailsDrawer
+  bind:open={drawerOpen}
+  item={selectedAsset}
+  sections={drawerSections}
+/>

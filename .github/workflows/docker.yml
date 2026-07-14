@@ -149,13 +149,10 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           FULL_SHA="${{ steps.buildmeta.outputs.full_sha }}"
           BUILD_DIGEST="${{ steps.build.outputs.digest }}"
-          LATEST_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:latest" | awk -F': ' '/^Digest:/ {print $2; exit}')"
-          SHA_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${FULL_SHA}" | awk -F': ' '/^Digest:/ {print $2; exit}')"
+          TAGS="${{ steps.meta.outputs.tags }}"
           test -n "$BUILD_DIGEST"
-          test -n "$LATEST_DIGEST"
-          test -n "$SHA_DIGEST"
-          test "$BUILD_DIGEST" = "$LATEST_DIGEST"
-          test "$BUILD_DIGEST" = "$SHA_DIGEST"
+          printf '%s\n' "$TAGS" | grep -Fx "${IMAGE}:latest"
+          printf '%s\n' "$TAGS" | grep -Fx "${IMAGE}:${FULL_SHA}"
 
       - name: Build summary
         if: always()

@@ -106,9 +106,7 @@
   );
   const protectionAuthLabel = $derived(
     protectionStatus?.authentication_status ??
-      (protectionStatus?.authenticated
-        ? "Authenticated"
-        : "Not Authenticated"),
+      (protectionStatus?.authenticated ? "Authenticated" : "Not Authenticated"),
   );
   const protectionServiceLastSyncLabel = $derived.by(() => {
     nowTick;
@@ -372,17 +370,25 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+          <span
+            class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground"
+          >
             v{VERSION}
           </span>
-          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+          <span
+            class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground"
+          >
             Connected services: {connectedServicesCount}
           </span>
-          <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+          <span
+            class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground"
+          >
             Last sync: {lastSystemSyncLabel}
           </span>
           {#if lastUpdatedLabel}
-            <span class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+            <span
+              class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground"
+            >
               Updated {lastUpdatedLabel}
             </span>
           {/if}
@@ -475,15 +481,21 @@
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Movies</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.movies}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.ready_today.movies}</span
+                  >
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">TV Seasons</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.tv_seasons}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.ready_today.tv_seasons}</span
+                  >
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Episodes</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.ready_today.episodes}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.ready_today.episodes}</span
+                  >
                 </div>
               </div>
             </button>
@@ -491,36 +503,52 @@
             <button
               type="button"
               class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1 cursor-pointer text-left"
-              onclick={() => openQuery("/series", { decision_state: "waiting" })}
+              onclick={() =>
+                openQuery("/series", { decision_state: "waiting" })}
             >
               <p class="text-sm text-muted-foreground">Blocked</p>
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Protected</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.protected}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.blocked.protected}</span
+                  >
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Waiting</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.waiting}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.blocked.waiting}</span
+                  >
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Attention</span>
-                  <span class="font-semibold text-foreground">{dashboard.decision_summary.blocked.attention_required}</span>
+                  <span class="font-semibold text-foreground"
+                    >{dashboard.decision_summary.blocked
+                      .attention_required}</span
+                  >
                 </div>
               </div>
             </button>
 
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1">
+            <article
+              class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1"
+            >
               <p class="text-sm text-muted-foreground">Recently Reclaimable</p>
               <div class="mt-3 space-y-2 text-sm">
                 {#each dashboard.decision_summary.recently_reclaimable.slice(0, 3) as item}
                   <div>
-                    <p class="font-medium text-foreground truncate">{item.title}</p>
-                    <p class="text-xs text-muted-foreground">{formatSize(item.reclaimable_size_bytes)} • {item.scope}</p>
+                    <p class="font-medium text-foreground truncate">
+                      {item.title}
+                    </p>
+                    <p class="text-xs text-muted-foreground">
+                      {formatSize(item.reclaimable_size_bytes)} • {item.scope}
+                    </p>
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.recently_reclaimable.length === 0}
-                  <p class="text-xs text-muted-foreground">No recent reclaim candidates</p>
+                  <p class="text-xs text-muted-foreground">
+                    No recent reclaim candidates
+                  </p>
                 {/if}
               </div>
             </article>
@@ -528,33 +556,54 @@
 
           <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <article class="bg-card rounded-lg border border-border p-5">
-              <h2 class="text-lg font-semibold text-foreground mb-4">Top Opportunities</h2>
+              <h2 class="text-lg font-semibold text-foreground mb-4">
+                Top Opportunities
+              </h2>
               <div class="space-y-3">
                 {#each dashboard.decision_summary.top_opportunities as opportunity}
                   <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="font-medium text-foreground truncate">{opportunity.title}</p>
-                      <p class="text-xs text-muted-foreground">{opportunity.scope} • {capitalizeFirstLetter(opportunity.media_type)}</p>
+                      <p class="font-medium text-foreground truncate">
+                        {opportunity.title}
+                      </p>
+                      <p class="text-xs text-muted-foreground">
+                        {opportunity.scope} • {capitalizeFirstLetter(
+                          opportunity.media_type,
+                        )}
+                      </p>
                     </div>
-                    <span class="shrink-0 text-sm font-semibold text-emerald-500">
+                    <span
+                      class="shrink-0 text-sm font-semibold text-emerald-500"
+                    >
                       {formatSize(opportunity.reclaimable_size_bytes)}
                     </span>
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.top_opportunities.length === 0}
-                  <p class="text-sm text-muted-foreground">No reclaim opportunities available.</p>
+                  <p class="text-sm text-muted-foreground">
+                    No reclaim opportunities available.
+                  </p>
                 {/if}
               </div>
             </article>
 
             <article class="bg-card rounded-lg border border-border p-5">
-              <h2 class="text-lg font-semibold text-foreground mb-4">Libraries</h2>
+              <h2 class="text-lg font-semibold text-foreground mb-4">
+                Libraries
+              </h2>
               <div class="space-y-3">
                 {#each dashboard.decision_summary.libraries as library}
                   <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="font-medium text-foreground truncate">{formatLibraryDisplayName(library.label)}</p>
-                      <p class="text-xs text-muted-foreground">{library.item_count} reclaimable item{library.item_count === 1 ? "" : "s"}</p>
+                      <p class="font-medium text-foreground truncate">
+                        {formatLibraryDisplayName(library.label)}
+                      </p>
+                      <p class="text-xs text-muted-foreground">
+                        {library.item_count} reclaimable item{library.item_count ===
+                        1
+                          ? ""
+                          : "s"}
+                      </p>
                     </div>
                     <span class="shrink-0 text-sm font-semibold text-primary">
                       {formatSize(library.reclaimable_size_bytes)}
@@ -562,7 +611,9 @@
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.libraries.length === 0}
-                  <p class="text-sm text-muted-foreground">No grouped reclaimable libraries yet.</p>
+                  <p class="text-sm text-muted-foreground">
+                    No grouped reclaimable libraries yet.
+                  </p>
                 {/if}
               </div>
             </article>
@@ -768,11 +819,14 @@
                           Reclaimerr Protection
                         </p>
                         <span
-                          class={`text-xs px-2 py-0.5 rounded-full ${(protectionStatus?.connected ?? false)
-                            ? "bg-green-500/20 text-green-500"
-                            : "bg-destructive/20 text-destructive"}`}
+                          class={`text-xs px-2 py-0.5 rounded-full ${
+                            (protectionStatus?.connected ?? false)
+                              ? "bg-green-500/20 text-green-500"
+                              : "bg-destructive/20 text-destructive"
+                          }`}
                         >
-                          {protectionStatus?.connection_status ?? "disconnected"}
+                          {protectionStatus?.connection_status ??
+                            "disconnected"}
                         </span>
                       </div>
                       <span
@@ -837,16 +891,19 @@
                 {/if}
               </article>
             {/if}
-
           </section>
 
           <!-- recent activity -->
           <section class="bg-card rounded-lg border border-border p-5">
-            <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div
+              class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+            >
               <h2 class="text-xl font-semibold text-foreground">
                 Recent Activity
               </h2>
-              <div class="inline-flex rounded-lg border border-border bg-secondary/30 p-1">
+              <div
+                class="inline-flex rounded-lg border border-border bg-secondary/30 p-1"
+              >
                 <button
                   class={`rounded-md px-3 py-1.5 text-sm cursor-pointer transition-colors ${activityTab === "media" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                   onclick={() => (activityTab = "media")}

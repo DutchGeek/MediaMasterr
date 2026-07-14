@@ -282,36 +282,75 @@
             <div class="media-dialog__header-content">
               <!-- title and status badges -->
               <div>
-
-                <div class="rounded-xl border border-border bg-card/80 p-4 space-y-4">
+                <div
+                  class="rounded-xl border border-border bg-card/80 p-4 space-y-4"
+                >
                   <div>
-                    <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Decision</p>
+                    <p
+                      class="text-xs uppercase tracking-[0.2em] text-muted-foreground"
+                    >
+                      Decision
+                    </p>
                     <h3 class="text-lg font-semibold text-foreground mt-1">
                       {media.status.decision?.display_name ?? "Unknown"}
                     </h3>
                     <p class="text-sm text-muted-foreground mt-1">
-                      {media.status.decision?.explanation ?? "No decision explanation available yet."}
+                      {media.status.decision?.explanation ??
+                        "No decision explanation available yet."}
                     </p>
                   </div>
 
                   <div class="grid gap-3 md:grid-cols-2">
-                    <div class="rounded-lg border border-border bg-background/60 p-3">
-                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">Why</p>
-                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.explanation ?? "Unknown"}</p>
+                    <div
+                      class="rounded-lg border border-border bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-xs uppercase tracking-[0.16em] text-muted-foreground"
+                      >
+                        Why
+                      </p>
+                      <p class="mt-1 text-sm text-foreground">
+                        {media.status.decision?.explanation ?? "Unknown"}
+                      </p>
                     </div>
-                    <div class="rounded-lg border border-border bg-background/60 p-3">
-                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">What Next</p>
-                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.recommended_action ?? "Review manually"}</p>
+                    <div
+                      class="rounded-lg border border-border bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-xs uppercase tracking-[0.16em] text-muted-foreground"
+                      >
+                        What Next
+                      </p>
+                      <p class="mt-1 text-sm text-foreground">
+                        {media.status.decision?.recommended_action ??
+                          "Review manually"}
+                      </p>
                     </div>
-                    <div class="rounded-lg border border-border bg-background/60 p-3">
-                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">When</p>
-                      <p class="mt-1 text-sm text-foreground">{media.status.decision?.remaining_label ?? "No timer"}</p>
+                    <div
+                      class="rounded-lg border border-border bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-xs uppercase tracking-[0.16em] text-muted-foreground"
+                      >
+                        When
+                      </p>
+                      <p class="mt-1 text-sm text-foreground">
+                        {media.status.decision?.remaining_label ?? "No timer"}
+                      </p>
                     </div>
-                    <div class="rounded-lg border border-border bg-background/60 p-3">
-                      <p class="text-xs uppercase tracking-[0.16em] text-muted-foreground">How Much</p>
+                    <div
+                      class="rounded-lg border border-border bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-xs uppercase tracking-[0.16em] text-muted-foreground"
+                      >
+                        How Much
+                      </p>
                       <p class="mt-1 text-sm text-foreground">
                         {media.status.decision?.reclaimable_size_bytes != null
-                          ? formatFileSize(media.status.decision.reclaimable_size_bytes)
+                          ? formatFileSize(
+                              media.status.decision.reclaimable_size_bytes,
+                            )
                           : "Unknown"}
                       </p>
                     </div>
@@ -320,11 +359,19 @@
                   <DecisionTimeline decision={media.status.decision} />
                 </div>
                 {#if isSeries(media)}
-                  <div class="rounded-xl border border-border bg-card/80 p-4 space-y-4">
+                  <div
+                    class="rounded-xl border border-border bg-card/80 p-4 space-y-4"
+                  >
                     <div class="flex items-center justify-between gap-3">
                       <div>
-                        <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Series Drill-down</p>
-                        <h3 class="text-lg font-semibold text-foreground mt-1">Seasons and Episodes</h3>
+                        <p
+                          class="text-xs uppercase tracking-[0.2em] text-muted-foreground"
+                        >
+                          Series Drill-down
+                        </p>
+                        <h3 class="text-lg font-semibold text-foreground mt-1">
+                          Seasons and Episodes
+                        </h3>
                       </div>
                       {#if loadingSeriesBreakdown}
                         <p class="text-xs text-muted-foreground">Loading…</p>
@@ -333,33 +380,58 @@
 
                     <div class="space-y-4">
                       {#each seasons as season (season.id)}
-                        <article class="rounded-lg border border-border bg-background/60 p-4 space-y-3">
-                          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <article
+                          class="rounded-lg border border-border bg-background/60 p-4 space-y-3"
+                        >
+                          <div
+                            class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
+                          >
                             <div>
-                              <h4 class="text-base font-semibold text-foreground">Season {season.season_number}</h4>
+                              <h4
+                                class="text-base font-semibold text-foreground"
+                              >
+                                Season {season.season_number}
+                              </h4>
                               <p class="text-sm text-muted-foreground">
-                                {season.episode_count ?? 0} episodes • {formatFileSize(season.size)}
+                                {season.episode_count ?? 0} episodes • {formatFileSize(
+                                  season.size,
+                                )}
                               </p>
                             </div>
                             <div class="lg:max-w-sm">
-                              <DecisionBadge decision={season.status.decision} compact={true} />
+                              <DecisionBadge
+                                decision={season.status.decision}
+                                compact={true}
+                              />
                             </div>
                           </div>
 
                           {#if groupedEpisodes.get(season.id)?.length}
                             <div class="grid gap-2 md:grid-cols-2">
-                              {#each groupedEpisodes.get(season.id)?.slice(0, 4) ?? [] as episode (episode.id)}
-                                <div class="rounded-lg border border-border bg-card/80 p-3">
+                              {#each groupedEpisodes
+                                .get(season.id)
+                                ?.slice(0, 4) ?? [] as episode (episode.id)}
+                                <div
+                                  class="rounded-lg border border-border bg-card/80 p-3"
+                                >
                                   <div class="min-w-0">
-                                    <p class="text-sm font-medium text-foreground truncate">
-                                      E{episode.episode_number} {episode.name ?? "Unknown"}
+                                    <p
+                                      class="text-sm font-medium text-foreground truncate"
+                                    >
+                                      E{episode.episode_number}
+                                      {episode.name ?? "Unknown"}
                                     </p>
-                                    <p class="text-xs text-muted-foreground mt-1">
+                                    <p
+                                      class="text-xs text-muted-foreground mt-1"
+                                    >
                                       {formatFileSize(episode.size)}
                                     </p>
                                   </div>
                                   <div class="mt-2">
-                                    <DecisionBadge decision={episode.status.decision} compact={true} />
+                                    <DecisionBadge
+                                      decision={episode.status.decision}
+                                      compact={true}
+                                    />
                                   </div>
                                 </div>
                               {/each}
@@ -369,7 +441,9 @@
                       {/each}
 
                       {#if !loadingSeriesBreakdown && seasons.length === 0}
-                        <p class="text-sm text-muted-foreground">No season breakdown available.</p>
+                        <p class="text-sm text-muted-foreground">
+                          No season breakdown available.
+                        </p>
                       {/if}
                     </div>
                   </div>

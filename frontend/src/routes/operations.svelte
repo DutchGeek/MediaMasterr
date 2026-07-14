@@ -40,13 +40,19 @@
     loading = true;
     error = "";
     try {
-      const [overviewResponse, recommendationsResponse, filesystemResponse, plansResponse] =
-        await Promise.all([
-          get_api<OperationsOverviewResponse>("/api/operations/overview"),
-          get_api<OperationsRecommendationsResponse>("/api/operations/recommendations"),
-          get_api<FilesystemConfigResponse>("/api/operations/filesystem"),
-          get_api<CleanupPlanListResponse>("/api/operations/cleanup-plans"),
-        ]);
+      const [
+        overviewResponse,
+        recommendationsResponse,
+        filesystemResponse,
+        plansResponse,
+      ] = await Promise.all([
+        get_api<OperationsOverviewResponse>("/api/operations/overview"),
+        get_api<OperationsRecommendationsResponse>(
+          "/api/operations/recommendations",
+        ),
+        get_api<FilesystemConfigResponse>("/api/operations/filesystem"),
+        get_api<CleanupPlanListResponse>("/api/operations/cleanup-plans"),
+      ]);
       overview = overviewResponse;
       recommendations = recommendationsResponse;
       filesystem = filesystemResponse;
@@ -58,7 +64,9 @@
     }
   };
 
-  const safetyToSeverity = (safety: OperationsRecommendation["safety_level"]) => {
+  const safetyToSeverity = (
+    safety: OperationsRecommendation["safety_level"],
+  ) => {
     if (safety === "safe") return "healthy" as const;
     if (safety === "low_risk") return "information" as const;
     if (safety === "medium_risk") return "action" as const;
@@ -69,7 +77,8 @@
     const action = item.action.toLowerCase();
     if (action.includes("detach")) return "detached" as const;
     if (action.includes("protect")) return "protected" as const;
-    if (action.includes("delete") || action.includes("remove")) return "candidate" as const;
+    if (action.includes("delete") || action.includes("remove"))
+      return "candidate" as const;
     return "imported" as const;
   };
 
@@ -85,7 +94,10 @@
       kind: "movie_collection" as const,
       title: card.title,
       subtitle: `${card.count} media assets`,
-      lifecycleState: card.severity === "high" ? ("candidate" as const) : ("verified" as const),
+      lifecycleState:
+        card.severity === "high"
+          ? ("candidate" as const)
+          : ("verified" as const),
       recommendationSeverity:
         card.severity === "high"
           ? "problem"
@@ -97,7 +109,12 @@
       recommendation: {
         message: card.description,
         confidence: card.severity === "high" ? 0.72 : 0.92,
-        risk: card.severity === "high" ? "high" : card.severity === "medium" ? "medium" : "low",
+        risk:
+          card.severity === "high"
+            ? "high"
+            : card.severity === "medium"
+              ? "medium"
+              : "low",
       },
       healthSignals: [
         {
@@ -114,7 +131,8 @@
     return recommendationsForCollection
       .filter(
         (item) =>
-          !/series|season|episode/i.test(item.target_type) && !/season\s+\d+/i.test(item.title),
+          !/series|season|episode/i.test(item.target_type) &&
+          !/season\s+\d+/i.test(item.title),
       )
       .map((item) => ({
         id: item.id,
@@ -157,8 +175,10 @@
   const mediaSeries = $derived.by((): SeriesObject[] => {
     const grouped = new Map<string, OperationsRecommendation[]>();
     for (const item of recommendationsForCollection) {
-      const seasonal = /season\s*(\d+)/i.exec(item.title) || /s(\d{1,2})/i.exec(item.title);
-      if (!seasonal && !/series|season|episode/i.test(item.target_type)) continue;
+      const seasonal =
+        /season\s*(\d+)/i.exec(item.title) || /s(\d{1,2})/i.exec(item.title);
+      if (!seasonal && !/series|season|episode/i.test(item.target_type))
+        continue;
       const key = item.title.split(" - ")[0].split(":")[0].trim();
       const bucket = grouped.get(key) ?? [];
       bucket.push(item);
@@ -167,8 +187,11 @@
 
     return Array.from(grouped.entries()).map(([seriesName, items]) => {
       const seasons: SeasonObject[] = items.map((item, index) => {
-        const seasonNo = /season\s*(\d+)/i.exec(item.title) || /s(\d{1,2})/i.exec(item.title);
-        const seasonLabel = seasonNo ? `Season ${seasonNo[1]}` : `Season ${index + 1}`;
+        const seasonNo =
+          /season\s*(\d+)/i.exec(item.title) || /s(\d{1,2})/i.exec(item.title);
+        const seasonLabel = seasonNo
+          ? `Season ${seasonNo[1]}`
+          : `Season ${index + 1}`;
         return {
           id: `${item.id}-season`,
           kind: "season",
@@ -197,7 +220,8 @@
             {
               kind: "torrent_active",
               label: "Torrent Active",
-              explanation: "Related transfer activity still exists for this season.",
+              explanation:
+                "Related transfer activity still exists for this season.",
             },
           ],
           quickActions: [
@@ -218,7 +242,10 @@
         };
       });
 
-      const totalRecovery = items.reduce((sum, row) => sum + row.estimated_recovery_bytes, 0);
+      const totalRecovery = items.reduce(
+        (sum, row) => sum + row.estimated_recovery_bytes,
+        0,
+      );
       const highest = items.some((row) => row.safety_level === "high_risk")
         ? "high"
         : items.some((row) => row.safety_level === "medium_risk")
@@ -231,13 +258,20 @@
         title: seriesName,
         subtitle: `${seasons.length} seasons with recommendations`,
         lifecycleState: "imported",
-        recommendationSeverity: highest === "high" ? "problem" : highest === "medium" ? "action" : "information",
+        recommendationSeverity:
+          highest === "high"
+            ? "problem"
+            : highest === "medium"
+              ? "action"
+              : "information",
         recommendation: {
-          message: "Series context keeps seasons visible while actions are taken season-by-season.",
+          message:
+            "Series context keeps seasons visible while actions are taken season-by-season.",
           confidence: 0.98,
           risk: highest,
           recoverableBytes: totalRecovery,
-          explanation: "Series cards provide context, while season cards are the operational unit.",
+          explanation:
+            "Series cards provide context, while season cards are the operational unit.",
         },
         seasons,
         affectedSeasons: seasons.length,
@@ -247,7 +281,11 @@
         overallHealth: highest === "high" ? "Attention" : "Good",
         lastScanAt: overview?.generated_at,
         healthSignals: [
-          { kind: "imported", label: "Imported", explanation: "Series is imported and linked." },
+          {
+            kind: "imported",
+            label: "Imported",
+            explanation: "Series is imported and linked.",
+          },
         ],
       };
     });
@@ -260,7 +298,8 @@
       {
         id: "lifecycle_timeline",
         title: "Lifecycle Timeline",
-        description: "Context before detail: timeline explains why this action appears now.",
+        description:
+          "Context before detail: timeline explains why this action appears now.",
         rows: [
           { key: "Requested", value: "Complete" },
           { key: "Downloading", value: "Complete" },
@@ -279,7 +318,9 @@
           {
             key: "Why",
             value:
-              recommendation?.explanation ?? recommendation?.message ?? "No explanation available",
+              recommendation?.explanation ??
+              recommendation?.message ??
+              "No explanation available",
           },
           { key: "Risk", value: recommendation?.risk ?? "unknown" },
           {
@@ -299,14 +340,20 @@
         title: "Filesystem",
         rows: [
           { key: "Access Mode", value: filesystem?.access_mode ?? "unknown" },
-          { key: "Configured Roots", value: String(filesystem?.roots.length ?? 0) },
+          {
+            key: "Configured Roots",
+            value: String(filesystem?.roots.length ?? 0),
+          },
         ],
       },
       {
         id: "torrent",
         title: "Torrent",
         rows: [
-          { key: "Correlation", value: "Media-first view mapped to transfer state" },
+          {
+            key: "Correlation",
+            value: "Media-first view mapped to transfer state",
+          },
           { key: "Tracker", value: "See provider information" },
         ],
       },
@@ -353,15 +400,20 @@
 
 <div class="p-2.5 md:p-8">
   <div class="mx-auto max-w-7xl space-y-6">
-    <div class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10">
+    <div
+      class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10"
+    >
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">
             Media Intelligence Workspace
           </p>
-          <h1 class="text-4xl font-black tracking-tight text-foreground">Operations</h1>
+          <h1 class="text-4xl font-black tracking-tight text-foreground">
+            Operations
+          </h1>
           <p class="mt-2 text-sm text-muted-foreground">
-            Visual collections answer what to do next using media context before provider detail.
+            Visual collections answer what to do next using media context before
+            provider detail.
           </p>
         </div>
         <button
@@ -375,23 +427,30 @@
     </div>
 
     {#if loading}
-      <div class="rounded-xl border border-border bg-card p-6 text-muted-foreground">
+      <div
+        class="rounded-xl border border-border bg-card p-6 text-muted-foreground"
+      >
         Loading operations workspace...
       </div>
     {:else if error}
-      <div class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive">
+      <div
+        class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive"
+      >
         {error}
       </div>
     {:else}
       <section class="space-y-3">
-        <h2 class="text-lg font-semibold text-foreground">Operations Collections</h2>
+        <h2 class="text-lg font-semibold text-foreground">
+          Operations Collections
+        </h2>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {#each collectionCards as item}
             <CollectionCard
               {item}
               selected={selectedCollectionKey === item.id}
               onSelect={() =>
-                (selectedCollectionKey = selectedCollectionKey === item.id ? null : item.id)}
+                (selectedCollectionKey =
+                  selectedCollectionKey === item.id ? null : item.id)}
               {posterSize}
             />
           {/each}
@@ -442,4 +501,8 @@
   }}
 />
 
-<MediaDetailsDrawer bind:open={drawerOpen} item={selectedAsset} sections={drawerSections} />
+<MediaDetailsDrawer
+  bind:open={drawerOpen}
+  item={selectedAsset}
+  sections={drawerSections}
+/>

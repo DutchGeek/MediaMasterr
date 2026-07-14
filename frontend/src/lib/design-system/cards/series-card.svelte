@@ -21,9 +21,12 @@
 
   const subtitle = $derived.by(() => {
     const segments: string[] = [];
-    if (item.affectedSeasons !== undefined) segments.push(`${item.affectedSeasons} seasons`);
-    if (item.recommendations !== undefined) segments.push(`${item.recommendations} recommendations`);
-    if (item.recoverableBytes !== undefined) segments.push(formatFileSize(item.recoverableBytes));
+    if (item.affectedSeasons !== undefined)
+      segments.push(`${item.affectedSeasons} seasons`);
+    if (item.recommendations !== undefined)
+      segments.push(`${item.recommendations} recommendations`);
+    if (item.recoverableBytes !== undefined)
+      segments.push(formatFileSize(item.recoverableBytes));
     return segments.join(" • ") || item.subtitle || "Series";
   });
 </script>
@@ -31,9 +34,11 @@
 <MediaCardShell
   posterUrl={item.posterUrl}
   title={item.title}
-  subtitle={subtitle}
+  {subtitle}
   lifecycleState={item.lifecycleState}
-  recommendationText={item.highestRisk ? `Highest ${item.highestRisk}` : "Series Context"}
+  recommendationText={item.highestRisk
+    ? `Highest ${item.highestRisk}`
+    : "Series Context"}
   recommendationSeverity={item.recommendationSeverity}
   recommendationSummary={item.recommendation?.message}
   healthSignals={item.healthSignals ?? []}

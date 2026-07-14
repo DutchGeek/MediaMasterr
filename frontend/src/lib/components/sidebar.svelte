@@ -91,7 +91,8 @@
       icon: Shield,
       adminOnly: false,
       page: PageAccess.Protected,
-      tooltip: "Manage MediaMasterr Protection provider, rules, and protected items",
+      tooltip:
+        "Manage MediaMasterr Protection provider, rules, and protected items",
     },
     {
       path: "/settings",
