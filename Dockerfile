@@ -32,6 +32,24 @@ EXPOSE 8000
 
 ## API image (includes frontend build)
 FROM backend-base AS api
+ARG BUILD_VERSION=0.0.0
+ARG BUILD_COMMIT_SHA=unknown
+ARG BUILD_TIMESTAMP=unknown
+ARG BUILD_REPOSITORY=https://github.com/dutchgeek/mediamasterr
+ARG BUILD_DOCKER_IMAGE=ghcr.io/dutchgeek/mediamasterr
+ARG BUILD_CONTAINER_DIGEST=unknown
+LABEL org.opencontainers.image.title="MediaMasterr" \
+	  org.opencontainers.image.description="Media server cleanup and deletion management tool" \
+	  org.opencontainers.image.source="${BUILD_REPOSITORY}" \
+	  org.opencontainers.image.url="${BUILD_REPOSITORY}" \
+	  org.opencontainers.image.version="${BUILD_VERSION}" \
+	  org.opencontainers.image.revision="${BUILD_COMMIT_SHA}" \
+	  org.opencontainers.image.created="${BUILD_TIMESTAMP}"
+ENV APP_COMMIT_SHA=${BUILD_COMMIT_SHA} \
+	APP_BUILD_TIMESTAMP=${BUILD_TIMESTAMP} \
+	APP_DOCKER_IMAGE=${BUILD_DOCKER_IMAGE} \
+	APP_CONTAINER_DIGEST=${BUILD_CONTAINER_DIGEST} \
+	APP_GIT_REPOSITORY=${BUILD_REPOSITORY}
 COPY --from=frontend-build /workspace/frontend/dist /app/frontend/dist
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sh", "-c", \

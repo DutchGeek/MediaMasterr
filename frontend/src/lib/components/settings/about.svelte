@@ -17,6 +17,17 @@
     body: string;
   }
 
+  interface VersionInfo {
+    version: string;
+    program: string;
+    url: string;
+    commit_sha: string | null;
+    build_timestamp: string | null;
+    docker_image: string | null;
+    container_digest: string | null;
+    repository: string | null;
+  }
+
   interface Props {
     svgIcon: Component | null;
   }
@@ -29,6 +40,7 @@
   let releases = $state<Release[]>([]);
   let selectedIndex = $state(0);
   let currentVersion = $state<string | null>(null);
+  let versionInfo = $state<VersionInfo | null>(null);
 
   const selected = $derived(releases[selectedIndex] ?? null);
 
@@ -36,9 +48,10 @@
     try {
       const [rel, ver] = await Promise.all([
         get_api<Release[]>("/api/info/changelog"),
-        get_api<{ version: string }>("/api/info/version"),
+        get_api<VersionInfo>("/api/info/version"),
       ]);
       releases = rel;
+      versionInfo = ver;
       currentVersion = ver.version;
       // default to the entry matching the running version, else first
       const match = releases.findIndex((r) => r.version === currentVersion);
@@ -72,6 +85,57 @@
   </div>
 
   <hr />
+
+  {#if versionInfo}
+    <section class="space-y-3">
+      <h3 class="text-foreground">Runtime Metadata</h3>
+      <div class="overflow-x-auto rounded-md border border-border/60">
+        <table class="w-full min-w-[540px] text-sm">
+          <tbody>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">MediaMasterr Version</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.version}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Commit SHA</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.commit_sha ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Build Timestamp</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.build_timestamp ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Docker Image</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.docker_image ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Container Digest</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.container_digest ?? "n/a"}</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 text-muted-foreground">GitHub Repository</td>
+              <td class="px-3 py-2 text-foreground">
+                {#if versionInfo.repository}
+                  <a
+                    href={versionInfo.repository}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-primary underline"
+                  >
+                    {versionInfo.repository}
+                  </a>
+                {:else}
+                  n/a
+                {/if}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <hr />
+  {/if}
 
   {#if loading}
     <div class="flex justify-center py-8">

@@ -69,8 +69,21 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short,prefix=
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Prepare build metadata
+        id: buildmeta
+        shell: bash
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          VERSION="${{ steps.meta.outputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Resolve frontend channel
         id: channel
@@ -94,5 +107,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_APP_CHANNEL=${{ steps.channel.outputs.value }}
+            BUILD_VERSION=${{ steps.buildmeta.outputs.version }}
+            BUILD_COMMIT_SHA=${{ steps.buildmeta.outputs.short_sha }}
+            BUILD_TIMESTAMP=${{ steps.buildmeta.outputs.timestamp }}
+            BUILD_REPOSITORY=https://github.com/${{ github.repository }}
+            BUILD_DOCKER_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            BUILD_CONTAINER_DIGEST=unknown
           cache-from: type=gha
           cache-to: type=gha,mode=max

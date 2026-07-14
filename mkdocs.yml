@@ -80,6 +80,11 @@ nav:
       - Architecture: development/architecture.md
       - Release Process: development/release-process.md
       - Database Migrations: development/migrations.md
+      - Design System: DesignSystem.md
+      - Media Cards: MediaCards.md
+      - Operations Workspace: OperationsWorkspace.md
+      - Display Profiles: DisplayProfiles.md
+      - Media Asset Hierarchy: MediaAssetHierarchy.md
   - Reference:
       - Changelog: reference/changelog.md
       - API Reference: reference/api.md

@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 from pathlib import Path
@@ -86,12 +87,23 @@ async def health_check() -> dict[str, str]:
 
 
 @router.get("/version")
-async def get_version() -> dict[str, str]:
+async def get_version() -> dict[str, str | None]:
     """Get application version."""
+    commit_sha = os.getenv("APP_COMMIT_SHA")
+    build_timestamp = os.getenv("APP_BUILD_TIMESTAMP")
+    docker_image = os.getenv("APP_DOCKER_IMAGE")
+    container_digest = os.getenv("APP_CONTAINER_DIGEST")
+    repository = os.getenv("APP_GIT_REPOSITORY") or program_url
+
     return {
         "version": str(__version__),
         "program": program_name,
         "url": program_url,
+        "commit_sha": commit_sha,
+        "build_timestamp": build_timestamp,
+        "docker_image": docker_image,
+        "container_digest": container_digest,
+        "repository": repository,
     }
 
 
