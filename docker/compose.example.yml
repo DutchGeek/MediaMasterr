@@ -1,6 +1,7 @@
 services:
   mediamasterr:
     image: ghcr.io/dutchgeek/mediamasterr:latest
+    pull_policy: always
     container_name: mediamasterr
     restart: unless-stopped
     env_file: ".env"

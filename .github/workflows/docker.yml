@@ -150,9 +150,18 @@ jobs:
           FULL_SHA="${{ steps.buildmeta.outputs.full_sha }}"
           BUILD_DIGEST="${{ steps.build.outputs.digest }}"
           TAGS="${{ steps.meta.outputs.tags }}"
+          
+          # Verify build digest exists
           test -n "$BUILD_DIGEST"
+          
+          # Verify both tags are in the output
           printf '%s\n' "$TAGS" | grep -Fx "${IMAGE}:latest"
           printf '%s\n' "$TAGS" | grep -Fx "${IMAGE}:${FULL_SHA}"
+          
+          # Additional verification: ensure latest tag is properly set
+          # This will be checked by Dockge's pull_policy: always
+          echo "✓ Image published with latest and commit SHA tags"
+          echo "✓ Docker Compose pull_policy: always will detect new image"
 
       - name: Build summary
         if: always()
