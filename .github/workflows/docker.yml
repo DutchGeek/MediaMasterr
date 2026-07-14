@@ -32,7 +32,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/mediamasterr
+  IMAGE_NAME: dutchgeek/mediamasterr
 
 jobs:
   build-and-push:
