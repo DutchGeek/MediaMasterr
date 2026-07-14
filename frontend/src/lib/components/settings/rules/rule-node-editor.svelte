@@ -114,7 +114,7 @@
 
   const MAX_TOTAL_GROUPS = 10;
   const MAX_GROUP_DEPTH = 4;
-  const RULE_DND_TYPE = "reclaimerr-rule-node";
+  const RULE_DND_TYPE = "mediamasterr-rule-node";
 
   const inheritedDragState = getContext<RuleDragState>(RULE_DND_CONTEXT);
   const localDragState = $state<RuleDragState>({

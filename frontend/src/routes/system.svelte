@@ -115,7 +115,7 @@
         "qbittorrent",
         "plex",
         "tautulli",
-        "reclaimerr",
+        "protection",
       ];
 
       providers = knownProviders.map((providerKey) => {
@@ -136,6 +136,8 @@
           name:
             providerKey === "qbittorrent"
               ? "qBittorrent"
+              : providerKey === "protection"
+                ? "Protection"
               : providerKey.charAt(0).toUpperCase() + providerKey.slice(1),
           connected,
           version: connected ? "Configured" : "Unknown",

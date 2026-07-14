@@ -226,7 +226,7 @@ class DecisionEngine:
             label = (
                 signals.protected_rule_name
                 or signals.protected_reason
-                or "Protected by Reclaimerr"
+                or "Protected by MediaMasterr"
             )
             explanation = (
                 f"Protected by {label}" if signals.protected_source == "rule" else label

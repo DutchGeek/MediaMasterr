@@ -123,7 +123,8 @@
   let menuOpen = $state(false);
   let hiddenPaths = $state<string[]>([]);
   let hydratedStorageKey = $state<string | null>(null);
-  const SIDEBAR_HIDDEN_PATHS_KEY = "sidebar_hidden_paths";
+  const SIDEBAR_HIDDEN_PATHS_KEY = "mediamasterr.sidebar_hidden_paths";
+  const LEGACY_SIDEBAR_HIDDEN_PATHS_KEY = "sidebar_hidden_paths";
   const lockedNavPaths = new Set<string>();
   const allNavPaths = new Set(navItems.map((item) => item.path));
 
@@ -207,7 +208,24 @@
   $effect(() => {
     const key = storageKey;
     const scopedStore = createFilterState<string[]>(key, []);
-    hiddenPaths = normalizeHiddenPaths(scopedStore.getInitial());
+    const initial = normalizeHiddenPaths(scopedStore.getInitial());
+    if (initial.length > 0) {
+      hiddenPaths = initial;
+      hydratedStorageKey = key;
+      return;
+    }
+
+    const legacyKey = key.replace(
+      SIDEBAR_HIDDEN_PATHS_KEY,
+      LEGACY_SIDEBAR_HIDDEN_PATHS_KEY,
+    );
+    const legacyStore = createFilterState<string[]>(legacyKey, []);
+    const legacyInitial = normalizeHiddenPaths(legacyStore.getInitial());
+    hiddenPaths = legacyInitial;
+    if (legacyInitial.length > 0) {
+      scopedStore.save(legacyInitial);
+      legacyStore.save([]);
+    }
     hydratedStorageKey = key;
   });
 

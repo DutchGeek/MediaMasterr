@@ -1,12 +1,14 @@
 services:
   mediamasterr:
-    image: ghcr.io/jessielw/mediamasterr:latest
+    image: ghcr.io/dutchgeek/mediamasterr:latest
     container_name: mediamasterr
     restart: unless-stopped
     env_file: ".env"
+    environment:
+      DATA_DIR: /config
     volumes:
       # persist app data
-      - ./data:/app/data
+      - ./data:/config
 
       # bind mount for media files (adjust the host path as needed) - this is needed for
       # MediaMasterr to clean up additional files on delete when deleting via the main media server

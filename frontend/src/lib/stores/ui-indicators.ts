@@ -7,7 +7,7 @@ import type { UiIndicatorsResponse } from "$lib/types/shared";
 const POLL_INTERVAL_MS = 60 * 1000;
 const INVALIDATE_DEBOUNCE_MS = 150;
 export const UI_INDICATORS_INVALIDATE_EVENT =
-  "reclaimerr:ui-indicators:invalidate";
+  "mediamasterr:ui-indicators:invalidate";
 
 type UiIndicatorsState = {
   hasCandidates: boolean;

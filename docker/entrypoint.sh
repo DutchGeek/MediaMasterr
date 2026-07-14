@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-APP_USER="${APP_USER:-reclaimerr}"
-APP_GROUP="${APP_GROUP:-reclaimerr}"
-APP_HOME="${APP_HOME:-/app/data}"
+APP_USER="${APP_USER:-mediamasterr}"
+APP_GROUP="${APP_GROUP:-mediamasterr}"
+DATA_DIR="${DATA_DIR:-/config}"
+APP_HOME="${APP_HOME:-$DATA_DIR}"
 
 fail() {
 	echo "ERROR: $*" >&2
@@ -95,12 +96,12 @@ if [ -n "${TZ:-}" ]; then
 	configure_timezone "$TZ"
 fi
 
-mkdir -p /app/data/database /app/data/logs /app/data/static/avatars
+mkdir -p "$DATA_DIR/database" "$DATA_DIR/logs" "$DATA_DIR/static/avatars"
 
 if [ -n "${PUID:-}" ] && [ -n "${PGID:-}" ]; then
 	ensure_group "$PGID"
 	ensure_user "$PUID" "$PGID"
-	chown -R "$PUID:$PGID" /app/data
+	chown -R "$PUID:$PGID" "$DATA_DIR"
 fi
 
 if [ -n "${UMASK:-}" ]; then

@@ -3,7 +3,7 @@
   import Spinner from "$lib/components/ui/spinner/spinner.svelte";
 
   type AuthCompleteMessage = {
-    type: "reclaimerr-auth-complete";
+    type: "mediamasterr-auth-complete";
     error: string | null;
   };
 
@@ -26,12 +26,12 @@
   onMount(() => {
     const error = readAuthError();
     const payload: AuthCompleteMessage = {
-      type: "reclaimerr-auth-complete",
+      type: "mediamasterr-auth-complete",
       error,
     };
 
     try {
-      const channel = new BroadcastChannel("reclaimerr-auth");
+      const channel = new BroadcastChannel("mediamasterr-auth");
       channel.postMessage(payload);
       channel.close();
     } catch {

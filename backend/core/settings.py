@@ -113,6 +113,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _persist_generated_secrets(self) -> Settings:
         """Write <data_dir>/secrets.env on first run so generated keys survive restarts."""
+        # keep static/avatar folders coupled to data_dir unless explicitly overridden,
+        # so Docker deployments can move persistence to /config with one setting.
+        default_static_dir = Path("./data/static")
+        default_avatars_dir = Path("./data/static/avatars")
+        if self.static_dir == default_static_dir:
+            self.static_dir = self.data_dir / "static"
+        if self.avatars_dir == default_avatars_dir:
+            self.avatars_dir = self.static_dir / "avatars"
+
         secrets_path = self.data_dir / "secrets.env"
         if not secrets_path.exists():
             self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +141,7 @@ class Settings(BaseSettings):
             return normalized
 
         accepted_values = ", ".join(LogLevel.__members__.keys())
-        logging.getLogger("reclaimerr").warning(
+        logging.getLogger("mediamasterr").warning(
             "Invalid LOG_LEVEL value %r. Falling back to INFO. Accepted values: %s",
             v,
             accepted_values,
@@ -247,7 +256,7 @@ class Settings(BaseSettings):
         """
         # we're avoiding importing LOG here to prevent circular imports, but we still want
         # to log through the same logger ASAP that's in backend.core.settings.logger (LOG)
-        _log = logging.getLogger("reclaimerr")
+        _log = logging.getLogger("mediamasterr")
 
         if isinstance(v, str):
             v = v.strip()

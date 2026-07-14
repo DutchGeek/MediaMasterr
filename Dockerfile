@@ -16,6 +16,9 @@ FROM python:3.13-slim AS backend-base
 ENV PYTHONDONTWRITEBYTECODE=1 \
 	PYTHONUNBUFFERED=1 \
 	PIP_NO_CACHE_DIR=1 \
+	DATA_DIR=/config \
+	STATIC_DIR=/config/static \
+	AVATARS_DIR=/config/static/avatars \
 	FRONTEND_DIST=/app/frontend/dist
 WORKDIR /app
 RUN apt-get update \
@@ -27,7 +30,7 @@ COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN python -m pip install --upgrade pip \
 	&& python -m pip install .
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-	&& mkdir -p /app/data/database /app/data/logs /app/data/static/avatars
+	&& mkdir -p /config/database /config/logs /config/static/avatars
 EXPOSE 8000
 
 ## API image (includes frontend build)

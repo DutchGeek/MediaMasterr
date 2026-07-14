@@ -80,7 +80,7 @@ def oidc_session_middleware(app: FastAPI) -> None:
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.jwt_secret,
-        session_cookie="oidc_state",
+        session_cookie="mediamasterr.oidc_state",
         max_age=10 * 60,
         same_site="lax",
         https_only=settings.cookie_secure,

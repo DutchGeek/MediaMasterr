@@ -19,7 +19,7 @@ from backend.enums import PageAccess, Permission, UserRole
 argon_ph = PasswordHasher()
 
 # cookie name for JWT token
-COOKIE_NAME = "access_token"
+COOKIE_NAME = "mediamasterr.access_token"
 
 # Session lifetime (24 hours)
 # The sliding session middleware will refresh the cookie when

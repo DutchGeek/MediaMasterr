@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from authlib.integrations.starlette_client import OAuth
 
-_CLIENT_NAME = "reclaimerr_oidc"
+_CLIENT_NAME = "mediamasterr_oidc"
 TokenEndpointAuthMethod = Literal["client_secret_basic", "client_secret_post"]
 
 

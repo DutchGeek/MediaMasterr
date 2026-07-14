@@ -117,7 +117,7 @@
 
   const handleAuthMessage = (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return;
-    if (event.data?.type !== "reclaimerr-auth-complete") return;
+      if (event.data?.type !== "mediamasterr-auth-complete") return;
     void finishRedirectAuth(event.data.error ?? null);
   };
 
@@ -158,7 +158,7 @@
       "scrollbars=yes",
     ].join(",");
 
-    authPopup = window.open(url, "reclaimerr-auth", features);
+      authPopup = window.open(url, "mediamasterr-auth", features);
     if (!authPopup) {
       window.location.href = fallbackUrl;
       return;
@@ -324,9 +324,9 @@
     window.addEventListener("message", handleAuthMessage);
 
     try {
-      authChannel = new BroadcastChannel("reclaimerr-auth");
+      authChannel = new BroadcastChannel("mediamasterr-auth");
       authChannel.onmessage = (event) => {
-        if (event.data?.type !== "reclaimerr-auth-complete") return;
+        if (event.data?.type !== "mediamasterr-auth-complete") return;
         void finishRedirectAuth(event.data.error ?? null);
       };
     } catch {

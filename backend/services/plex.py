@@ -107,7 +107,7 @@ class PlexService:
     def __init__(self, token: str, plex_url: str) -> None:
         self.token = token
         self.plex_url = plex_url.rstrip("/")
-        self._plex_client_identifier = "reclaimerr"
+        self._plex_client_identifier = "mediamasterr"
         self._plex_user_map_cache: dict[str, str] | None = None
         self._plex_user_map_expires_at: datetime | None = None
         self._plex_user_map_ttl = timedelta(minutes=15)

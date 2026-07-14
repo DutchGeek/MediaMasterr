@@ -30,11 +30,11 @@ from backend.user_types import DEFAULT_NEW_USER_ALLOWED_PAGES, MEDIA_SERVERS
 
 MediaAuthMode = Literal["credentials", "redirect"]
 
-MEDIA_AUTH_DEVICE_ID = "reclaimerr-media-auth"
+MEDIA_AUTH_DEVICE_ID = "mediamasterr-media-auth"
 MEDIA_AUTH_CLIENT = "MediaMasterr"
 MEDIA_AUTH_DEVICE = "MediaMasterr"
 MEDIA_AUTH_VERSION = "1.0.0"
-PLEX_CLIENT_ID_PREFIX = "reclaimerr"
+PLEX_CLIENT_ID_PREFIX = "mediamasterr"
 PLEX_AUTH_BASE_URL = "https://app.plex.tv/auth#"
 PLEX_TV_PINS_URL = "https://plex.tv/api/v2/pins"
 PLEX_TV_USER_URL = "https://plex.tv/api/v2/user"

@@ -20,7 +20,7 @@ class Logger:
         to_console: bool = False,
         default_source: LogSource = LogSource.BE,
     ) -> None:
-        self.logger = logging.getLogger("reclaimerr")
+        self.logger = logging.getLogger("mediamasterr")
         self.logger.setLevel(log_level.value)
         self.log_file = log_file
         self.log_level = log_level

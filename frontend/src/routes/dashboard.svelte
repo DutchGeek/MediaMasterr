@@ -96,7 +96,7 @@
     return formatDistanceToNow(newest);
   });
   const protectionProviderLabel = $derived(
-    protectionStatus?.provider ?? protectionStats?.provider ?? "Reclaimerr",
+    protectionStatus?.provider ?? protectionStats?.provider ?? "MediaMasterr",
   );
   const protectionConnectionLabel = $derived(
     protectionStatus?.connection_status ??
@@ -816,7 +816,7 @@
                         <p
                           class="inline-flex items-center gap-1 font-medium text-foreground truncate"
                         >
-                          Reclaimerr Protection
+                          MediaMasterr Protection
                         </p>
                         <span
                           class={`text-xs px-2 py-0.5 rounded-full ${

@@ -1,5 +1,5 @@
 [project]
-name = "reclaimerr"
+name = "mediamasterr"
 version = "0.1.11"
 description = "Backend of MediaMasterr"
 readme = "README.md"
@@ -47,9 +47,9 @@ desktop = [
 docs = ["zensical>=0.0.46", "pymdown-extensions>=11.0"]
 
 [project.urls]
-Homepage = "https://github.com/jessielw/MediaMasterr"
-Source = "https://github.com/jessielw/MediaMasterr"
-Documentation = "https://jessielw.github.io/MediaMasterr"
+Homepage = "https://github.com/DutchGeek/MediaMasterr"
+Source = "https://github.com/DutchGeek/MediaMasterr"
+Documentation = "https://dutchgeek.github.io/MediaMasterr"
 
 [build-system]
 requires = ["hatchling"]
