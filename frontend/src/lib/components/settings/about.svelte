@@ -22,9 +22,18 @@
     program: string;
     url: string;
     commit_sha: string | null;
+    short_sha: string | null;
     build_timestamp: string | null;
+    release_channel: string | null;
+    docker_tag: string | null;
     docker_image: string | null;
+    docker_digest: string | null;
     container_digest: string | null;
+    workflow_run_number: string | null;
+    workflow_run_attempt: string | null;
+    oci_revision: string | null;
+    oci_source: string | null;
+    oci_version: string | null;
     repository: string | null;
   }
 
@@ -101,16 +110,63 @@
               <td class="px-3 py-2 text-foreground">{versionInfo.commit_sha ?? "n/a"}</td>
             </tr>
             <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Short SHA</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.short_sha ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Build Timestamp</td>
               <td class="px-3 py-2 text-foreground">{versionInfo.build_timestamp ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Release Channel</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.release_channel ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Docker Tag</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.docker_tag ?? "n/a"}</td>
             </tr>
             <tr class="border-b border-border/50">
               <td class="px-3 py-2 text-muted-foreground">Docker Image</td>
               <td class="px-3 py-2 text-foreground">{versionInfo.docker_image ?? "n/a"}</td>
             </tr>
             <tr class="border-b border-border/50">
-              <td class="px-3 py-2 text-muted-foreground">Container Digest</td>
-              <td class="px-3 py-2 text-foreground">{versionInfo.container_digest ?? "n/a"}</td>
+              <td class="px-3 py-2 text-muted-foreground">OCI Revision</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.oci_revision ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">OCI Source</td>
+              <td class="px-3 py-2 text-foreground">
+                {#if versionInfo.oci_source}
+                  <a
+                    href={versionInfo.oci_source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-primary underline"
+                  >
+                    {versionInfo.oci_source}
+                  </a>
+                {:else}
+                  n/a
+                {/if}
+              </td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">OCI Version</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.oci_version ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Docker Digest</td>
+              <td class="px-3 py-2 text-foreground">
+                {versionInfo.docker_digest ?? versionInfo.container_digest ?? "n/a"}
+              </td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Workflow Build Number</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.workflow_run_number ?? "n/a"}</td>
+            </tr>
+            <tr class="border-b border-border/50">
+              <td class="px-3 py-2 text-muted-foreground">Workflow Run Attempt</td>
+              <td class="px-3 py-2 text-foreground">{versionInfo.workflow_run_attempt ?? "n/a"}</td>
             </tr>
             <tr>
               <td class="px-3 py-2 text-muted-foreground">GitHub Repository</td>

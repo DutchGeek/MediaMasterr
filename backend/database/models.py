@@ -374,6 +374,11 @@ class GeneralSettings(Base):
         JSON, default_factory=dict
     )
 
+    # provenance for settings updates
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
     # timestamps
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), init=False

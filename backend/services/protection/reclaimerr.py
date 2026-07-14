@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from http import HTTPStatus
+from typing import Any
 from urllib.parse import urlsplit
 
 import niquests
@@ -83,6 +84,13 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
     def _capabilities() -> list[str]:
         return ["Rules", "Protected Items", "Statistics"]
 
+    @staticmethod
+    def _int_value(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     def _new_session(self) -> niquests.AsyncSession:
         session = niquests.AsyncSession()
         if self._session_token:
@@ -93,7 +101,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                 key = key.strip()
                 value = value.strip()
                 if key:
-                    session.cookies.set(key, value)
+                    session.cookies.set(key, value)  # type: ignore[no-untyped-call]
         return session
 
     @staticmethod
@@ -108,7 +116,7 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         url: str,
         *,
         trace_label: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> tuple[niquests.Response | None, object | None, bool]:
         LOG.debug(
             "Protection provider request: "
@@ -140,7 +148,9 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         return response, payload, json_ok
 
     @staticmethod
-    def _as_payload_dict(payload: object, keys: tuple[str, ...]) -> dict[str, object] | None:
+    def _as_payload_dict(
+        payload: object, keys: tuple[str, ...]
+    ) -> dict[str, object] | None:
         if isinstance(payload, dict):
             for key in keys:
                 nested = payload.get(key)
@@ -150,7 +160,9 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         return None
 
     @staticmethod
-    def _as_payload_list(payload: object, keys: tuple[str, ...]) -> list[dict[str, object]]:
+    def _as_payload_list(
+        payload: object, keys: tuple[str, ...]
+    ) -> list[dict[str, object]]:
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
         if isinstance(payload, dict):
@@ -263,9 +275,17 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
             connection_status=connection_status,
             authentication_status=authentication_status,
             base_url=base_url if isinstance(base_url, str) else self._base_url,
-            provider_version=(provider_version if isinstance(provider_version, str) else self._provider_version),
-            last_login=last_login if isinstance(last_login, str) else to_utc_isoformat(self._last_login),
-            last_sync=last_sync if isinstance(last_sync, str) else to_utc_isoformat(self._last_sync),
+            provider_version=(
+                provider_version
+                if isinstance(provider_version, str)
+                else self._provider_version
+            ),
+            last_login=last_login
+            if isinstance(last_login, str)
+            else to_utc_isoformat(self._last_login),
+            last_sync=last_sync
+            if isinstance(last_sync, str)
+            else to_utc_isoformat(self._last_sync),
             capabilities=(
                 [str(item) for item in capabilities if isinstance(item, str)]
                 if isinstance(capabilities, list)
@@ -443,7 +463,9 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         }
 
     def _is_connected(self) -> bool:
-        return bool(self._enabled and self._base_url and self._username and self._password)
+        return bool(
+            self._enabled and self._base_url and self._username and self._password
+        )
 
     def getDefinition(self) -> ProtectionProviderDefinition:
         return ProtectionProviderDefinition(
@@ -474,7 +496,9 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
 
     async def connect(self) -> ProtectionProviderStatus:
         connected = self._is_connected()
-        authentication_status = "authenticated" if self._authenticated else "not_authenticated"
+        authentication_status = (
+            "authenticated" if self._authenticated else "not_authenticated"
+        )
         return ProtectionProviderStatus(
             connected=connected,
             authenticated=self._authenticated,
@@ -633,14 +657,20 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         payload,
                         ("rules", "items", "data", "result"),
                     )
-                    if response is not None and response.status_code == HTTPStatus.OK and parsed_rules:
+                    if (
+                        response is not None
+                        and response.status_code == HTTPStatus.OK
+                        and parsed_rules
+                    ):
                         remote_rows: list[ProtectionRuleRecord] = []
                         for item in parsed_rules:
                             remote_rows.append(
                                 ProtectionRuleRecord(
                                     rule=str(item.get("rule") or "Unknown"),
                                     source=str(item.get("source") or "Reclaimerr"),
-                                    protected_items=int(item.get("protected_items") or 0),
+                                    protected_items=self._int_value(
+                                        item.get("protected_items")
+                                    ),
                                     status=str(item.get("status") or "Unknown"),
                                     last_updated=(
                                         str(item.get("last_updated"))
@@ -671,41 +701,64 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         trace_label="remote-rules-compat",
                         timeout=20,
                     )
-                    compat_rules = self._as_payload_list(payload, ("rules", "items", "data", "result"))
-                    if response is not None and response.status_code == HTTPStatus.OK and compat_rules:
-                        remote_rows: list[ProtectionRuleRecord] = []
+                    compat_rules = self._as_payload_list(
+                        payload, ("rules", "items", "data", "result")
+                    )
+                    if (
+                        response is not None
+                        and response.status_code == HTTPStatus.OK
+                        and compat_rules
+                    ):
+                        compat_rows: list[ProtectionRuleRecord] = []
                         for item in compat_rules:
-                            remote_rows.append(
+                            compat_rows.append(
                                 ProtectionRuleRecord(
-                                    rule=str(item.get("rule") or item.get("name") or "Unknown"),
+                                    rule=str(
+                                        item.get("rule")
+                                        or item.get("name")
+                                        or "Unknown"
+                                    ),
                                     source=str(item.get("source") or "Reclaimerr"),
-                                    protected_items=int(item.get("protected_items") or 0),
+                                    protected_items=self._int_value(
+                                        item.get("protected_items")
+                                    ),
                                     status=self._rule_status_from_payload(item),
                                     last_updated=(
-                                        str(item.get("last_updated") or item.get("updated_at"))
-                                        if (item.get("last_updated") is not None or item.get("updated_at") is not None)
+                                        str(
+                                            item.get("last_updated")
+                                            or item.get("updated_at")
+                                        )
+                                        if (
+                                            item.get("last_updated") is not None
+                                            or item.get("updated_at") is not None
+                                        )
                                         else None
                                     ),
                                 )
                             )
                         LOG.debug(
                             "Protection rules discovered from remote compatibility endpoint: "
-                            f"total_rules={len(remote_rows)}"
+                            f"total_rules={len(compat_rows)}"
                         )
-                        return remote_rows
+                        return compat_rows
                 finally:
                     await session.close()
 
-        rules_result = await self._db.execute(select(ReclaimRule).order_by(ReclaimRule.name))
+        rules_result = await self._db.execute(
+            select(ReclaimRule).order_by(ReclaimRule.name)
+        )
         rules = rules_result.scalars().all()
 
         protected_counts_result = await self._db.execute(
             select(ProtectedMedia.source_rule_id, func.count(ProtectedMedia.id))
-            .where(ProtectedMedia.source == "rule", ProtectedMedia.source_rule_id.is_not(None))
+            .where(
+                ProtectedMedia.source == "rule",
+                ProtectedMedia.source_rule_id.is_not(None),
+            )
             .group_by(ProtectedMedia.source_rule_id)
         )
         protected_counts = {
-            int(rule_id): int(count)
+            self._int_value(rule_id): self._int_value(count)
             for rule_id, count in protected_counts_result.all()
             if rule_id is not None
         }
@@ -771,13 +824,19 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         payload,
                         ("items", "protected_items", "data", "result"),
                     )
-                    if response is not None and response.status_code == HTTPStatus.OK and parsed_items:
+                    if (
+                        response is not None
+                        and response.status_code == HTTPStatus.OK
+                        and parsed_items
+                    ):
                         remote_rows: list[ProtectionItemRecord] = []
                         for item in parsed_items:
                             remote_rows.append(
                                 ProtectionItemRecord(
                                     path=str(item.get("path") or "Unknown"),
-                                    reason=str(item.get("reason") or "Protected by policy"),
+                                    reason=str(
+                                        item.get("reason") or "Protected by policy"
+                                    ),
                                     provider=str(item.get("provider") or "Reclaimerr"),
                                     expiration=(
                                         str(item.get("expiration"))
@@ -843,7 +902,9 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                                 reason=str(item.get("reason") or "Protected by policy"),
                                 provider=str(item.get("provider") or "Reclaimerr"),
                                 expiration=(
-                                    str(item.get("expiration") or item.get("expires_at"))
+                                    str(
+                                        item.get("expiration") or item.get("expires_at")
+                                    )
                                     if (
                                         item.get("expiration") is not None
                                         or item.get("expires_at") is not None
@@ -871,8 +932,12 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
         now = datetime.now(UTC)
         for entry in entries:
             path, _ = await self._resolve_item_path_and_size(entry)
-            expiration = to_utc_isoformat(entry.expires_at) if entry.expires_at else "Never"
-            is_active = entry.permanent or entry.expires_at is None or entry.expires_at > now
+            expiration = (
+                to_utc_isoformat(entry.expires_at) if entry.expires_at else "Never"
+            )
+            is_active = (
+                entry.permanent or entry.expires_at is None or entry.expires_at > now
+            )
             rows.append(
                 ProtectionItemRecord(
                     path=path,
@@ -901,14 +966,26 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         trace_label="remote-stats",
                         timeout=20,
                     )
-                    parsed_stats = self._as_payload_dict(payload, ("stats", "data", "result"))
-                    if response is not None and response.status_code == HTTPStatus.OK and parsed_stats:
+                    parsed_stats = self._as_payload_dict(
+                        payload, ("stats", "data", "result")
+                    )
+                    if (
+                        response is not None
+                        and response.status_code == HTTPStatus.OK
+                        and parsed_stats
+                    ):
                         stats = ProtectionStatistics(
                             connected=bool(parsed_stats.get("connected", True)),
                             provider=str(parsed_stats.get("provider") or "Reclaimerr"),
-                            protected_files=int(parsed_stats.get("protected_files") or 0),
-                            protected_size=int(parsed_stats.get("protected_size") or 0),
-                            active_rules=int(parsed_stats.get("active_rules") or 0),
+                            protected_files=self._int_value(
+                                parsed_stats.get("protected_files")
+                            ),
+                            protected_size=self._int_value(
+                                parsed_stats.get("protected_size")
+                            ),
+                            active_rules=self._int_value(
+                                parsed_stats.get("active_rules")
+                            ),
                             last_sync=(
                                 str(parsed_stats.get("last_sync"))
                                 if parsed_stats.get("last_sync") is not None
@@ -961,10 +1038,16 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
                         if isinstance(payload_items, dict):
                             raw_items = payload_items.get("items")
                             if isinstance(raw_items, list):
-                                items_payload = [entry for entry in raw_items if isinstance(entry, dict)]
+                                items_payload = [
+                                    entry
+                                    for entry in raw_items
+                                    if isinstance(entry, dict)
+                                ]
 
                         active_rules = sum(
-                            1 for rule in rules_payload if self._rule_status_from_payload(rule) == "Active"
+                            1
+                            for rule in rules_payload
+                            if self._rule_status_from_payload(rule) == "Active"
                         )
                         stats = ProtectionStatistics(
                             connected=True,
@@ -989,12 +1072,18 @@ class ReclaimerrProtectionProvider(ProtectionProvider):
 
         protected_size = 0
         item_rows = (
-            await self._db.execute(select(ProtectedMedia).order_by(ProtectedMedia.id.asc()))
-        ).scalars().all()
+            (
+                await self._db.execute(
+                    select(ProtectedMedia).order_by(ProtectedMedia.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
         for entry in item_rows:
             _, size = await self._resolve_item_path_and_size(entry)
             if size:
-                protected_size += int(size)
+                protected_size += self._int_value(size)
 
         stats = ProtectionStatistics(
             connected=status.connected,

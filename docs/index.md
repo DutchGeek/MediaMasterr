@@ -2,39 +2,30 @@
 
 ![MediaMasterr Logo](../branding/web/logo.svg)
 
-MediaMasterr scans media libraries for eligible items, tracks protection and
-deletion requests, and routes the final action through the appropriate service.
+MediaMasterr is a Visual Media Operations Platform. It correlates media sources, request systems, protection rules, and lifecycle state into one place so operators can answer a single question: what should happen next?
 
-Documentation for setup, usage, deployment, and development.
+## Start Here
 
-## Sections
+- [Getting Started](getting-started/index.md) - install MediaMasterr and complete initial setup.
+- [Features](features.md) - review the media intelligence engine and shared workflow surfaces.
+- [Using MediaMasterr](usage/how-it-works.md) - understand candidates, recommendations, and lifecycle actions.
+- [Deployment](deployment/docker.md) - run MediaMasterr in Docker or behind a proxy.
 
-- [Getting Started](getting-started/index.md) - install MediaMasterr and complete
-  initial setup.
-- [Features](features.md) - review the core workflow and supported services.
-- [Using MediaMasterr](usage/how-it-works.md) - candidates, requests, and
-  deletion flow.
-- [Deployment](deployment/docker.md) - run MediaMasterr in Docker or behind a
-  proxy.
+## Core Concepts
 
-## Capabilities
-
-- Supports Jellyfin, Plex, and Emby
-- Integrates with Radarr and Sonarr when configured
-- Scans candidates using your reclaim rules
-- Respects protection, pending requests, and approval flows
-- Supports scheduled tasks, including automatic cleanup deletion
-- Can move instead of delete when configured
+- Media Assets - the normalized model used across services and UI surfaces.
+- Media Intelligence Engine - the backend logic that ranks, correlates, and explains next actions.
+- Visual Media Operations - the design system that keeps media workspaces readable and consistent.
+- Display Profiles - the module-scoped visibility rules that control how cards and drawers present context.
 
 ## Project Links
 
-- [README](https://github.com/jessielw/MediaMasterr/blob/main/README.md)
+- [README](https://github.com/DutchGeek/MediaMasterr)
 - [Features](features.md)
 - [API Reference](reference/api.md)
 - [Changelog](reference/changelog.md)
 - [Contributing](development/contributing.md)
 - [Architecture](development/architecture.md)
+- [Release Process](development/release-process.md)
 - [Rules](usage/rules.md)
-- [Backups](deployment/backups.md)
-- [SWAG reverse proxy example](deployment/swag.md)
 - [Production deployment](deployment/production.md)

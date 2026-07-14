@@ -48,7 +48,9 @@ class MediaCorrelationService:
     """Provider-independent read-only media correlation service."""
 
     @staticmethod
-    def torrent_summary_from_raw(item: dict[str, Any], *, index: int = 0) -> CorrelationTorrentSummary:
+    def torrent_summary_from_raw(
+        item: dict[str, Any], *, index: int = 0
+    ) -> CorrelationTorrentSummary:
         raw_hash = str(item.get("hash") or "").strip()
         save_path = str(item.get("save_path") or "").strip() or None
         category = str(item.get("category") or "").strip() or None
@@ -72,7 +74,9 @@ class MediaCorrelationService:
         )
 
     @staticmethod
-    def build_torrent_summaries(torrents_raw: list[dict[str, Any]]) -> list[CorrelationTorrentSummary]:
+    def build_torrent_summaries(
+        torrents_raw: list[dict[str, Any]],
+    ) -> list[CorrelationTorrentSummary]:
         items = [
             MediaCorrelationService.torrent_summary_from_raw(item, index=index)
             for index, item in enumerate(torrents_raw)
@@ -107,7 +111,9 @@ class MediaCorrelationService:
         category: str | None,
     ) -> int:
         score = 0
-        normalized_path = normalize_fpath(version_path or "", strip_ending_slash=True, lower=True)
+        normalized_path = normalize_fpath(
+            version_path or "", strip_ending_slash=True, lower=True
+        )
         if save_path and normalized_path and normalized_path.startswith(save_path):
             score += 75
         if token and normalized_path and token in normalized_path:
@@ -116,7 +122,9 @@ class MediaCorrelationService:
             score += 30
         if category and ("movie" in category or "radarr" in category):
             score += 10
-        if category and ("series" in category or "sonarr" in category or "tv" in category):
+        if category and (
+            "series" in category or "sonarr" in category or "tv" in category
+        ):
             score -= 5
         return score
 
@@ -131,7 +139,9 @@ class MediaCorrelationService:
         category: str | None,
     ) -> int:
         score = 0
-        normalized_path = normalize_fpath(episode_path or "", strip_ending_slash=True, lower=True)
+        normalized_path = normalize_fpath(
+            episode_path or "", strip_ending_slash=True, lower=True
+        )
         if save_path and normalized_path and normalized_path.startswith(save_path):
             score += 75
         if token and normalized_path and token in normalized_path:
@@ -140,7 +150,9 @@ class MediaCorrelationService:
             score += 20
         if token and episode_name and token in episode_name.lower():
             score += 20
-        if category and ("series" in category or "sonarr" in category or "tv" in category):
+        if category and (
+            "series" in category or "sonarr" in category or "tv" in category
+        ):
             score += 10
         if category and ("movie" in category or "radarr" in category):
             score -= 5
@@ -164,16 +176,13 @@ class MediaCorrelationService:
             return None
 
         rows = (
-            (
-                await db.execute(
-                    select(MovieVersion, Movie)
-                    .join(Movie, MovieVersion.movie_id == Movie.id)
-                    .where(MovieVersion.path.is_not(None), or_(*filters))
-                    .limit(40)
-                )
+            await db.execute(
+                select(MovieVersion, Movie)
+                .join(Movie, MovieVersion.movie_id == Movie.id)
+                .where(MovieVersion.path.is_not(None), or_(*filters))
+                .limit(40)
             )
-            .all()
-        )
+        ).all()
 
         best: _MovieMatch | None = None
         for version, movie in rows:
@@ -210,17 +219,14 @@ class MediaCorrelationService:
             return None
 
         rows = (
-            (
-                await db.execute(
-                    select(Episode, Season, Series)
-                    .join(Season, Episode.season_id == Season.id)
-                    .join(Series, Season.series_id == Series.id)
-                    .where(Episode.path.is_not(None), or_(*filters))
-                    .limit(60)
-                )
+            await db.execute(
+                select(Episode, Season, Series)
+                .join(Season, Episode.season_id == Season.id)
+                .join(Series, Season.series_id == Series.id)
+                .where(Episode.path.is_not(None), or_(*filters))
+                .limit(60)
             )
-            .all()
-        )
+        ).all()
 
         best: _EpisodeMatch | None = None
         for episode, season, series in rows:
@@ -234,7 +240,9 @@ class MediaCorrelationService:
             )
             if score <= 0:
                 continue
-            candidate = _EpisodeMatch(score=score, episode=episode, season=season, series=series)
+            candidate = _EpisodeMatch(
+                score=score, episode=episode, season=season, series=series
+            )
             if best is None or candidate.score > best.score:
                 best = candidate
         return best
@@ -247,46 +255,40 @@ class MediaCorrelationService:
     ) -> str:
         now = datetime.now(UTC)
         protected_count = (
-            (
-                await db.execute(
-                    select(func.count())
-                    .select_from(ProtectedMedia)
-                    .where(
-                        ProtectedMedia.movie_id == movie_id,
-                        or_(
-                            ProtectedMedia.movie_version_id.is_(None),
-                            ProtectedMedia.movie_version_id == movie_version_id,
-                        ),
-                        or_(
-                            ProtectedMedia.permanent.is_(True),
-                            ProtectedMedia.expires_at.is_(None),
-                            ProtectedMedia.expires_at > now,
-                        ),
-                    )
+            await db.execute(
+                select(func.count())
+                .select_from(ProtectedMedia)
+                .where(
+                    ProtectedMedia.movie_id == movie_id,
+                    or_(
+                        ProtectedMedia.movie_version_id.is_(None),
+                        ProtectedMedia.movie_version_id == movie_version_id,
+                    ),
+                    or_(
+                        ProtectedMedia.permanent.is_(True),
+                        ProtectedMedia.expires_at.is_(None),
+                        ProtectedMedia.expires_at > now,
+                    ),
                 )
             )
-            .scalar_one()
-        )
+        ).scalar_one()
         if protected_count > 0:
             return "Protected"
 
         pending_count = (
-            (
-                await db.execute(
-                    select(func.count())
-                    .select_from(ProtectionRequest)
-                    .where(
-                        ProtectionRequest.movie_id == movie_id,
-                        ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-                        or_(
-                            ProtectionRequest.movie_version_id.is_(None),
-                            ProtectionRequest.movie_version_id == movie_version_id,
-                        ),
-                    )
+            await db.execute(
+                select(func.count())
+                .select_from(ProtectionRequest)
+                .where(
+                    ProtectionRequest.movie_id == movie_id,
+                    ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+                    or_(
+                        ProtectionRequest.movie_version_id.is_(None),
+                        ProtectionRequest.movie_version_id == movie_version_id,
+                    ),
                 )
             )
-            .scalar_one()
-        )
+        ).scalar_one()
         if pending_count > 0:
             return "Pending Request"
         return "Unprotected"
@@ -301,60 +303,54 @@ class MediaCorrelationService:
     ) -> str:
         now = datetime.now(UTC)
         protected_count = (
-            (
-                await db.execute(
-                    select(func.count())
-                    .select_from(ProtectedMedia)
-                    .where(
-                        ProtectedMedia.series_id == series_id,
-                        or_(
-                            and_(
-                                ProtectedMedia.season_id.is_(None),
-                                ProtectedMedia.episode_id.is_(None),
-                            ),
-                            and_(
-                                ProtectedMedia.season_id == season_id,
-                                ProtectedMedia.episode_id.is_(None),
-                            ),
-                            ProtectedMedia.episode_id == episode_id,
+            await db.execute(
+                select(func.count())
+                .select_from(ProtectedMedia)
+                .where(
+                    ProtectedMedia.series_id == series_id,
+                    or_(
+                        and_(
+                            ProtectedMedia.season_id.is_(None),
+                            ProtectedMedia.episode_id.is_(None),
                         ),
-                        or_(
-                            ProtectedMedia.permanent.is_(True),
-                            ProtectedMedia.expires_at.is_(None),
-                            ProtectedMedia.expires_at > now,
+                        and_(
+                            ProtectedMedia.season_id == season_id,
+                            ProtectedMedia.episode_id.is_(None),
                         ),
-                    )
+                        ProtectedMedia.episode_id == episode_id,
+                    ),
+                    or_(
+                        ProtectedMedia.permanent.is_(True),
+                        ProtectedMedia.expires_at.is_(None),
+                        ProtectedMedia.expires_at > now,
+                    ),
                 )
             )
-            .scalar_one()
-        )
+        ).scalar_one()
         if protected_count > 0:
             return "Protected"
 
         pending_count = (
-            (
-                await db.execute(
-                    select(func.count())
-                    .select_from(ProtectionRequest)
-                    .where(
-                        ProtectionRequest.series_id == series_id,
-                        ProtectionRequest.status == ProtectionRequestStatus.PENDING,
-                        or_(
-                            and_(
-                                ProtectionRequest.season_id.is_(None),
-                                ProtectionRequest.episode_id.is_(None),
-                            ),
-                            and_(
-                                ProtectionRequest.season_id == season_id,
-                                ProtectionRequest.episode_id.is_(None),
-                            ),
-                            ProtectionRequest.episode_id == episode_id,
+            await db.execute(
+                select(func.count())
+                .select_from(ProtectionRequest)
+                .where(
+                    ProtectionRequest.series_id == series_id,
+                    ProtectionRequest.status == ProtectionRequestStatus.PENDING,
+                    or_(
+                        and_(
+                            ProtectionRequest.season_id.is_(None),
+                            ProtectionRequest.episode_id.is_(None),
                         ),
-                    )
+                        and_(
+                            ProtectionRequest.season_id == season_id,
+                            ProtectionRequest.episode_id.is_(None),
+                        ),
+                        ProtectionRequest.episode_id == episode_id,
+                    ),
                 )
             )
-            .scalar_one()
-        )
+        ).scalar_one()
         if pending_count > 0:
             return "Pending Request"
         return "Unprotected"
@@ -364,7 +360,12 @@ class MediaCorrelationService:
         db: AsyncSession,
         torrent: CorrelationTorrentSummary,
     ) -> CorrelationDetailResponse:
-        save_path = normalize_fpath(torrent.save_path or "", strip_ending_slash=True, lower=True) or None
+        save_path = (
+            normalize_fpath(
+                torrent.save_path or "", strip_ending_slash=True, lower=True
+            )
+            or None
+        )
         token = self._name_token(torrent.name)
         category = (torrent.category or "").lower() or None
 
@@ -383,7 +384,9 @@ class MediaCorrelationService:
 
         selected_mode: str | None = None
         if best_movie and best_episode:
-            selected_mode = "movie" if best_movie.score >= best_episode.score else "episode"
+            selected_mode = (
+                "movie" if best_movie.score >= best_episode.score else "episode"
+            )
         elif best_movie:
             selected_mode = "movie"
         elif best_episode:
@@ -403,7 +406,9 @@ class MediaCorrelationService:
             movie = best_movie.movie
             version = best_movie.version
             movie_value = (
-                f"{movie.title} ({movie.year})" if movie.year is not None else movie.title
+                f"{movie.title} ({movie.year})"
+                if movie.year is not None
+                else movie.title
             )
             file_value = version.path or "Unknown"
             media_server_value = f"{version.service.value}:{version.service_item_id}"
@@ -421,24 +426,21 @@ class MediaCorrelationService:
             season = best_episode.season
             series = best_episode.series
             series_value = (
-                f"{series.title} ({series.year})" if series.year is not None else series.title
+                f"{series.title} ({series.year})"
+                if series.year is not None
+                else series.title
             )
             episode_name = episode.name or "Unknown Episode"
-            episode_value = (
-                f"S{season.season_number:02d}E{episode.episode_number:02d} - {episode_name}"
-            )
+            episode_value = f"S{season.season_number:02d}E{episode.episode_number:02d} - {episode_name}"
             file_value = episode.path or "Unknown"
 
             media_ref = (
-                (
-                    await db.execute(
-                        select(SeriesServiceRef)
-                        .where(SeriesServiceRef.series_id == series.id)
-                        .limit(1)
-                    )
+                await db.execute(
+                    select(SeriesServiceRef)
+                    .where(SeriesServiceRef.series_id == series.id)
+                    .limit(1)
                 )
-                .scalar_one_or_none()
-            )
+            ).scalar_one_or_none()
             if media_ref is not None:
                 media_server_value = f"{media_ref.service.value}:{media_ref.service_id}"
                 provider_value = media_ref.service.value
@@ -469,7 +471,9 @@ class MediaCorrelationService:
         )
 
         category_status, category_value = self._status_value(torrent.category)
-        file_status, file_known_value = self._status_value(file_value if file_value != "Unknown" else None)
+        file_status, file_known_value = self._status_value(
+            file_value if file_value != "Unknown" else None
+        )
         watch_state_status, watch_state_value = self._status_value(
             watch_status if watch_status != "Unknown" else None
         )

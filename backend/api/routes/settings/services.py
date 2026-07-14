@@ -360,7 +360,9 @@ async def set_service_settings(
     existing_result = await _find_existing_service_config(db, data, service_name)
     existing_config = existing_result.scalar_one_or_none()
     if data.service_type is Service.QBITTORRENT and not data.extra_settings:
-        data.extra_settings = existing_config.extra_settings if existing_config else None
+        data.extra_settings = (
+            existing_config.extra_settings if existing_config else None
+        )
     _log_qbittorrent_config("save/service received", data)
     if (
         not data.enabled
@@ -689,7 +691,9 @@ async def test_service_settings(
         existing_config = existing.scalar_one_or_none()
 
     if data.service_type is Service.QBITTORRENT and not data.extra_settings:
-        data.extra_settings = existing_config.extra_settings if existing_config else None
+        data.extra_settings = (
+            existing_config.extra_settings if existing_config else None
+        )
     _log_qbittorrent_config("test/service received", data)
 
     success, error_msg = await service_manager.test_service(

@@ -60,10 +60,10 @@ from backend.models.media import (
     DecisionFilterUpsertRequest,
     DeleteCandidatesRequest,
     EpisodeWithStatus,
-    MediaStatusInfo,
-    MoveCandidatesRequest,
     MediaFilterCatalogResponse,
     MediaFilterOptionResponse,
+    MediaStatusInfo,
+    MoveCandidatesRequest,
     MovieVersionResponse,
     MovieWithStatus,
     PaginatedCandidatesResponse,
@@ -78,7 +78,11 @@ from backend.models.media import (
     SmartFilterUpsertRequest,
 )
 from backend.services.decision_engine import DecisionEngine, DecisionSignals
-from backend.services.query_engine import QueryEngineSpec, apply_spec, get_filter_catalog
+from backend.services.query_engine import (
+    QueryEngineSpec,
+    apply_spec,
+    get_filter_catalog,
+)
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -173,7 +177,7 @@ def _candidate_policy_values(
     policy = resolve_auto_delete_policy(
         media_type=media_type,
         matched_rule_ids=cast(list[int], candidate.matched_rule_ids or []),
-        created_at=cast(datetime, candidate.created_at),
+        created_at=candidate.created_at,
         rule_actions_by_id=rule_actions_by_id,
         movie_delay_days=movie_delay_days,
         series_delay_days=series_delay_days,
@@ -194,11 +198,19 @@ def _apply_legacy_decision_state(
 
     if media_type is MediaType.MOVIE:
         if decision_state == "safe_to_delete":
-            query = query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
-            count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id).distinct()
+            query = query.join(
+                ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id
+            ).distinct()
+            count_query = count_query.join(
+                ReclaimCandidate, ReclaimCandidate.movie_id == Movie.id
+            ).distinct()
         elif decision_state == "protected":
-            query = query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
-            count_query = count_query.join(ProtectedMedia, ProtectedMedia.movie_id == Movie.id).distinct()
+            query = query.join(
+                ProtectedMedia, ProtectedMedia.movie_id == Movie.id
+            ).distinct()
+            count_query = count_query.join(
+                ProtectedMedia, ProtectedMedia.movie_id == Movie.id
+            ).distinct()
         elif decision_state == "waiting":
             clause = and_(
                 ProtectionRequest.movie_id == Movie.id,
@@ -208,19 +220,33 @@ def _apply_legacy_decision_state(
             count_query = count_query.join(ProtectionRequest, clause).distinct()
         elif decision_state == "unwatched":
             query = query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
-            count_query = count_query.where(Movie.view_count <= 0, Movie.last_viewed_at.is_(None))
+            count_query = count_query.where(
+                Movie.view_count <= 0, Movie.last_viewed_at.is_(None)
+            )
         elif decision_state == "watching":
             cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=14)
-            query = query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff)
-            count_query = count_query.where(Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff)
+            query = query.where(
+                Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff
+            )
+            count_query = count_query.where(
+                Movie.last_viewed_at.is_not(None), Movie.last_viewed_at >= cutoff
+            )
         return query, count_query
 
     if decision_state == "safe_to_delete":
-        query = query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
-        count_query = count_query.join(ReclaimCandidate, ReclaimCandidate.series_id == Series.id).distinct()
+        query = query.join(
+            ReclaimCandidate, ReclaimCandidate.series_id == Series.id
+        ).distinct()
+        count_query = count_query.join(
+            ReclaimCandidate, ReclaimCandidate.series_id == Series.id
+        ).distinct()
     elif decision_state == "protected":
-        query = query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
-        count_query = count_query.join(ProtectedMedia, ProtectedMedia.series_id == Series.id).distinct()
+        query = query.join(
+            ProtectedMedia, ProtectedMedia.series_id == Series.id
+        ).distinct()
+        count_query = count_query.join(
+            ProtectedMedia, ProtectedMedia.series_id == Series.id
+        ).distinct()
     elif decision_state == "waiting":
         clause = and_(
             ProtectionRequest.series_id == Series.id,
@@ -230,11 +256,17 @@ def _apply_legacy_decision_state(
         count_query = count_query.join(ProtectionRequest, clause).distinct()
     elif decision_state == "unwatched":
         query = query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
-        count_query = count_query.where(Series.view_count <= 0, Series.last_viewed_at.is_(None))
+        count_query = count_query.where(
+            Series.view_count <= 0, Series.last_viewed_at.is_(None)
+        )
     elif decision_state == "watching":
         cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=14)
-        query = query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff)
-        count_query = count_query.where(Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff)
+        query = query.where(
+            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff
+        )
+        count_query = count_query.where(
+            Series.last_viewed_at.is_not(None), Series.last_viewed_at >= cutoff
+        )
 
     return query, count_query
 
@@ -597,9 +629,17 @@ async def get_movies(
         if isinstance(decision_state, str) and decision_state.strip()
         else None
     )
-    arr_filter_ids = [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
-    decision_filter_ids = [int(v) for v in decision_filter_ids] if isinstance(decision_filter_ids, list) else []
-    smart_filter_ids = [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
+    arr_filter_ids = (
+        [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
+    )
+    decision_filter_ids = (
+        [int(v) for v in decision_filter_ids]
+        if isinstance(decision_filter_ids, list)
+        else []
+    )
+    smart_filter_ids = (
+        [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
+    )
     # build base query
     query = (
         select(Movie)
@@ -749,10 +789,14 @@ async def get_movies(
             if protection_entry
             else True,
             protected_created_at=(
-                to_utc_isoformat(protection_entry.created_at) if protection_entry else None
+                to_utc_isoformat(protection_entry.created_at)
+                if protection_entry
+                else None
             ),
             protected_expires_at=(
-                to_utc_isoformat(protection_entry.expires_at) if protection_entry else None
+                to_utc_isoformat(protection_entry.expires_at)
+                if protection_entry
+                else None
             ),
             protected_source=protection_entry.source if protection_entry else None,
             has_pending_request=request is not None,
@@ -784,8 +828,12 @@ async def get_movies(
                 protected_permanent=status.protected_permanent,
                 protected_source=status.protected_source,
                 protected_rule_name=status.protected_rule_name,
-                protected_created_at=protection_entry.created_at if protection_entry else None,
-                protected_expires_at=protection_entry.expires_at if protection_entry else None,
+                protected_created_at=protection_entry.created_at
+                if protection_entry
+                else None,
+                protected_expires_at=protection_entry.expires_at
+                if protection_entry
+                else None,
                 has_pending_request=status.has_pending_request,
                 request_reason=status.request_reason,
                 has_pending_delete_request=status.has_pending_delete_request,
@@ -967,9 +1015,17 @@ async def get_series(
         if isinstance(decision_state, str) and decision_state.strip()
         else None
     )
-    arr_filter_ids = [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
-    decision_filter_ids = [int(v) for v in decision_filter_ids] if isinstance(decision_filter_ids, list) else []
-    smart_filter_ids = [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
+    arr_filter_ids = (
+        [int(v) for v in arr_filter_ids] if isinstance(arr_filter_ids, list) else []
+    )
+    decision_filter_ids = (
+        [int(v) for v in decision_filter_ids]
+        if isinstance(decision_filter_ids, list)
+        else []
+    )
+    smart_filter_ids = (
+        [int(v) for v in smart_filter_ids] if isinstance(smart_filter_ids, list) else []
+    )
     # build base query
     query = (
         select(Series)
@@ -1154,8 +1210,8 @@ async def get_series(
                 now=now,
             )
         )
-        child_candidate_count, child_candidate_space_bytes = series_child_candidate_stats.get(
-            series.id, (0, 0)
+        child_candidate_count, child_candidate_space_bytes = (
+            series_child_candidate_stats.get(series.id, (0, 0))
         )
         library_names = [
             ref.library_name for ref in series.service_refs if ref.library_name
@@ -1177,10 +1233,14 @@ async def get_series(
             if protection_entry
             else True,
             protected_created_at=(
-                to_utc_isoformat(protection_entry.created_at) if protection_entry else None
+                to_utc_isoformat(protection_entry.created_at)
+                if protection_entry
+                else None
             ),
             protected_expires_at=(
-                to_utc_isoformat(protection_entry.expires_at) if protection_entry else None
+                to_utc_isoformat(protection_entry.expires_at)
+                if protection_entry
+                else None
             ),
             protected_source=protection_entry.source if protection_entry else None,
             has_pending_request=request is not None,
@@ -1214,8 +1274,12 @@ async def get_series(
                 protected_permanent=status.protected_permanent,
                 protected_source=status.protected_source,
                 protected_rule_name=status.protected_rule_name,
-                protected_created_at=protection_entry.created_at if protection_entry else None,
-                protected_expires_at=protection_entry.expires_at if protection_entry else None,
+                protected_created_at=protection_entry.created_at
+                if protection_entry
+                else None,
+                protected_expires_at=protection_entry.expires_at
+                if protection_entry
+                else None,
                 has_pending_request=status.has_pending_request,
                 request_reason=status.request_reason,
                 has_pending_delete_request=status.has_pending_delete_request,
@@ -1376,15 +1440,19 @@ async def list_decision_filters(
     media_type: MediaType = Query(MediaType.MOVIE),
 ) -> list[QueryFilterResponse]:
     rows = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.kind == "decision",
-                QueryFilter.user_id == current_user.id,
-                QueryFilter.media_type == media_type,
-                QueryFilter.enabled.is_(True),
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.kind == "decision",
+                    QueryFilter.user_id == current_user.id,
+                    QueryFilter.media_type == media_type,
+                    QueryFilter.enabled.is_(True),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [_query_filter_to_response(row) for row in rows]
 
 
@@ -1416,14 +1484,18 @@ async def update_decision_filter(
     db: AsyncSession = Depends(get_db),
 ) -> QueryFilterResponse:
     row = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.id == filter_id,
-                QueryFilter.kind == "decision",
-                QueryFilter.user_id == current_user.id,
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.id == filter_id,
+                    QueryFilter.kind == "decision",
+                    QueryFilter.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Decision filter not found")
     row.name = payload.name.strip() or row.name
@@ -1441,14 +1513,18 @@ async def delete_decision_filter(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
     row = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.id == filter_id,
-                QueryFilter.kind == "decision",
-                QueryFilter.user_id == current_user.id,
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.id == filter_id,
+                    QueryFilter.kind == "decision",
+                    QueryFilter.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Decision filter not found")
     row.enabled = False
@@ -1463,15 +1539,19 @@ async def list_smart_filters(
     media_type: MediaType = Query(MediaType.MOVIE),
 ) -> list[QueryFilterResponse]:
     rows = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.kind == "smart",
-                QueryFilter.user_id == current_user.id,
-                QueryFilter.media_type == media_type,
-                QueryFilter.enabled.is_(True),
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.kind == "smart",
+                    QueryFilter.user_id == current_user.id,
+                    QueryFilter.media_type == media_type,
+                    QueryFilter.enabled.is_(True),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [_query_filter_to_response(row) for row in rows]
 
 
@@ -1514,14 +1594,18 @@ async def update_smart_filter(
     db: AsyncSession = Depends(get_db),
 ) -> QueryFilterResponse:
     row = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.id == filter_id,
-                QueryFilter.kind == "smart",
-                QueryFilter.user_id == current_user.id,
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.id == filter_id,
+                    QueryFilter.kind == "smart",
+                    QueryFilter.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Smart filter not found")
     row.name = payload.name.strip() or row.name
@@ -1550,14 +1634,18 @@ async def delete_smart_filter(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, bool]:
     row = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.id == filter_id,
-                QueryFilter.kind == "smart",
-                QueryFilter.user_id == current_user.id,
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.id == filter_id,
+                    QueryFilter.kind == "smart",
+                    QueryFilter.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Smart filter not found")
     row.enabled = False

@@ -19,8 +19,8 @@ from .schemas import (
     ProtectionItemResponse,
     ProtectionProviderDefinitionResponse,
     ProtectionRuleResponse,
-    ProtectionStatusResponse,
     ProtectionStatsResponse,
+    ProtectionStatusResponse,
 )
 
 
@@ -58,7 +58,9 @@ class ProtectionService:
         await self._db.flush()
         return config
 
-    def _provider_from_config(self, config: ProtectionProviderConfig) -> ProtectionProvider:
+    def _provider_from_config(
+        self, config: ProtectionProviderConfig
+    ) -> ProtectionProvider:
         decrypted_password = fer_decrypt(config.password) if config.password else None
         decrypted_session_token = (
             fer_decrypt(config.session_token) if config.session_token else None
@@ -80,7 +82,9 @@ class ProtectionService:
             last_sync=config.last_sync_at,
         )
 
-    def _provider_from_request(self, req: ProtectionConfigRequest) -> ProtectionProvider:
+    def _provider_from_request(
+        self, req: ProtectionConfigRequest
+    ) -> ProtectionProvider:
         provider_name = (req.provider or "reclaimerr").strip().lower()
         if provider_name != "reclaimerr":
             provider_name = "reclaimerr"
@@ -105,7 +109,9 @@ class ProtectionService:
         return ProtectionProviderDefinitionResponse.model_validate(asdict(definition))
 
     @staticmethod
-    def _to_status_response(status: ProtectionProviderStatus) -> ProtectionStatusResponse:
+    def _to_status_response(
+        status: ProtectionProviderStatus,
+    ) -> ProtectionStatusResponse:
         return ProtectionStatusResponse(
             connected=status.connected,
             authenticated=status.authenticated,
@@ -175,7 +181,9 @@ class ProtectionService:
         provider = self._provider_from_config(config)
         return self._to_definition_response(provider)
 
-    async def save_config(self, req: ProtectionConfigRequest) -> ProtectionConfigResponse:
+    async def save_config(
+        self, req: ProtectionConfigRequest
+    ) -> ProtectionConfigResponse:
         config = await self._get_or_create_config()
         config.provider = "reclaimerr"
         config.auth_method = "web_login"
@@ -188,7 +196,9 @@ class ProtectionService:
         next_password = req.password.strip()
         if next_password:
             encrypted_password = fer_encrypt(next_password)
-            credentials_changed = credentials_changed or encrypted_password != config.password
+            credentials_changed = (
+                credentials_changed or encrypted_password != config.password
+            )
             config.password = encrypted_password
 
         if credentials_changed:
@@ -218,7 +228,9 @@ class ProtectionService:
 
         return self._to_status_response(status)
 
-    async def test_connection(self, req: ProtectionConfigRequest) -> ProtectionStatusResponse:
+    async def test_connection(
+        self, req: ProtectionConfigRequest
+    ) -> ProtectionStatusResponse:
         config = await self._get_or_create_config()
         resolved_password = req.password.strip()
         if not resolved_password and config.password:

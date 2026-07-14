@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.enums import MediaType
@@ -35,12 +36,18 @@ def _clamp_progress(progress: int | None) -> int | None:
     return max(0, min(100, progress))
 
 
-def _derive_library_group(tags: list[str] | None, library_names: list[str] | None) -> str | None:
-    cleaned_tags = [tag.strip() for tag in tags or [] if isinstance(tag, str) and tag.strip()]
+def _derive_library_group(
+    tags: list[str] | None, library_names: list[str] | None
+) -> str | None:
+    cleaned_tags = [
+        tag.strip() for tag in tags or [] if isinstance(tag, str) and tag.strip()
+    ]
     if cleaned_tags:
         return cleaned_tags[0]
     cleaned_libraries = [
-        name.strip() for name in library_names or [] if isinstance(name, str) and name.strip()
+        name.strip()
+        for name in library_names or []
+        if isinstance(name, str) and name.strip()
     ]
     if cleaned_libraries:
         return cleaned_libraries[0]
@@ -81,15 +88,60 @@ class DecisionSignals:
 
 class DecisionEngine:
     _META: dict[str, dict[str, str | int]] = {
-        "superseding": {"label": "Superseding", "icon": "rocket", "tone": "purple", "priority": 100},
-        "protected": {"label": "Protected", "icon": "shield", "tone": "blue", "priority": 90},
-        "seeding": {"label": "Seeding", "icon": "sprout", "tone": "orange", "priority": 80},
-        "waiting": {"label": "Waiting", "icon": "hourglass", "tone": "yellow", "priority": 70},
-        "incomplete": {"label": "Incomplete", "icon": "download", "tone": "gray", "priority": 60},
-        "unwatched": {"label": "Unwatched", "icon": "play", "tone": "teal", "priority": 50},
-        "watching": {"label": "Watching", "icon": "monitor-play", "tone": "teal", "priority": 40},
-        "safe_to_delete": {"label": "Safe to Delete", "icon": "trash-2", "tone": "green", "priority": 30},
-        "attention_required": {"label": "Attention Required", "icon": "triangle-alert", "tone": "red", "priority": 20},
+        "superseding": {
+            "label": "Superseding",
+            "icon": "rocket",
+            "tone": "purple",
+            "priority": 100,
+        },
+        "protected": {
+            "label": "Protected",
+            "icon": "shield",
+            "tone": "blue",
+            "priority": 90,
+        },
+        "seeding": {
+            "label": "Seeding",
+            "icon": "sprout",
+            "tone": "orange",
+            "priority": 80,
+        },
+        "waiting": {
+            "label": "Waiting",
+            "icon": "hourglass",
+            "tone": "yellow",
+            "priority": 70,
+        },
+        "incomplete": {
+            "label": "Incomplete",
+            "icon": "download",
+            "tone": "gray",
+            "priority": 60,
+        },
+        "unwatched": {
+            "label": "Unwatched",
+            "icon": "play",
+            "tone": "teal",
+            "priority": 50,
+        },
+        "watching": {
+            "label": "Watching",
+            "icon": "monitor-play",
+            "tone": "teal",
+            "priority": 40,
+        },
+        "safe_to_delete": {
+            "label": "Safe to Delete",
+            "icon": "trash-2",
+            "tone": "green",
+            "priority": 30,
+        },
+        "attention_required": {
+            "label": "Attention Required",
+            "icon": "triangle-alert",
+            "tone": "red",
+            "priority": 20,
+        },
     }
 
     @classmethod
@@ -115,7 +167,7 @@ class DecisionEngine:
         watched = signals.view_count > 0 or signals.last_viewed_at is not None
         protected = signals.is_protected
 
-        reclaim_status = "blocked"
+        reclaim_status: Literal["complete", "current", "pending", "blocked"] = "blocked"
         if state == "safe_to_delete":
             reclaim_status = "current"
         elif state in {"watching", "unwatched", "waiting"}:
@@ -150,7 +202,9 @@ class DecisionEngine:
         ]
 
     @classmethod
-    def evaluate(cls, signals: DecisionSignals, *, now: datetime | None = None) -> DecisionInfo:
+    def evaluate(
+        cls, signals: DecisionSignals, *, now: datetime | None = None
+    ) -> DecisionInfo:
         current = _ensure_utc(now) or datetime.now(UTC)
         library_group = _derive_library_group(signals.tags, signals.library_names)
         reclaimable_size = (
@@ -169,37 +223,59 @@ class DecisionEngine:
 
         if signals.is_protected:
             state = "protected"
-            label = signals.protected_rule_name or signals.protected_reason or "Protected by Reclaimerr"
-            explanation = f"Protected by {label}" if signals.protected_source == "rule" else label
+            label = (
+                signals.protected_rule_name
+                or signals.protected_reason
+                or "Protected by Reclaimerr"
+            )
+            explanation = (
+                f"Protected by {label}" if signals.protected_source == "rule" else label
+            )
             recommended_action = "No action required"
         elif signals.has_pending_delete_request:
             state = "waiting"
-            explanation = signals.delete_request_reason or "Deletion request is pending approval or execution."
+            explanation = (
+                signals.delete_request_reason
+                or "Deletion request is pending approval or execution."
+            )
             recommended_action = "Wait for deletion workflow to complete"
         elif signals.has_pending_request:
             state = "waiting"
-            explanation = signals.request_reason or "Protection request is pending review."
+            explanation = (
+                signals.request_reason or "Protection request is pending review."
+            )
             recommended_action = "Wait for request review"
         elif signals.is_candidate:
             eligible_at = _ensure_utc(signals.candidate_eligible_at)
             if eligible_at is not None and eligible_at > current:
                 state = "waiting"
                 remaining_seconds = int((eligible_at - current).total_seconds())
-                explanation = signals.candidate_reason or "Retention window has not expired yet."
+                explanation = (
+                    signals.candidate_reason or "Retention window has not expired yet."
+                )
                 recommended_action = "Wait until retention expires"
-                if signals.candidate_created_at is not None and signals.candidate_delay_days:
+                if (
+                    signals.candidate_created_at is not None
+                    and signals.candidate_delay_days
+                ):
                     total_seconds = max(signals.candidate_delay_days * 86400, 1)
+                    candidate_created_at = _ensure_utc(signals.candidate_created_at)
+                    assert candidate_created_at is not None
                     elapsed_seconds = int(
-                        max(0, (current - _ensure_utc(signals.candidate_created_at)).total_seconds())
+                        max(0, (current - candidate_created_at).total_seconds())
                     )
                     progress_percent = int((elapsed_seconds / total_seconds) * 100)
             else:
                 state = "safe_to_delete"
-                explanation = signals.candidate_reason or "All reclaim conditions are satisfied."
+                explanation = (
+                    signals.candidate_reason or "All reclaim conditions are satisfied."
+                )
                 recommended_action = "Queue deletion"
         elif signals.child_candidate_count > 0:
             state = "safe_to_delete"
-            explanation = f"{signals.child_candidate_count} child item(s) are reclaimable."
+            explanation = (
+                f"{signals.child_candidate_count} child item(s) are reclaimable."
+            )
             recommended_action = (
                 "Review reclaimable seasons or episodes"
                 if signals.media_type is MediaType.SERIES
@@ -207,7 +283,9 @@ class DecisionEngine:
             )
         elif signals.size_bytes is None:
             state = "incomplete"
-            explanation = "Media size is missing, so reclaimable space cannot be estimated yet."
+            explanation = (
+                "Media size is missing, so reclaimable space cannot be estimated yet."
+            )
             recommended_action = "Refresh media sync"
         elif signals.view_count <= 0 and signals.last_viewed_at is None:
             state = "unwatched"

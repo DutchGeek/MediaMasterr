@@ -1,36 +1,32 @@
 # Release Process
 
-MediaMasterr does not have a fully automated release pipeline in-repo. Treat
-releases as a deliberate maintainer action with a short checklist.
+MediaMasterr uses GitHub Actions as the canonical release report. A release is only trustworthy when validation, Docker publication, and runtime identity all agree on the same commit.
 
 ## Before a Release
 
-- Make sure the version matches in both `pyproject.toml` and
-  `backend/core/__version__.py`.
-- Update `CHANGELOG.md` with an `Unreleased` section or the final release notes.
-- Run the test and lint commands you normally use for the code that changed.
-- Confirm the docs still build with `uv run zensical build --clean`.
+- Confirm the application metadata, workflow metadata, and published image all point at the same commit SHA.
+- Validate the repo with the backend, frontend, docs, and quality checks.
+- Confirm the Docker workflow summary includes the published digest and both tags.
 
 ## Release Sequence
 
-1. Merge the release-ready changes to the target branch.
-2. Bump the version in the project metadata and runtime version module.
-3. Update `CHANGELOG.md`.
-4. Run validation locally.
-5. Create the git tag for the release.
-6. Publish the GitHub release and attach any build artifacts you ship.
+1. Push the release-ready commit to `main`.
+2. Wait for the Docker workflow to finish and verify the run summary.
+3. Confirm `latest` and the full commit SHA both exist in GHCR.
+4. Open the About page from the running build and confirm the commit SHA and Docker digest match the published image.
 
 ## Versioning Notes
 
-- `pyproject.toml` is the packaging version source.
-- `backend/core/__version__.py` is the runtime version source used by the app.
-- The release notes endpoint reads `CHANGELOG.md` from the runtime environment.
+- `pyproject.toml` remains the packaging version source.
+- `backend/core/__version__.py` remains the runtime application version source.
+- `/api/info/version` is the runtime identity endpoint used by the About page.
+- The Docker workflow summary is the release record of truth for published tags and digest.
 
 ## After the Release
 
-- Verify the published version is visible in the app and `/api/version`.
-- Check that the changelog endpoint still returns the expected release entries.
-- Update any deployment notes if the release changes install or upgrade steps.
+- Check the GitHub Actions run URL for the build summary.
+- Confirm Dockge can pull the new `latest` tag or pin the full SHA tag.
+- Update deployment notes if the image or startup contract changes.
 
 ## Related Pages
 

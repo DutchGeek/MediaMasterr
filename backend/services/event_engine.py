@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import quote
 
 from sqlalchemy import literal, select
@@ -29,7 +30,7 @@ def _media_target_path(
         return None
     base = "/movies" if media_type is MediaType.MOVIE else "/series"
     if media_title:
-      return f"{base}?search={quote(media_title)}&open={media_id}&inspector=1"
+        return f"{base}?search={quote(media_title)}&open={media_id}&inspector=1"
     return f"{base}?open={media_id}&inspector=1"
 
 
@@ -68,36 +69,41 @@ class EventEngine:
                 ProtectionRequest.requested_by_user_id == current_user.id
             )
 
-        protected_query = select(
-            literal("protected").label("event_type"),
-            ProtectedMedia.id.label("source_id"),
-            ProtectedMedia.created_at.label("created_at"),
-            literal(None).label("request_status"),
-            ProtectedMedia.media_type.label("media_type"),
-            ProtectedMedia.movie_id.label("movie_id"),
-            ProtectedMedia.series_id.label("series_id"),
-            Movie.title.label("movie_title"),
-            Series.title.label("series_title"),
-            User.username.label("actor_username"),
-            User.display_name.label("actor_display_name"),
-        ).outerjoin(User, User.id == ProtectedMedia.protected_by_user_id).outerjoin(
-            Movie, Movie.id == ProtectedMedia.movie_id
-        ).outerjoin(Series, Series.id == ProtectedMedia.series_id)
+        protected_query = (
+            select(
+                literal("protected").label("event_type"),
+                ProtectedMedia.id.label("source_id"),
+                ProtectedMedia.created_at.label("created_at"),
+                literal(None).label("request_status"),
+                ProtectedMedia.media_type.label("media_type"),
+                ProtectedMedia.movie_id.label("movie_id"),
+                ProtectedMedia.series_id.label("series_id"),
+                Movie.title.label("movie_title"),
+                Series.title.label("series_title"),
+                User.username.label("actor_username"),
+                User.display_name.label("actor_display_name"),
+            )
+            .outerjoin(User, User.id == ProtectedMedia.protected_by_user_id)
+            .outerjoin(Movie, Movie.id == ProtectedMedia.movie_id)
+            .outerjoin(Series, Series.id == ProtectedMedia.series_id)
+        )
 
-        candidate_query = select(
-            literal("candidate").label("event_type"),
-            ReclaimCandidate.id.label("source_id"),
-            ReclaimCandidate.created_at.label("created_at"),
-            literal(None).label("request_status"),
-            ReclaimCandidate.media_type.label("media_type"),
-            ReclaimCandidate.movie_id.label("movie_id"),
-            ReclaimCandidate.series_id.label("series_id"),
-            Movie.title.label("movie_title"),
-            Series.title.label("series_title"),
-            literal(None).label("actor_username"),
-            literal(None).label("actor_display_name"),
-        ).outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id).outerjoin(
-            Series, Series.id == ReclaimCandidate.series_id
+        candidate_query = (
+            select(
+                literal("candidate").label("event_type"),
+                ReclaimCandidate.id.label("source_id"),
+                ReclaimCandidate.created_at.label("created_at"),
+                literal(None).label("request_status"),
+                ReclaimCandidate.media_type.label("media_type"),
+                ReclaimCandidate.movie_id.label("movie_id"),
+                ReclaimCandidate.series_id.label("series_id"),
+                Movie.title.label("movie_title"),
+                Series.title.label("series_title"),
+                literal(None).label("actor_username"),
+                literal(None).label("actor_display_name"),
+            )
+            .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
+            .outerjoin(Series, Series.id == ReclaimCandidate.series_id)
         )
 
         history_query = select(
@@ -114,13 +120,17 @@ class EventEngine:
             literal(None).label("actor_display_name"),
         )
 
-        media_rows = []
+        media_rows: list[Any] = []
         for query in (request_query, protected_query, candidate_query, history_query):
             media_rows.extend((await db.execute(query.limit(limit_per_tab))).all())
-        media_rows.sort(key=lambda row: row.created_at or datetime.now(UTC), reverse=True)
+        media_rows.sort(
+            key=lambda row: row.created_at or datetime.now(UTC), reverse=True
+        )
 
         for row in media_rows[:limit_per_tab]:
-            media_type = row.media_type if isinstance(row.media_type, MediaType) else None
+            media_type = (
+                row.media_type if isinstance(row.media_type, MediaType) else None
+            )
             media_id = row.movie_id if media_type is MediaType.MOVIE else row.series_id
             media_title = row.movie_title or row.series_title
             actor_display = row.actor_display_name or row.actor_username
@@ -159,13 +169,17 @@ class EventEngine:
             )
 
         task_rows = (
-            await db.execute(
-                select(TaskRun)
-                .where(TaskRun.status.in_([TaskStatus.COMPLETED, TaskStatus.ERROR]))
-                .order_by(TaskRun.created_at.desc())
-                .limit(limit_per_tab)
+            (
+                await db.execute(
+                    select(TaskRun)
+                    .where(TaskRun.status.in_([TaskStatus.COMPLETED, TaskStatus.ERROR]))
+                    .order_by(TaskRun.created_at.desc())
+                    .limit(limit_per_tab)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for task in task_rows:
             subtitle = (

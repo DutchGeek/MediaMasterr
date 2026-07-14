@@ -74,7 +74,11 @@ def _extract_arr_ids(raw: Mapping[str, Any], media_type: MediaType) -> list[int]
 
 
 def _text_tokens(name: str) -> list[str]:
-    return [token.strip().lower() for token in name.replace("-", " ").split() if token.strip()]
+    return [
+        token.strip().lower()
+        for token in name.replace("-", " ").split()
+        if token.strip()
+    ]
 
 
 def _normalized_provider_filter_id(source: str, raw_id: object) -> str:
@@ -121,9 +125,9 @@ def _apply_imported_filter(
                 MovieArrRef, MovieArrRef.movie_id == Movie.id
             ).where(MovieArrRef.arr_movie_id.in_(arr_ids))
         else:
-            query = query.join(
-                SeriesArrRef, SeriesArrRef.series_id == Series.id
-            ).where(SeriesArrRef.arr_series_id.in_(arr_ids))
+            query = query.join(SeriesArrRef, SeriesArrRef.series_id == Series.id).where(
+                SeriesArrRef.arr_series_id.in_(arr_ids)
+            )
             count_query = count_query.join(
                 SeriesArrRef, SeriesArrRef.series_id == Series.id
             ).where(SeriesArrRef.arr_series_id.in_(arr_ids))
@@ -220,9 +224,13 @@ def _decision_clause_expression(
             return None
         cutoff = datetime.now(UTC) - timedelta(days=parsed_days)
         if op in {"greater_than", ">"}:
-            return and_(model.last_viewed_at.is_not(None), model.last_viewed_at <= cutoff)
+            return and_(
+                model.last_viewed_at.is_not(None), model.last_viewed_at <= cutoff
+            )
         if op in {"less_than", "<"}:
-            return and_(model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff)
+            return and_(
+                model.last_viewed_at.is_not(None), model.last_viewed_at >= cutoff
+            )
         if op in {"exists"}:
             return model.last_viewed_at.is_not(None)
         if op in {"does_not_exist", "not_exists"}:
@@ -259,13 +267,19 @@ def _decision_clause_expression(
     return None
 
 
-def _normalize_definition_nodes(raw_definition: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+def _normalize_definition_nodes(
+    raw_definition: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
     if not isinstance(raw_definition, Mapping):
         return []
     if isinstance(raw_definition.get("clauses"), list):
         nodes = raw_definition["clauses"]
     else:
-        nodes = raw_definition.get("children") if isinstance(raw_definition.get("children"), list) else []
+        nodes = (
+            raw_definition.get("children")
+            if isinstance(raw_definition.get("children"), list)
+            else []
+        )
     normalized: list[dict[str, Any]] = []
     for node in nodes:
         if not isinstance(node, Mapping):
@@ -291,7 +305,9 @@ def _normalize_definition_nodes(raw_definition: Mapping[str, Any] | None) -> lis
     return normalized
 
 
-def _definition_expression(media_type: MediaType, definition: Mapping[str, Any] | None) -> Any | None:
+def _definition_expression(
+    media_type: MediaType, definition: Mapping[str, Any] | None
+) -> Any | None:
     if not isinstance(definition, Mapping):
         return None
     combinator = str(definition.get("combinator") or "and").lower()
@@ -323,10 +339,10 @@ def _definition_expression(media_type: MediaType, definition: Mapping[str, Any] 
 async def sync_imported_arr_filters(db: AsyncSession) -> None:
     candidates: list[tuple[Service, int, list[dict[str, Any]]]] = []
 
-    for config_id, client in service_manager.radarr_clients().items():
+    for config_id, radarr_client in service_manager.radarr_clients().items():
         imported: list[dict[str, Any]] = []
         try:
-            for saved in await client.get_saved_filters():
+            for saved in await radarr_client.get_saved_filters():
                 imported.append(
                     {
                         "id": _normalized_provider_filter_id("saved", saved.get("id")),
@@ -338,7 +354,7 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
             # Some ARR versions/instances do not expose saved filters over API.
             pass
         try:
-            for label, movie_ids in (await client.get_all_tag_details()).items():
+            for label, movie_ids in (await radarr_client.get_all_tag_details()).items():
                 tag_name = str(label or "").strip()
                 if not tag_name:
                     continue
@@ -353,11 +369,11 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
             pass
         candidates.append((Service.RADARR, config_id, imported))
 
-    for config_id, client in service_manager.sonarr_clients().items():
-        imported: list[dict[str, Any]] = []
+    for config_id, sonarr_client in service_manager.sonarr_clients().items():
+        imported_series: list[dict[str, Any]] = []
         try:
-            for saved in await client.get_saved_filters():
-                imported.append(
+            for saved in await sonarr_client.get_saved_filters():
+                imported_series.append(
                     {
                         "id": _normalized_provider_filter_id("saved", saved.get("id")),
                         "name": str(saved.get("name") or "").strip(),
@@ -367,11 +383,13 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
         except Exception:
             pass
         try:
-            for label, series_ids in (await client.get_all_tag_details()).items():
+            for label, series_ids in (
+                await sonarr_client.get_all_tag_details()
+            ).items():
                 tag_name = str(label or "").strip()
                 if not tag_name:
                     continue
-                imported.append(
+                imported_series.append(
                     {
                         "id": _normalized_provider_filter_id("tag", tag_name.lower()),
                         "name": tag_name,
@@ -380,27 +398,36 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
                 )
         except Exception:
             pass
-        candidates.append((Service.SONARR, config_id, imported))
+        candidates.append((Service.SONARR, config_id, imported_series))
 
     for service_type, config_id, filters in candidates:
-        media_type = MediaType.MOVIE if service_type is Service.RADARR else MediaType.SERIES
+        media_type = (
+            MediaType.MOVIE if service_type is Service.RADARR else MediaType.SERIES
+        )
         seen_ids: set[str] = set()
         for filter_item in filters:
             provider_filter_id = str(filter_item.get("id") or "").strip()
             if not provider_filter_id:
                 continue
             seen_ids.add(provider_filter_id)
-            name = str(filter_item.get("name") or "").strip() or f"Filter {provider_filter_id}"
+            name = (
+                str(filter_item.get("name") or "").strip()
+                or f"Filter {provider_filter_id}"
+            )
             existing = (
-                await db.execute(
-                    select(QueryFilter).where(
-                        QueryFilter.kind == "imported_arr",
-                        QueryFilter.provider_service == service_type,
-                        QueryFilter.provider_config_id == config_id,
-                        QueryFilter.provider_filter_id == provider_filter_id,
+                (
+                    await db.execute(
+                        select(QueryFilter).where(
+                            QueryFilter.kind == "imported_arr",
+                            QueryFilter.provider_service == service_type,
+                            QueryFilter.provider_config_id == config_id,
+                            QueryFilter.provider_filter_id == provider_filter_id,
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if existing is None:
                 db.add(
                     QueryFilter(
@@ -422,14 +449,18 @@ async def sync_imported_arr_filters(db: AsyncSession) -> None:
                 existing.enabled = True
 
         stale = (
-            await db.execute(
-                select(QueryFilter).where(
-                    QueryFilter.kind == "imported_arr",
-                    QueryFilter.provider_service == service_type,
-                    QueryFilter.provider_config_id == config_id,
+            (
+                await db.execute(
+                    select(QueryFilter).where(
+                        QueryFilter.kind == "imported_arr",
+                        QueryFilter.provider_service == service_type,
+                        QueryFilter.provider_config_id == config_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for item in stale:
             if item.provider_filter_id not in seen_ids:
                 item.enabled = False
@@ -446,37 +477,49 @@ async def get_filter_catalog(
     await sync_imported_arr_filters(db)
 
     imported_rows = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.kind == "imported_arr",
-                QueryFilter.media_type == media_type,
-                QueryFilter.enabled.is_(True),
-                QueryFilter.read_only.is_(True),
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.kind == "imported_arr",
+                    QueryFilter.media_type == media_type,
+                    QueryFilter.enabled.is_(True),
+                    QueryFilter.read_only.is_(True),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     decision_rows = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.kind == "decision",
-                QueryFilter.user_id == current_user.id,
-                QueryFilter.media_type == media_type,
-                QueryFilter.enabled.is_(True),
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.kind == "decision",
+                    QueryFilter.user_id == current_user.id,
+                    QueryFilter.media_type == media_type,
+                    QueryFilter.enabled.is_(True),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     smart_rows = (
-        await db.execute(
-            select(QueryFilter).where(
-                QueryFilter.kind == "smart",
-                QueryFilter.user_id == current_user.id,
-                QueryFilter.media_type == media_type,
-                QueryFilter.enabled.is_(True),
+        (
+            await db.execute(
+                select(QueryFilter).where(
+                    QueryFilter.kind == "smart",
+                    QueryFilter.user_id == current_user.id,
+                    QueryFilter.media_type == media_type,
+                    QueryFilter.enabled.is_(True),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     imported = [
         MediaFilterOptionResponse(
@@ -557,20 +600,24 @@ async def apply_spec(
     if spec.media_status:
         status = spec.media_status.strip().lower()
         if status:
-            query = query.where(func.lower(model.status) == status)  # type: ignore[name-defined]
-            count_query = count_query.where(func.lower(model.status) == status)  # type: ignore[name-defined]
+            query = query.where(func.lower(model.status) == status)
+            count_query = count_query.where(func.lower(model.status) == status)
 
     imported_ids = [int(v) for v in (spec.imported_filter_ids or [])]
     if imported_ids:
         imported_filters = (
-            await db.execute(
-                select(QueryFilter).where(
-                    QueryFilter.id.in_(imported_ids),
-                    QueryFilter.kind == "imported_arr",
-                    QueryFilter.enabled.is_(True),
+            (
+                await db.execute(
+                    select(QueryFilter).where(
+                        QueryFilter.id.in_(imported_ids),
+                        QueryFilter.kind == "imported_arr",
+                        QueryFilter.enabled.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if imported_filters:
             # Imported filters combine naturally as OR groups at user level.
             # We apply each as intersection inside a subquery set then OR by unioning ids.
@@ -578,12 +625,12 @@ async def apply_spec(
             # Practical behavior: selecting multiple filters broadens results.
             branch_queries: list[Any] = []
             branch_count_queries: list[Any] = []
-            for imported in imported_filters:
+            for imported_filter in imported_filters:
                 q_branch, c_branch = _apply_imported_filter(
                     query=query,
                     count_query=count_query,
                     media_type=media_type,
-                    imported_filter=imported,
+                    imported_filter=imported_filter,
                 )
                 branch_queries.append(q_branch)
                 branch_count_queries.append(c_branch)
@@ -596,18 +643,26 @@ async def apply_spec(
     smart_ids = [int(v) for v in (spec.smart_filter_ids or [])]
     if smart_ids:
         smart_filters = (
-            await db.execute(
-                select(QueryFilter).where(
-                    QueryFilter.id.in_(smart_ids),
-                    QueryFilter.kind == "smart",
-                    QueryFilter.enabled.is_(True),
+            (
+                await db.execute(
+                    select(QueryFilter).where(
+                        QueryFilter.id.in_(smart_ids),
+                        QueryFilter.kind == "smart",
+                        QueryFilter.enabled.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for smart in smart_filters:
             payload = smart.definition or {}
             decision_ids.extend(
-                [int(v) for v in payload.get("decision_filter_ids", []) if str(v).isdigit()]
+                [
+                    int(v)
+                    for v in payload.get("decision_filter_ids", [])
+                    if str(v).isdigit()
+                ]
             )
             imported_ids.extend(
                 [int(v) for v in payload.get("arr_filter_ids", []) if str(v).isdigit()]
@@ -624,22 +679,28 @@ async def apply_spec(
                     else ReclaimCandidate.series_id == Series.id
                 )
                 query = query.join(ReclaimCandidate, relation_clause).distinct()
-                count_query = count_query.join(ReclaimCandidate, relation_clause).distinct()
+                count_query = count_query.join(
+                    ReclaimCandidate, relation_clause
+                ).distinct()
 
     if decision_ids:
         decision_filters = (
-            await db.execute(
-                select(QueryFilter).where(
-                    QueryFilter.id.in_(decision_ids),
-                    QueryFilter.kind == "decision",
-                    QueryFilter.enabled.is_(True),
+            (
+                await db.execute(
+                    select(QueryFilter).where(
+                        QueryFilter.id.in_(decision_ids),
+                        QueryFilter.kind == "decision",
+                        QueryFilter.enabled.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for decision_filter in decision_filters:
-                expr = _definition_expression(media_type, decision_filter.definition)
-                if expr is not None:
-                    query = query.where(expr)
-                    count_query = count_query.where(expr)
+            expr = _definition_expression(media_type, decision_filter.definition)
+            if expr is not None:
+                query = query.where(expr)
+                count_query = count_query.where(expr)
 
     return query, count_query

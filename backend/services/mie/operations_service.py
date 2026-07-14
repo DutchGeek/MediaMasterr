@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from backend.database.models import (
 from backend.models.mie import (
     CleanupPlanListResponse,
     CleanupPlanSummaryResponse,
+    FilesystemAccessMode,
     FilesystemConfigResponse,
     FilesystemRootConfigResponse,
     OperationsCard,
@@ -27,22 +29,86 @@ from backend.models.mie import (
     OperationsRecommendationsResponse,
 )
 
-
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
-    ("import_pending", "Import Pending", "Media expected from ARR/torrent sources but not indexed", "medium"),
-    ("ready_to_detach", "Ready To Detach", "Imported and protected assets that can detach torrents", "low"),
-    ("protected_seeding", "Protected & Seeding", "Assets that remain protected while seeding", "info"),
-    ("detached_media", "Detached Media", "Assets with files present and no active torrent", "info"),
-    ("orphaned_torrents", "Orphaned Torrents", "Torrents without linked media assets", "high"),
-    ("orphaned_files", "Orphaned Files", "Filesystem entries without media correlation", "high"),
-    ("broken_imports", "Broken Imports", "Library entries with missing or stale version files", "high"),
-    ("unknown_files", "Unknown Files", "Indexed files outside configured media context", "medium"),
-    ("duplicate_releases", "Duplicate Releases", "Media groups with duplicate versions", "medium"),
-    ("duplicate_torrents", "Duplicate Torrents", "Multiple torrents resolving to same payload", "medium"),
-    ("empty_folders", "Empty Folders", "Candidate directories with no media files", "low"),
-    ("leftover_files", "Leftover Files", "Sample/RAR/NFO/proof leftovers identified by scanner", "low"),
-    ("space_recovery", "Space Recovery", "Bytes recoverable from current cleanup recommendations", "info"),
+    (
+        "import_pending",
+        "Import Pending",
+        "Media expected from ARR/torrent sources but not indexed",
+        "medium",
+    ),
+    (
+        "ready_to_detach",
+        "Ready To Detach",
+        "Imported and protected assets that can detach torrents",
+        "low",
+    ),
+    (
+        "protected_seeding",
+        "Protected & Seeding",
+        "Assets that remain protected while seeding",
+        "info",
+    ),
+    (
+        "detached_media",
+        "Detached Media",
+        "Assets with files present and no active torrent",
+        "info",
+    ),
+    (
+        "orphaned_torrents",
+        "Orphaned Torrents",
+        "Torrents without linked media assets",
+        "high",
+    ),
+    (
+        "orphaned_files",
+        "Orphaned Files",
+        "Filesystem entries without media correlation",
+        "high",
+    ),
+    (
+        "broken_imports",
+        "Broken Imports",
+        "Library entries with missing or stale version files",
+        "high",
+    ),
+    (
+        "unknown_files",
+        "Unknown Files",
+        "Indexed files outside configured media context",
+        "medium",
+    ),
+    (
+        "duplicate_releases",
+        "Duplicate Releases",
+        "Media groups with duplicate versions",
+        "medium",
+    ),
+    (
+        "duplicate_torrents",
+        "Duplicate Torrents",
+        "Multiple torrents resolving to same payload",
+        "medium",
+    ),
+    (
+        "empty_folders",
+        "Empty Folders",
+        "Candidate directories with no media files",
+        "low",
+    ),
+    (
+        "leftover_files",
+        "Leftover Files",
+        "Sample/RAR/NFO/proof leftovers identified by scanner",
+        "low",
+    ),
+    (
+        "space_recovery",
+        "Space Recovery",
+        "Bytes recoverable from current cleanup recommendations",
+        "info",
+    ),
 ]
 
 
@@ -84,8 +150,7 @@ class OperationsService:
         duplicate_releases = int(
             (
                 await self.db.execute(
-                    select(func.count())
-                    .select_from(
+                    select(func.count()).select_from(
                         select(MovieVersion.movie_id)
                         .group_by(MovieVersion.movie_id)
                         .having(func.count(MovieVersion.id) > 1)
@@ -99,7 +164,11 @@ class OperationsService:
         estimated_recovery_bytes = int(
             (
                 await self.db.execute(
-                    select(func.coalesce(func.sum(ReclaimCandidate.estimated_space_bytes), 0))
+                    select(
+                        func.coalesce(
+                            func.sum(ReclaimCandidate.estimated_space_bytes), 0
+                        )
+                    )
                 )
             ).scalar()
             or 0
@@ -136,12 +205,16 @@ class OperationsService:
 
     async def recommendations(self) -> OperationsRecommendationsResponse:
         rows = (
-            await self.db.execute(
-                select(CleanupPlanItem)
-                .order_by(CleanupPlanItem.created_at.desc())
-                .limit(250)
+            (
+                await self.db.execute(
+                    select(CleanupPlanItem)
+                    .order_by(CleanupPlanItem.created_at.desc())
+                    .limit(250)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if rows:
             items = [
@@ -161,12 +234,16 @@ class OperationsService:
             return OperationsRecommendationsResponse(items=items, total=len(items))
 
         fallback_rows = (
-            await self.db.execute(
-                select(ReclaimCandidate)
-                .order_by(ReclaimCandidate.created_at.desc())
-                .limit(50)
+            (
+                await self.db.execute(
+                    select(ReclaimCandidate)
+                    .order_by(ReclaimCandidate.created_at.desc())
+                    .limit(50)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         items = [
             OperationsRecommendation(
                 id=f"candidate:{row.id}",
@@ -190,16 +267,19 @@ class OperationsService:
             .first()
         )
         roots = (
-            await self.db.execute(
-                select(FilesystemRoot).order_by(FilesystemRoot.name.asc())
+            (
+                await self.db.execute(
+                    select(FilesystemRoot).order_by(FilesystemRoot.name.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         return FilesystemConfigResponse(
-            access_mode=(
-                settings.filesystem_access_mode
-                if settings is not None
-                else "assisted"
+            access_mode=cast(
+                FilesystemAccessMode,
+                settings.filesystem_access_mode if settings is not None else "assisted",
             ),
             roots=[
                 FilesystemRootConfigResponse(
@@ -215,10 +295,16 @@ class OperationsService:
 
     async def cleanup_plans(self) -> CleanupPlanListResponse:
         plans = (
-            await self.db.execute(
-                select(CleanupPlan).order_by(CleanupPlan.created_at.desc()).limit(100)
+            (
+                await self.db.execute(
+                    select(CleanupPlan)
+                    .order_by(CleanupPlan.created_at.desc())
+                    .limit(100)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         return CleanupPlanListResponse(
             plans=[

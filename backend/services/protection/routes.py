@@ -15,8 +15,8 @@ from .schemas import (
     ProtectionItemResponse,
     ProtectionProviderDefinitionResponse,
     ProtectionRuleResponse,
-    ProtectionStatusResponse,
     ProtectionStatsResponse,
+    ProtectionStatusResponse,
 )
 from .service import ProtectionService
 

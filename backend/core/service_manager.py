@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import niquests.exceptions as niq_exceptions
 import urllib3.exceptions as url3_exceptions
 
@@ -136,7 +138,7 @@ class ServiceManager:
         service_type: Service,
         url: str,
         api_key: str,
-        extra_settings: dict | None = None,
+        extra_settings: dict[str, Any] | None = None,
     ) -> tuple[bool, str]:
         """Test if the specified service is initialized."""
         try:
@@ -152,9 +154,7 @@ class ServiceManager:
                 return await SonarrClient.test_service(url, api_key), ""
             elif service_type is Service.QBITTORRENT:
                 return (
-                    await QBittorrentClient.test_service(
-                        url, api_key, extra_settings
-                    ),
+                    await QBittorrentClient.test_service(url, api_key, extra_settings),
                     "",
                 )
             elif service_type is Service.SEERR:
@@ -350,7 +350,7 @@ class ServiceManager:
         self,
         base_url: str,
         password: str,
-        extra_settings: dict | None = None,
+        extra_settings: dict[str, Any] | None = None,
     ) -> QBittorrentClient | None:
         """Initialize qBittorrent service with provided config."""
         try:
@@ -364,14 +364,10 @@ class ServiceManager:
                 f"base_url={config.base_url}, username={config.username}, "
                 f"use_https={config.use_https}, timeout={config.timeout}"
             )
-            self._qbittorrent = QBittorrentClient.from_connection_config(
-                config
-            )
+            self._qbittorrent = QBittorrentClient.from_connection_config(config)
             if not await self._qbittorrent.health():
                 LOG.error(f"qBittorrent service health check failed: {base_url}")
-                raise ValueError(
-                    f"qBittorrent service health check failed: {base_url}"
-                )
+                raise ValueError(f"qBittorrent service health check failed: {base_url}")
             LOG.info(f"qBittorrent service initialized: {base_url}")
             return self._qbittorrent
         except Exception as e:

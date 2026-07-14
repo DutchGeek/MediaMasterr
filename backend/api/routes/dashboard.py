@@ -254,7 +254,9 @@ async def get_dashboard(
     active_protected_count = int(
         (
             await db.execute(
-                select(func.count()).select_from(ProtectedMedia).where(
+                select(func.count())
+                .select_from(ProtectedMedia)
+                .where(
                     or_(
                         ProtectedMedia.permanent.is_(True),
                         ProtectedMedia.expires_at.is_(None),
@@ -302,7 +304,11 @@ async def get_dashboard(
         return "Series"
 
     def _title(row: object) -> str:
-        return str(getattr(row, "movie_title", None) or getattr(row, "series_title", None) or "Unknown")
+        return str(
+            getattr(row, "movie_title", None)
+            or getattr(row, "series_title", None)
+            or "Unknown"
+        )
 
     ready_today_movies = 0
     ready_today_seasons = 0
@@ -339,7 +345,9 @@ async def get_dashboard(
                 title=_title(row),
                 media_type=getattr(row, "media_type", MediaType.MOVIE).value,
                 scope=_scope_label(row),
-                reclaimable_size_bytes=int(getattr(row, "estimated_space_bytes", 0) or 0),
+                reclaimable_size_bytes=int(
+                    getattr(row, "estimated_space_bytes", 0) or 0
+                ),
             )
         )
 
@@ -349,7 +357,9 @@ async def get_dashboard(
                 title=_title(row),
                 media_type=getattr(row, "media_type", MediaType.MOVIE).value,
                 scope=_scope_label(row),
-                reclaimable_size_bytes=int(getattr(row, "estimated_space_bytes", 0) or 0),
+                reclaimable_size_bytes=int(
+                    getattr(row, "estimated_space_bytes", 0) or 0
+                ),
             )
         )
 

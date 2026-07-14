@@ -1,9 +1,9 @@
 site_name: MediaMasterr Docs
-site_url: https://jessielw.github.io/MediaMasterr/
-site_description: MediaMasterr documentation, setup, deployment, and development notes
-site_author: jessielw
-repo_url: https://github.com/jessielw/MediaMasterr
-repo_name: jessielw/MediaMasterr
+site_url: https://dutchgeek.github.io/MediaMasterr/
+site_description: MediaMasterr documentation for release engineering, deployment, and visual media operations
+site_author: DutchGeek
+repo_url: https://github.com/DutchGeek/MediaMasterr
+repo_name: DutchGeek/MediaMasterr
 edit_uri: edit/main/docs/
 
 theme:

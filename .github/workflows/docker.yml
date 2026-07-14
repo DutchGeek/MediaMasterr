@@ -44,18 +44,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -63,27 +63,15 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short,prefix=
+            type=raw,value=${{ github.sha }}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
-
-      - name: Prepare build metadata
-        id: buildmeta
-        shell: bash
-        run: |
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          VERSION="${{ steps.meta.outputs.version }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION="${GITHUB_SHA::7}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Resolve frontend channel
         id: channel
@@ -95,8 +83,31 @@ jobs:
             echo "value=${{ github.event.inputs.app_channel || 'dev' }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Capture build start
+        id: buildstart
+        shell: bash
+        run: echo "epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare build metadata
+        id: buildmeta
+        shell: bash
+        run: |
+          VERSION=$(python -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')
+          echo "full_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "docker_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "release_channel=${{ steps.channel.outputs.value }}" >> "$GITHUB_OUTPUT"
+          echo "workflow_run_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "workflow_run_attempt=${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "oci_revision=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "oci_source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "oci_version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -108,10 +119,76 @@ jobs:
           build-args: |
             VITE_APP_CHANNEL=${{ steps.channel.outputs.value }}
             BUILD_VERSION=${{ steps.buildmeta.outputs.version }}
-            BUILD_COMMIT_SHA=${{ steps.buildmeta.outputs.short_sha }}
+            BUILD_COMMIT_SHA=${{ steps.buildmeta.outputs.full_sha }}
+            BUILD_SHORT_SHA=${{ steps.buildmeta.outputs.short_sha }}
             BUILD_TIMESTAMP=${{ steps.buildmeta.outputs.timestamp }}
-            BUILD_REPOSITORY=https://github.com/${{ github.repository }}
+            BUILD_DOCKER_TAG=${{ steps.buildmeta.outputs.docker_tag }}
+            BUILD_RELEASE_CHANNEL=${{ steps.buildmeta.outputs.release_channel }}
+            BUILD_WORKFLOW_RUN_NUMBER=${{ steps.buildmeta.outputs.workflow_run_number }}
+            BUILD_WORKFLOW_RUN_ATTEMPT=${{ steps.buildmeta.outputs.workflow_run_attempt }}
+            BUILD_OCI_REVISION=${{ steps.buildmeta.outputs.oci_revision }}
+            BUILD_OCI_SOURCE=${{ steps.buildmeta.outputs.oci_source }}
+            BUILD_OCI_VERSION=${{ steps.buildmeta.outputs.oci_version }}
+            BUILD_REPOSITORY=${{ steps.buildmeta.outputs.oci_source }}
             BUILD_DOCKER_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
             BUILD_CONTAINER_DIGEST=unknown
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Capture build end
+        if: always()
+        id: buildend
+        shell: bash
+        run: echo "epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          FULL_SHA="${{ steps.buildmeta.outputs.full_sha }}"
+          BUILD_DIGEST="${{ steps.build.outputs.digest }}"
+          LATEST_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:latest" | awk -F': ' '/^Digest:/ {print $2; exit}')"
+          SHA_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${FULL_SHA}" | awk -F': ' '/^Digest:/ {print $2; exit}')"
+          test -n "$BUILD_DIGEST"
+          test -n "$LATEST_DIGEST"
+          test -n "$SHA_DIGEST"
+          test "$BUILD_DIGEST" = "$LATEST_DIGEST"
+          test "$BUILD_DIGEST" = "$SHA_DIGEST"
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        run: |
+          BUILD_START=${{ steps.buildstart.outputs.epoch }}
+          BUILD_END=${{ steps.buildend.outputs.epoch }}
+          BUILD_DURATION_SECONDS=$((BUILD_END - BUILD_START))
+          BUILD_DURATION_MINUTES=$((BUILD_DURATION_SECONDS / 60))
+          BUILD_DURATION_REMAINDER=$((BUILD_DURATION_SECONDS % 60))
+          if [ "$BUILD_DURATION_MINUTES" -gt 0 ]; then
+            BUILD_DURATION="${BUILD_DURATION_MINUTES}m ${BUILD_DURATION_REMAINDER}s"
+          else
+            BUILD_DURATION="${BUILD_DURATION_SECONDS}s"
+          fi
+          {
+            echo "## Docker Build Summary"
+            echo ""
+            echo "- Repository: ${{ github.repository }}"
+            echo "- Published Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+            echo "- Branch: ${{ github.ref_name }}"
+            echo "- Build Number: ${{ github.run_number }}"
+            echo "- Run Attempt: ${{ github.run_attempt }}"
+            echo "- Build Duration: ${BUILD_DURATION}"
+            echo "- Published Tags:"
+            printf '%s\n' "${{ steps.meta.outputs.tags }}" | sed 's/^/-   /'
+            echo "- Image Digest: ${{ steps.build.outputs.digest }}"
+            echo "- Commit SHA: ${{ steps.buildmeta.outputs.full_sha }}"
+            echo "- Short SHA: ${{ steps.buildmeta.outputs.short_sha }}"
+            echo "- Build Time: ${{ steps.buildmeta.outputs.timestamp }}"
+            echo "- Release Channel: ${{ steps.buildmeta.outputs.release_channel }}"
+            echo "- Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- OCI Revision: ${{ steps.buildmeta.outputs.full_sha }}"
+            echo "- OCI Version: ${{ steps.buildmeta.outputs.version }}"
+            echo "- OCI Source: https://github.com/${{ github.repository }}"
+          } >> "$GITHUB_STEP_SUMMARY"

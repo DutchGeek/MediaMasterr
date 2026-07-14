@@ -41,9 +41,9 @@ def parse_qbittorrent_connection_config(
         raise ValueError("extra_settings.username is required")
 
     use_https = bool(settings.get("use_https", False))
-    raw_timeout = settings.get("timeout", 30)
+    raw_timeout: Any = settings.get("timeout", 30)
     try:
-        timeout = int(raw_timeout)
+        timeout: int = int(raw_timeout)
     except (TypeError, ValueError) as exc:
         raise ValueError("extra_settings.timeout must be an integer") from exc
     if timeout < 1:
@@ -114,7 +114,7 @@ class QBittorrentClient:
     @staticmethod
     def _response_body(response: niquests.Response) -> str:
         try:
-            return response.text.strip()
+            return (response.text or "").strip()
         except Exception:
             return ""
 
@@ -142,21 +142,26 @@ class QBittorrentClient:
             )
         except niq_exceptions.InvalidURL as exc:
             raise ValueError(f"Invalid URL: {base_url}") from exc
-        except (niq_exceptions.ConnectTimeout, niq_exceptions.ReadTimeout, TimeoutError) as exc:
+        except (
+            niq_exceptions.ConnectTimeout,
+            niq_exceptions.ReadTimeout,
+            TimeoutError,
+        ) as exc:
             raise ValueError("Timeout while connecting to qBittorrent") from exc
         except niq_exceptions.ConnectionError as exc:
             raise ValueError("Connection refused or unreachable host") from exc
 
         QBittorrentClient._log_http("POST", login_url, response)
 
-        if response.status_code >= 400:
+        status_code = response.status_code or 0
+        if status_code >= 400:
             raise ValueError(
                 "HTTP status code "
-                f"{response.status_code} during login: "
+                f"{status_code} during login: "
                 f"{QBittorrentClient._response_body(response) or 'empty response'}"
             )
 
-        body = QBittorrentClient._response_body(response)
+        body: str = QBittorrentClient._response_body(response)
         if body.lower() not in {"ok.", "ok"}:
             raise ValueError(
                 f"Authentication failed: unexpected login response body {body or '<empty>'}"
@@ -204,11 +209,11 @@ class QBittorrentClient:
 
     async def get_webapi_version(self) -> str:
         response = await self._get("app/webapiVersion")
-        return response.text.strip()
+        return (response.text or "").strip()
 
     async def get_app_version(self) -> str:
         response = await self._get("app/version")
-        return response.text.strip()
+        return (response.text or "").strip()
 
     async def get_transfer_info(self) -> dict[str, Any]:
         response = await self._get("transfer/info")
@@ -230,7 +235,7 @@ class QBittorrentClient:
     @classmethod
     def from_connection_config(
         cls, config: QBittorrentConnectionConfig
-    ) -> "QBittorrentClient":
+    ) -> QBittorrentClient:
         return cls(
             base_url=config.base_url,
             username=config.username,

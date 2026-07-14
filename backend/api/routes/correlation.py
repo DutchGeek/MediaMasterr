@@ -9,7 +9,10 @@ from backend.core.auth import require_admin
 from backend.core.service_manager import service_manager
 from backend.database import get_db
 from backend.database.models import User
-from backend.models.correlation import CorrelationDetailResponse, CorrelationTorrentsResponse
+from backend.models.correlation import (
+    CorrelationDetailResponse,
+    CorrelationTorrentsResponse,
+)
 from backend.services.correlation import MediaCorrelationService
 
 router = APIRouter(prefix="/api/correlation", tags=["correlation"])
