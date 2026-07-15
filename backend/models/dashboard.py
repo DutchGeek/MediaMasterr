@@ -66,6 +66,7 @@ class DashboardOpportunity(BaseModel):
     media_type: str
     scope: str
     reclaimable_size_bytes: int
+    poster_url: str | None = None
 
 
 class DashboardLibraryBucket(BaseModel):

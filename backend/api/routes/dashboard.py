@@ -48,8 +48,7 @@ from backend.user_types import MEDIA_SERVERS
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
-@router.get("/dashboard", response_model=DashboardResponse)
-async def get_dashboard(
+async def build_dashboard_response(
     current_user: Annotated[User, Depends(require_page_access(PageAccess.DASHBOARD))],
     db: AsyncSession = Depends(get_db),
 ) -> DashboardResponse:
@@ -275,8 +274,10 @@ async def get_dashboard(
                 ReclaimCandidate.estimated_space_bytes,
                 ReclaimCandidate.created_at,
                 Movie.title.label("movie_title"),
+                Movie.poster_url.label("movie_poster_url"),
                 Movie.arr_tags.label("movie_tags"),
                 Series.title.label("series_title"),
+                Series.poster_url.label("series_poster_url"),
                 Series.arr_tags.label("series_tags"),
             )
             .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
@@ -309,6 +310,13 @@ async def get_dashboard(
             or getattr(row, "series_title", None)
             or "Unknown"
         )
+
+    def _poster_url(row: object) -> str | None:
+        return str(
+            getattr(row, "movie_poster_url", None)
+            or getattr(row, "series_poster_url", None)
+            or ""
+        ) or None
 
     ready_today_movies = 0
     ready_today_seasons = 0
@@ -348,6 +356,7 @@ async def get_dashboard(
                 reclaimable_size_bytes=int(
                     getattr(row, "estimated_space_bytes", 0) or 0
                 ),
+                poster_url=_poster_url(row),
             )
         )
 
@@ -360,6 +369,7 @@ async def get_dashboard(
                 reclaimable_size_bytes=int(
                     getattr(row, "estimated_space_bytes", 0) or 0
                 ),
+                poster_url=_poster_url(row),
             )
         )
 
@@ -406,3 +416,11 @@ async def get_dashboard(
         media_server_configured=media_server_configured,
         decision_summary=decision_summary,
     )
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    current_user: Annotated[User, Depends(require_page_access(PageAccess.DASHBOARD))],
+    db: AsyncSession = Depends(get_db),
+) -> DashboardResponse:
+    return await build_dashboard_response(current_user, db)

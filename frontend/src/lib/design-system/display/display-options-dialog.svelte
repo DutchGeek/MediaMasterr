@@ -13,6 +13,7 @@
     saveModuleDisplayState,
     updatePresetConfig,
   } from "$lib/design-system/display/profiles";
+  import { get_api } from "$lib/api";
   import type {
     DisplayField,
     DisplayModuleId,
@@ -20,6 +21,11 @@
     ModuleDisplayState,
   } from "$lib/design-system/display/types";
   import type { MovieObject } from "$lib/design-system/model/types";
+  import type {
+    MovieWithStatus,
+    PaginatedResponse,
+    SeriesWithStatus,
+  } from "$lib/types/shared";
 
   let {
     moduleId,
@@ -36,6 +42,7 @@
     presets: [],
   });
   let draft: DisplayProfileConfig | null = $state(null);
+  let previewPosterUrl: string | null = $state(null);
 
   const allFields: DisplayField[] = [
     "timeline",
@@ -69,7 +76,7 @@
       kind: "movie",
       title: "Preview: The Last Cleanup",
       subtitle: `${config?.viewMode ?? "cards"} • ${config?.cardDensity ?? "comfortable"}`,
-      posterUrl: null,
+      posterUrl: previewPosterUrl,
       lifecycleState: "protected",
       recommendationSeverity: "action",
       recommendation: {
@@ -196,6 +203,25 @@
 
   onMount(() => {
     profileState = loadModuleDisplayState(moduleId);
+    void (async () => {
+      try {
+        const [movieResponse, seriesResponse] = await Promise.all([
+          get_api<PaginatedResponse<MovieWithStatus>>(
+            "/api/media/movies?per_page=1&sort_by=added_at&sort_order=desc",
+          ),
+          get_api<PaginatedResponse<SeriesWithStatus>>(
+            "/api/media/series?per_page=1&sort_by=added_at&sort_order=desc",
+          ),
+        ]);
+
+        previewPosterUrl =
+          movieResponse.items.find((item) => item.poster_url)?.poster_url ??
+          seriesResponse.items.find((item) => item.poster_url)?.poster_url ??
+          null;
+      } catch {
+        previewPosterUrl = null;
+      }
+    })();
   });
 </script>
 

@@ -35,6 +35,7 @@ class OperationsRecommendation(BaseModel):
     target_type: str
     target_id: str | None = None
     estimated_recovery_bytes: int = 0
+    poster_url: str | None = None
 
 
 class OperationsRecommendationsResponse(BaseModel):
@@ -80,3 +81,10 @@ class CleanupPlanSummaryResponse(BaseModel):
 
 class CleanupPlanListResponse(BaseModel):
     plans: list[CleanupPlanSummaryResponse] = Field(default_factory=list)
+
+
+class OperationsWorkspaceResponse(BaseModel):
+    overview: OperationsOverviewResponse
+    recommendations: OperationsRecommendationsResponse
+    filesystem: FilesystemConfigResponse
+    cleanup_plans: CleanupPlanListResponse

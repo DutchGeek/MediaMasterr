@@ -16,20 +16,14 @@
     type SeriesObject,
   } from "$lib/design-system";
   import type {
-    CleanupPlanListResponse,
-    FilesystemConfigResponse,
-    OperationsOverviewResponse,
+    MieOperationsResponse,
     OperationsRecommendation,
-    OperationsRecommendationsResponse,
   } from "$lib/types/shared";
   import { formatFileSize } from "$lib/utils/formatters";
 
   let loading = $state(true);
   let error = $state("");
-  let overview = $state<OperationsOverviewResponse | null>(null);
-  let recommendations = $state<OperationsRecommendationsResponse | null>(null);
-  let filesystem = $state<FilesystemConfigResponse | null>(null);
-  let plans = $state<CleanupPlanListResponse | null>(null);
+  let workspace = $state<MieOperationsResponse | null>(null);
   let selectedCollectionKey = $state<string | null>(null);
   let selectedAsset = $state<MediaObject | null>(null);
   let drawerOpen = $state(false);
@@ -40,23 +34,7 @@
     loading = true;
     error = "";
     try {
-      const [
-        overviewResponse,
-        recommendationsResponse,
-        filesystemResponse,
-        plansResponse,
-      ] = await Promise.all([
-        get_api<OperationsOverviewResponse>("/api/operations/overview"),
-        get_api<OperationsRecommendationsResponse>(
-          "/api/operations/recommendations",
-        ),
-        get_api<FilesystemConfigResponse>("/api/operations/filesystem"),
-        get_api<CleanupPlanListResponse>("/api/operations/cleanup-plans"),
-      ]);
-      overview = overviewResponse;
-      recommendations = recommendationsResponse;
-      filesystem = filesystemResponse;
-      plans = plansResponse;
+      workspace = await get_api<MieOperationsResponse>("/api/mie/operations");
     } catch (e: any) {
       error = e?.message ?? "Failed to load Operations data";
     } finally {
@@ -83,13 +61,14 @@
   };
 
   const recommendationsForCollection = $derived.by(() => {
-    const rows = recommendations?.items ?? [];
+    const rows = workspace?.recommendations.items ?? [];
     if (!selectedCollectionKey) return rows;
     return rows.filter((item) => item.card_key === selectedCollectionKey);
   });
 
   const collectionCards = $derived.by((): MovieCollectionObject[] => {
-    return (overview?.cards ?? []).map((card) => ({
+    const rows = workspace?.recommendations.items ?? [];
+    return (workspace?.overview.cards ?? []).map((card) => ({
       id: card.key,
       kind: "movie_collection" as const,
       title: card.title,
@@ -123,6 +102,8 @@
           explanation: card.description,
         },
       ],
+      posterUrl:
+        rows.find((item) => item.card_key === card.key)?.poster_url ?? null,
       quickActions: [{ id: "open", label: "Open Collection" }],
     }));
   });
@@ -169,6 +150,7 @@
           { id: "explain", label: "Explain" },
           { id: "review", label: "Review" },
         ],
+        posterUrl: item.poster_url,
       }));
   });
 
@@ -186,6 +168,8 @@
     }
 
     return Array.from(grouped.entries()).map(([seriesName, items]) => {
+      const posterUrl =
+        items.find((item) => item.poster_url)?.poster_url ?? null;
       const seasons: SeasonObject[] = items.map((item, index) => {
         const seasonNo =
           /season\s*(\d+)/i.exec(item.title) || /s(\d{1,2})/i.exec(item.title);
@@ -257,6 +241,7 @@
         kind: "series",
         title: seriesName,
         subtitle: `${seasons.length} seasons with recommendations`,
+        posterUrl,
         lifecycleState: "imported",
         recommendationSeverity:
           highest === "high"
@@ -279,7 +264,7 @@
         recoverableBytes: totalRecovery,
         highestRisk: highest,
         overallHealth: highest === "high" ? "Attention" : "Good",
-        lastScanAt: overview?.generated_at,
+        lastScanAt: workspace?.overview.generated_at,
         healthSignals: [
           {
             kind: "imported",
@@ -339,10 +324,13 @@
         id: "filesystem",
         title: "Filesystem",
         rows: [
-          { key: "Access Mode", value: filesystem?.access_mode ?? "unknown" },
+          {
+            key: "Access Mode",
+            value: workspace?.filesystem.access_mode ?? "unknown",
+          },
           {
             key: "Configured Roots",
-            value: String(filesystem?.roots.length ?? 0),
+            value: String(workspace?.filesystem.roots.length ?? 0),
           },
         ],
       },
@@ -366,8 +354,14 @@
         id: "history",
         title: "History",
         rows: [
-          { key: "Last Evaluation", value: overview?.generated_at ?? "n/a" },
-          { key: "Cleanup Plans", value: String(plans?.plans.length ?? 0) },
+          {
+            key: "Last Evaluation",
+            value: workspace?.overview.generated_at ?? "n/a",
+          },
+          {
+            key: "Cleanup Plans",
+            value: String(workspace?.cleanup_plans.plans.length ?? 0),
+          },
         ],
       },
       {

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import cast as typing_cast
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, func, select
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models import (
@@ -27,6 +28,7 @@ from backend.models.mie import (
     OperationsOverviewResponse,
     OperationsRecommendation,
     OperationsRecommendationsResponse,
+    OperationsWorkspaceResponse,
 )
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
@@ -205,60 +207,83 @@ class OperationsService:
 
     async def recommendations(self) -> OperationsRecommendationsResponse:
         rows = (
-            (
-                await self.db.execute(
-                    select(CleanupPlanItem)
-                    .order_by(CleanupPlanItem.created_at.desc())
-                    .limit(250)
+            await self.db.execute(
+                select(
+                    CleanupPlanItem,
+                    Movie.poster_url.label("movie_poster_url"),
+                    Series.poster_url.label("series_poster_url"),
                 )
+                .outerjoin(
+                    Movie, Movie.id == sql_cast(CleanupPlanItem.target_id, Integer)
+                )
+                .outerjoin(
+                        Series, Series.id == sql_cast(CleanupPlanItem.target_id, Integer)
+                )
+                .order_by(CleanupPlanItem.created_at.desc())
+                .limit(250)
             )
-            .scalars()
-            .all()
-        )
+        ).all()
 
         if rows:
             items = [
                 OperationsRecommendation(
-                    id=f"plan-item:{row.id}",
-                    card_key=row.card_key,
-                    title=row.title,
-                    summary=row.summary,
-                    action=row.action,
-                    safety_level=row.safety_level,  # type: ignore[arg-type]
-                    target_type=row.target_type,
-                    target_id=row.target_id,
-                    estimated_recovery_bytes=row.estimated_recovery_bytes,
+                    id=f"plan-item:{row.CleanupPlanItem.id}",
+                    card_key=row.CleanupPlanItem.card_key,
+                    title=row.CleanupPlanItem.title,
+                    summary=row.CleanupPlanItem.summary,
+                    action=row.CleanupPlanItem.action,
+                    safety_level=row.CleanupPlanItem.safety_level,
+                    target_type=row.CleanupPlanItem.target_type,
+                    target_id=row.CleanupPlanItem.target_id,
+                    estimated_recovery_bytes=row.CleanupPlanItem.estimated_recovery_bytes,
+                    poster_url=
+                        row.movie_poster_url or row.series_poster_url,
                 )
                 for row in rows
             ]
             return OperationsRecommendationsResponse(items=items, total=len(items))
 
         fallback_rows = (
-            (
-                await self.db.execute(
-                    select(ReclaimCandidate)
-                    .order_by(ReclaimCandidate.created_at.desc())
-                    .limit(50)
+            await self.db.execute(
+                select(
+                    ReclaimCandidate,
+                    Movie.poster_url.label("movie_poster_url"),
+                    Series.poster_url.label("series_poster_url"),
                 )
+                .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
+                .outerjoin(Series, Series.id == ReclaimCandidate.series_id)
+                .order_by(ReclaimCandidate.created_at.desc())
+                .limit(50)
             )
-            .scalars()
-            .all()
         )
         items = [
             OperationsRecommendation(
-                id=f"candidate:{row.id}",
+                id=f"candidate:{row.ReclaimCandidate.id}",
                 card_key="space_recovery",
-                title=f"Review reclaim candidate #{row.id}",
-                summary=row.reason or "Candidate queued by rule engine",
+                title=f"Review reclaim candidate #{row.ReclaimCandidate.id}",
+                summary=row.ReclaimCandidate.reason or "Candidate queued by rule engine",
                 action="review_candidate",
                 safety_level="low_risk",
                 target_type="reclaim_candidate",
-                target_id=str(row.id),
-                estimated_recovery_bytes=row.estimated_space_bytes or 0,
+                target_id=str(row.ReclaimCandidate.id),
+                estimated_recovery_bytes=row.ReclaimCandidate.estimated_space_bytes or 0,
+                poster_url=row.movie_poster_url or row.series_poster_url,
             )
-            for row in fallback_rows
+            for row in fallback_rows.all()
         ]
         return OperationsRecommendationsResponse(items=items, total=len(items))
+
+    async def workspace(self) -> OperationsWorkspaceResponse:
+        overview = await self.overview()
+        recommendations = await self.recommendations()
+        filesystem = await self.filesystem_config()
+        cleanup_plans = await self.cleanup_plans()
+        return OperationsWorkspaceResponse(
+            overview=overview,
+            recommendations=recommendations,
+            filesystem=filesystem,
+            cleanup_plans=cleanup_plans,
+        )
 
     async def filesystem_config(self) -> FilesystemConfigResponse:
         settings = (
@@ -277,7 +302,7 @@ class OperationsService:
         )
 
         return FilesystemConfigResponse(
-            access_mode=cast(
+            access_mode=typing_cast(
                 FilesystemAccessMode,
                 settings.filesystem_access_mode if settings is not None else "assisted",
             ),

@@ -12,11 +12,10 @@
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import Minus from "@lucide/svelte/icons/minus";
+  import Images from "@lucide/svelte/icons/images";
   import type {
     DashboardActivityItem,
     DashboardResponse,
-    ProtectionStatsResponse,
-    ProtectionStatusResponse,
   } from "$lib/types/shared";
   import { capitalizeFirstLetter } from "$lib/utils/strings";
   import JellyfinSVG from "$lib/components/svgs/jellyfin-svg.svelte";
@@ -27,12 +26,8 @@
   import SeerrSVG from "$lib/components/svgs/seerr-svg.svelte";
   import TautulliSVG from "$lib/components/svgs/tautulli-svg.svelte";
 
-  const PROTECTION_DASHBOARD_REFRESH_EVENT = "mediamasterr:protection:refresh";
-
   // state
   let dashboard = $state<DashboardResponse | null>(null);
-  let protectionStatus = $state<ProtectionStatusResponse | null>(null);
-  let protectionStats = $state<ProtectionStatsResponse | null>(null);
   let loading = $state(true);
   let error = $state("");
   let lastUpdatedAt = $state<string | null>(null);
@@ -79,7 +74,6 @@
       ...(dashboard?.services
         .map((service) => service.last_sync_at)
         .filter((value): value is string => typeof value === "string") ?? []),
-      ...(protectionStats?.last_sync ? [protectionStats.last_sync] : []),
     ];
     if (candidates.length === 0) return "Never";
 
@@ -94,48 +88,6 @@
     }
 
     return formatDistanceToNow(newest);
-  });
-  const protectionProviderLabel = $derived(
-    protectionStatus?.provider ?? protectionStats?.provider ?? "MediaMasterr",
-  );
-  const protectionConnectionLabel = $derived(
-    protectionStatus?.connection_status ??
-      (protectionStatus?.connected || protectionStats?.connected
-        ? "Connected"
-        : "Disconnected"),
-  );
-  const protectionAuthLabel = $derived(
-    protectionStatus?.authentication_status ??
-      (protectionStatus?.authenticated ? "Authenticated" : "Not Authenticated"),
-  );
-  const protectionServiceLastSyncLabel = $derived.by(() => {
-    nowTick;
-    const lastSync = protectionStatus?.last_sync ?? protectionStats?.last_sync;
-    return lastSync ? formatDistanceToNow(lastSync) : "Not synchronized";
-  });
-  const protectionLastSyncLabel = $derived.by(() => {
-    nowTick;
-    const lastSync = protectionStatus?.last_sync ?? protectionStats?.last_sync;
-    return lastSync ? formatDistanceToNow(lastSync) : "Not synchronized";
-  });
-  const protectionFilesLabel = $derived.by(() => {
-    const files = protectionStats?.protected_files;
-    if (typeof files !== "number" || files <= 0) return "No protected items";
-    return String(files);
-  });
-  const protectionReclaimableSize = $derived.by(() => {
-    const candidates = [
-      protectionStats?.reclaimable_size,
-      protectionStats?.reclaimable_bytes,
-      protectionStats?.reclaimable_total,
-      protectionStats?.reclaimable_total_bytes,
-    ];
-    for (const value of candidates) {
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-      }
-    }
-    return null;
   });
   const requestBalance7d = $derived(
     (dashboard?.requests.approved_7d ?? 0) -
@@ -278,16 +230,6 @@
     serviceType === "plex" ||
     serviceType === "jellyfin";
 
-  // fetch dashboard stats from API
-  const fetchProtectionMetrics = async () => {
-    const [statusPayload, statsPayload] = await Promise.all([
-      get_api<ProtectionStatusResponse>("/api/protection/status"),
-      get_api<ProtectionStatsResponse>("/api/protection/stats"),
-    ]);
-    protectionStatus = statusPayload;
-    protectionStats = statsPayload;
-  };
-
   const fetchStats = async (showLoading = true) => {
     if (isFetching) return;
 
@@ -296,11 +238,7 @@
       if (showLoading) {
         loading = true;
       }
-      const [dashboardPayload] = await Promise.all([
-        get_api<DashboardResponse>("/api/dashboard"),
-      ]);
-      await fetchProtectionMetrics();
-      dashboard = dashboardPayload;
+      dashboard = await get_api<DashboardResponse>("/api/mie/dashboard");
       lastUpdatedAt = new Date().toISOString();
       error = "";
     } catch (err: any) {
@@ -314,17 +252,9 @@
     }
   };
 
-  const handleProtectionRefresh = () => {
-    void fetchProtectionMetrics();
-  };
-
   // fetch stats when component mounts
   onMount(async () => {
     await fetchStats();
-    window.addEventListener(
-      PROTECTION_DASHBOARD_REFRESH_EVENT,
-      handleProtectionRefresh,
-    );
     refreshTimer = setInterval(() => {
       fetchStats(false);
     }, 60000);
@@ -334,10 +264,6 @@
   });
 
   onDestroy(() => {
-    window.removeEventListener(
-      PROTECTION_DASHBOARD_REFRESH_EVENT,
-      handleProtectionRefresh,
-    );
     if (refreshTimer) {
       clearInterval(refreshTimer);
       refreshTimer = null;
@@ -534,15 +460,55 @@
               class="bg-card rounded-lg border border-border p-5 min-h-28 xl:col-span-1"
             >
               <p class="text-sm text-muted-foreground">Recently Reclaimable</p>
-              <div class="mt-3 space-y-2 text-sm">
+              <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 {#each dashboard.decision_summary.recently_reclaimable.slice(0, 3) as item}
-                  <div>
-                    <p class="font-medium text-foreground truncate">
-                      {item.title}
-                    </p>
-                    <p class="text-xs text-muted-foreground">
-                      {formatSize(item.reclaimable_size_bytes)} • {item.scope}
-                    </p>
+                  <div
+                    class="overflow-hidden rounded-2xl border border-border bg-background/70"
+                  >
+                    <div
+                      class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
+                    >
+                      {#if item.poster_url}
+                        <img
+                          src={item.poster_url}
+                          alt={item.title}
+                          class="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      {:else}
+                        <div
+                          class="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary/50 to-background text-muted-foreground"
+                        >
+                          <Images class="size-9 opacity-60" />
+                        </div>
+                      {/if}
+                      <div
+                        class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
+                      >
+                        <p
+                          class="truncate text-sm font-semibold text-foreground"
+                        >
+                          {item.title}
+                        </p>
+                        <p class="truncate text-xs text-muted-foreground">
+                          {item.scope} • {capitalizeFirstLetter(
+                            item.media_type,
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 text-xs"
+                    >
+                      <span
+                        class="rounded-full border border-border px-2 py-1 text-muted-foreground"
+                      >
+                        Recommendation
+                      </span>
+                      <span class="font-semibold text-emerald-500">
+                        {formatSize(item.reclaimable_size_bytes)}
+                      </span>
+                    </div>
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.recently_reclaimable.length === 0}
@@ -559,24 +525,55 @@
               <h2 class="text-lg font-semibold text-foreground mb-4">
                 Top Opportunities
               </h2>
-              <div class="space-y-3">
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {#each dashboard.decision_summary.top_opportunities as opportunity}
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="font-medium text-foreground truncate">
-                        {opportunity.title}
-                      </p>
-                      <p class="text-xs text-muted-foreground">
-                        {opportunity.scope} • {capitalizeFirstLetter(
-                          opportunity.media_type,
-                        )}
-                      </p>
-                    </div>
-                    <span
-                      class="shrink-0 text-sm font-semibold text-emerald-500"
+                  <div
+                    class="overflow-hidden rounded-2xl border border-border bg-background/70 shadow-sm"
+                  >
+                    <div
+                      class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
                     >
-                      {formatSize(opportunity.reclaimable_size_bytes)}
-                    </span>
+                      {#if opportunity.poster_url}
+                        <img
+                          src={opportunity.poster_url}
+                          alt={opportunity.title}
+                          class="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      {:else}
+                        <div
+                          class="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary/50 to-background text-muted-foreground"
+                        >
+                          <Images class="size-9 opacity-60" />
+                        </div>
+                      {/if}
+                      <div
+                        class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
+                      >
+                        <p
+                          class="truncate text-sm font-semibold text-foreground"
+                        >
+                          {opportunity.title}
+                        </p>
+                        <p class="truncate text-xs text-muted-foreground">
+                          {opportunity.scope} • {capitalizeFirstLetter(
+                            opportunity.media_type,
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 text-xs"
+                    >
+                      <span
+                        class="rounded-full border border-border px-2 py-1 text-muted-foreground"
+                      >
+                        Top Opportunity
+                      </span>
+                      <span class="font-semibold text-emerald-500">
+                        {formatSize(opportunity.reclaimable_size_bytes)}
+                      </span>
+                    </div>
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.top_opportunities.length === 0}
@@ -803,49 +800,12 @@
                 <h2 class="text-lg font-semibold text-foreground mb-4">
                   Services
                 </h2>
-                {#if dashboard.services.length === 0 && !protectionStatus}
+                {#if dashboard.services.length === 0}
                   <p class="text-muted-foreground">No services configured.</p>
                 {:else}
                   <div
                     class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
                   >
-                    <div
-                      class="rounded-md border border-border bg-secondary/20 p-3 min-w-0"
-                    >
-                      <div class="flex items-center justify-between gap-2">
-                        <p
-                          class="inline-flex items-center gap-1 font-medium text-foreground truncate"
-                        >
-                          MediaMasterr Protection
-                        </p>
-                        <span
-                          class={`text-xs px-2 py-0.5 rounded-full ${
-                            (protectionStatus?.connected ?? false)
-                              ? "bg-green-500/20 text-green-500"
-                              : "bg-destructive/20 text-destructive"
-                          }`}
-                        >
-                          {protectionStatus?.connection_status ??
-                            "disconnected"}
-                        </span>
-                      </div>
-                      <span
-                        class="text-xs text-muted-foreground truncate block mt-1"
-                      >
-                        Provider: {protectionProviderLabel}
-                      </span>
-                      <p class="text-xs text-muted-foreground mt-1 truncate">
-                        Last sync: {protectionServiceLastSyncLabel}
-                      </p>
-                      <p class="text-xs text-muted-foreground mt-1 truncate">
-                        Authentication: {protectionAuthLabel}
-                      </p>
-                      {#if protectionStatus?.provider_version}
-                        <p class="text-xs text-muted-foreground mt-1 truncate">
-                          Version: {protectionStatus.provider_version}
-                        </p>
-                      {/if}
-                    </div>
                     {#each dashboard.services as service (`${service.service_type}:${service.name}`)}
                       {#if service.enabled}
                         {@const ServiceIcon =

@@ -116,6 +116,7 @@ export interface OperationsRecommendation {
   target_type: string;
   target_id: string | null;
   estimated_recovery_bytes: number;
+  poster_url: string | null;
 }
 
 export interface OperationsRecommendationsResponse {
@@ -149,6 +150,13 @@ export interface CleanupPlanSummary {
 
 export interface CleanupPlanListResponse {
   plans: CleanupPlanSummary[];
+}
+
+export interface MieOperationsResponse {
+  overview: OperationsOverviewResponse;
+  recommendations: OperationsRecommendationsResponse;
+  filesystem: FilesystemConfigResponse;
+  cleanup_plans: CleanupPlanListResponse;
 }
 
 export enum MediaType {
@@ -1238,6 +1246,7 @@ export interface DashboardOpportunity {
   media_type: string;
   scope: string;
   reclaimable_size_bytes: number;
+  poster_url: string | null;
 }
 
 export interface DashboardLibraryBucket {
