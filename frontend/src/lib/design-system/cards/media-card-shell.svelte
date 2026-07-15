@@ -53,9 +53,12 @@
   } = $props();
 
   let posterLoadFailed = $state(false);
-  const resolvedPosterUrl = $derived.by(() => {
+  $effect(() => {
     posterUrl;
     posterLoadFailed = false;
+  });
+
+  const resolvedPosterUrl = $derived.by(() => {
     return resolvePosterUrl(posterUrl);
   });
 </script>
