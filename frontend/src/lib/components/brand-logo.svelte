@@ -3,15 +3,16 @@
 
   let {
     class: className = "",
-    widthClass = "w-[200px]",
+    width = 200,
   }: {
     class?: string;
-    widthClass?: string;
+    width?: number;
   } = $props();
 </script>
 
 <img
   src={BRANDING.assets.logo}
   alt={`${BRANDING.applicationName} logo`}
-  class={`${widthClass} max-w-full h-auto object-contain ${className}`.trim()}
+  style={`width:${Math.max(1, width)}px`}
+  class={`block max-w-full max-h-full h-auto object-contain ${className}`.trim()}
 />

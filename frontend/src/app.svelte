@@ -180,7 +180,7 @@
             <Menu class="w-6 h-6 text-foreground" />
           {/if}
         </button>
-        <BrandLogo widthClass="w-[150px]" />
+        <BrandLogo width={150} />
         {#if isDevBuild}
           <span
             class="absolute right-1 top-1 z-10 rounded bg-destructive px-1.5 py-0.5 text-[10px]

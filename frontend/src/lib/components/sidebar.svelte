@@ -244,7 +244,7 @@
       onclick={onNavigate}
       class="inline-flex items-center rounded-lg p-1 -m-1 hover:opacity-90"
     >
-      <BrandLogo widthClass="w-[200px]" />
+      <BrandLogo width={200} class="max-h-[72px]" />
     </a>
     <!-- theme toggle -->
     <ThemeToggle class="absolute top-1 right-1" />

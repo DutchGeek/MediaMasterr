@@ -75,7 +75,7 @@
 
 <div class="space-y-6">
   <div class="flex justify-center">
-    <BrandLogo widthClass="w-[320px] sm:w-[360px]" />
+    <BrandLogo width={320} class="sm:w-[360px]" />
   </div>
 
   <div>

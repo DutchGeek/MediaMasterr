@@ -400,8 +400,8 @@
             <BrandLogo
               class="transition-transform duration-300 {loginHovered
                 ? 'scale-[1.02]'
-                : 'scale-100'}"
-              widthClass="w-[320px] sm:w-[360px] md:w-[400px]"
+                : 'scale-100'} sm:w-[360px] md:w-[400px]"
+              width={320}
             />
           </div>
         </div>

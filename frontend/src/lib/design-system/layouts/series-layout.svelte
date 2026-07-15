@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ArtworkImage from "$lib/design-system/media/artwork-image.svelte";
   import SeasonCard from "$lib/design-system/cards/season-card.svelte";
   import type {
     SeasonObject,
@@ -17,24 +18,12 @@
 
 <section class="space-y-4 rounded-2xl border border-border/70 bg-card p-4">
   <div class="grid gap-4 md:grid-cols-[220px_1fr]">
-    <div
-      class="overflow-hidden rounded-2xl border border-border/70 bg-background/70 aspect-[2/3]"
-    >
-      {#if series.posterUrl}
-        <img
-          src={series.posterUrl}
-          alt={series.title}
-          class="h-full w-full object-cover"
-          loading="lazy"
-        />
-      {:else}
-        <div
-          class="flex h-full w-full items-center justify-center text-xs text-muted-foreground"
-        >
-          No poster
-        </div>
-      {/if}
-    </div>
+    <ArtworkImage
+      src={series.posterUrl}
+      alt={series.title}
+      class="rounded-2xl border border-border/70 bg-background/70 aspect-[2/3]"
+      imageClass="h-full w-full object-cover"
+    />
 
     <div class="space-y-2">
       <h2 class="text-xl font-semibold text-foreground">{series.title}</h2>

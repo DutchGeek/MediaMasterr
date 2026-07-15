@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { get_api, post_api } from "$lib/api";
+  import { fetchAPI, get_api, post_api } from "$lib/api";
   import { toast } from "svelte-sonner";
   import { formatDistanceToNow } from "$lib/utils/date";
 
@@ -29,6 +29,38 @@
     is_main?: boolean | null;
   };
 
+  type ProtectionStatus = {
+    connected: boolean;
+    authenticated: boolean;
+    provider: string;
+    auth_method: string;
+    connection_status: string;
+    authentication_status: string;
+    base_url: string | null;
+    provider_version: string | null;
+    last_login: string | null;
+    last_sync: string | null;
+    capabilities: string[];
+    message: string | null;
+  };
+
+  type ProviderDiagnosticStatus = "healthy" | "degraded" | "down";
+
+  type ProviderDiagnostic = {
+    key: string;
+    name: string;
+    endpoint: string | null;
+    connected: boolean;
+    version: string;
+    responseTimeMs: number | null;
+    lastSuccessfulSync: string | null;
+    lastAttempt: string | null;
+    status: ProviderDiagnosticStatus;
+    reason: string | null;
+    lastError: string | null;
+    httpStatus: number | null;
+  };
+
   let loading = $state(true);
   let error = $state("");
 
@@ -41,17 +73,7 @@
   let programName = $state("MediaMasterr");
   let startedAt = $state(Date.now());
 
-  let providers = $state<
-    Array<{
-      name: string;
-      connected: boolean;
-      version: string;
-      lastSync: string | null;
-      responseTime: string;
-      lastSuccessfulSync: string | null;
-      status: "healthy" | "degraded" | "down";
-    }>
-  >([]);
+  let providers = $state<ProviderDiagnostic[]>([]);
 
   let tasks = $state<TaskItem[]>([]);
   let logs = $state<string[]>([]);
@@ -76,6 +98,18 @@
     return "Down";
   };
 
+  const formatTimestamp = (value: string | null): string => {
+    if (!value) return "Unknown";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString();
+  };
+
+  const formatResponseTime = (value: number | null): string => {
+    if (value == null) return "Unknown";
+    return `${value.toFixed(0)} ms`;
+  };
+
   const runMaintenanceAction = async (taskId: string, label: string) => {
     try {
       await post_api(`/api/tasks/tasks/${taskId}/run`, {});
@@ -86,20 +120,153 @@
     }
   };
 
+  const toProviderName = (key: string): string => {
+    if (key === "qbittorrent") return "qBittorrent";
+    if (key === "protection") return "Protection";
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  };
+
+  const extractErrorMessage = (payload: any, fallback: string): string => {
+    const detail = payload?.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    const message = payload?.message;
+    if (typeof message === "string" && message.trim()) return message;
+    return fallback;
+  };
+
+  const probeProtectionDiagnostics = async (
+    endpoint: string | null,
+  ): Promise<ProviderDiagnostic> => {
+    const started = performance.now();
+    const attemptedAt = new Date().toISOString();
+
+    try {
+      const response = await fetchAPI("/api/protection/status");
+      const responseTimeMs = performance.now() - started;
+      const payload = (await response
+        .json()
+        .catch(() => null)) as ProtectionStatus | null;
+
+      if (!response.ok || !payload) {
+        const reason = extractErrorMessage(
+          payload,
+          `Request failed with status ${response.status}`,
+        );
+        return {
+          key: "protection",
+          name: "Protection",
+          endpoint,
+          connected: false,
+          version: "Unknown",
+          responseTimeMs,
+          lastSuccessfulSync: null,
+          lastAttempt: attemptedAt,
+          status: response.status >= 500 ? "down" : "degraded",
+          reason,
+          lastError: reason,
+          httpStatus: response.status,
+        };
+      }
+
+      const connected = !!payload.connected;
+      const reason = connected
+        ? payload.message || "Connected"
+        : payload.message || payload.connection_status || "Provider unavailable";
+
+      return {
+        key: "protection",
+        name: "Protection",
+        endpoint: payload.base_url || endpoint,
+        connected,
+        version: payload.provider_version || "Unknown",
+        responseTimeMs,
+        lastSuccessfulSync: payload.last_sync,
+        lastAttempt: attemptedAt,
+        status: connected ? "healthy" : "degraded",
+        reason,
+        lastError: connected ? null : reason,
+        httpStatus: response.status,
+      };
+    } catch (err: any) {
+      const responseTimeMs = performance.now() - started;
+      const reason = err?.message ?? "Protection status probe failed";
+      return {
+        key: "protection",
+        name: "Protection",
+        endpoint,
+        connected: false,
+        version: "Unknown",
+        responseTimeMs,
+        lastSuccessfulSync: null,
+        lastAttempt: attemptedAt,
+        status: "down",
+        reason,
+        lastError: reason,
+        httpStatus: null,
+      };
+    }
+  };
+
+  const buildServiceDiagnostics = (
+    servicesPayload: Record<
+      string,
+      ServiceInstance | { instances?: ServiceInstance[] }
+    >,
+  ): ProviderDiagnostic[] => {
+    const knownProviders = [
+      "sonarr",
+      "radarr",
+      "qbittorrent",
+      "plex",
+      "tautulli",
+      "protection",
+    ];
+
+    return knownProviders.map((providerKey) => {
+      const payload = servicesPayload[providerKey];
+      let instance: ServiceInstance | null = null;
+      if (
+        payload &&
+        "instances" in payload &&
+        Array.isArray(payload.instances)
+      ) {
+        instance = payload.instances[0] ?? null;
+      } else if (payload && "enabled" in payload) {
+        instance = payload as ServiceInstance;
+      }
+
+      const connected = !!instance?.enabled;
+      return {
+        key: providerKey,
+        name: toProviderName(providerKey),
+        endpoint: instance?.base_url || null,
+        connected,
+        version: "Unknown",
+        responseTimeMs: null,
+        lastSuccessfulSync: null,
+        lastAttempt: null,
+        status: connected ? "healthy" : "degraded",
+        reason: connected
+          ? "Connected"
+          : "Service disabled or not configured",
+        lastError: connected ? null : "Service disabled or not configured",
+        httpStatus: null,
+      };
+    });
+  };
+
   const loadAll = async () => {
     loading = true;
     error = "";
     try {
-      const [health, version, servicesPayload, taskPayload] = await Promise.all(
-        [
-          get_api<HealthResponse>("/api/info/health"),
-          get_api<VersionResponse>("/api/info/version"),
-          get_api<
-            Record<string, ServiceInstance | { instances?: ServiceInstance[] }>
-          >("/api/settings/services"),
-          get_api<TasksResponse>("/api/tasks/tasks"),
-        ],
-      );
+      const [health, version, servicesPayload, taskPayload] = await Promise.all([
+        get_api<HealthResponse>("/api/info/health"),
+        get_api<VersionResponse>("/api/info/version"),
+        get_api<
+          Record<string, ServiceInstance | { instances?: ServiceInstance[] }>
+        >("/api/settings/services"),
+        get_api<TasksResponse>("/api/tasks/tasks"),
+      ]);
 
       backendStatus = health.status === "ok" ? "healthy" : "degraded";
       databaseStatus = "healthy";
@@ -109,44 +276,15 @@
       apiVersion = version.version;
       programName = version.program;
 
-      const knownProviders = [
-        "sonarr",
-        "radarr",
-        "qbittorrent",
-        "plex",
-        "tautulli",
-        "protection",
-      ];
+      const providerRows = buildServiceDiagnostics(servicesPayload);
+      const protectionSeed = providerRows.find((row) => row.key === "protection");
+      const protectionDiagnostics = await probeProtectionDiagnostics(
+        protectionSeed?.endpoint ?? null,
+      );
 
-      providers = knownProviders.map((providerKey) => {
-        const payload = servicesPayload[providerKey];
-        let instance: ServiceInstance | null = null;
-        if (
-          payload &&
-          "instances" in payload &&
-          Array.isArray(payload.instances)
-        ) {
-          instance = payload.instances[0] ?? null;
-        } else if (payload && "enabled" in payload) {
-          instance = payload as ServiceInstance;
-        }
-
-        const connected = !!instance?.enabled;
-        return {
-          name:
-            providerKey === "qbittorrent"
-              ? "qBittorrent"
-              : providerKey === "protection"
-                ? "Protection"
-                : providerKey.charAt(0).toUpperCase() + providerKey.slice(1),
-          connected,
-          version: connected ? "Configured" : "Unknown",
-          lastSync: null,
-          responseTime: connected ? "Online" : "N/A",
-          lastSuccessfulSync: null,
-          status: connected ? "healthy" : "degraded",
-        };
-      });
+      providers = providerRows.map((row) =>
+        row.key === "protection" ? protectionDiagnostics : row,
+      );
 
       tasks = taskPayload.tasks;
 
@@ -235,7 +373,7 @@
 
       <section class="bg-card rounded-lg border border-border p-5">
         <h2 class="text-lg font-semibold text-foreground mb-4">
-          Provider Health
+          Provider Diagnostics
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {#each providers as provider}
@@ -252,6 +390,7 @@
                   {statusLabel(provider.status)}
                 </span>
               </div>
+
               <dl class="mt-3 space-y-1 text-xs">
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Connected</dt>
@@ -264,23 +403,47 @@
                   <dd class="text-foreground">{provider.version}</dd>
                 </div>
                 <div class="flex justify-between gap-2">
-                  <dt class="text-muted-foreground">Last Sync</dt>
-                  <dd class="text-foreground">
-                    {provider.lastSync
-                      ? formatDistanceToNow(provider.lastSync)
-                      : "Unknown"}
-                  </dd>
-                </div>
-                <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Response Time</dt>
-                  <dd class="text-foreground">{provider.responseTime}</dd>
+                  <dd class="text-foreground">
+                    {formatResponseTime(provider.responseTimeMs)}
+                  </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Last Successful Sync</dt>
                   <dd class="text-foreground">
-                    {provider.lastSuccessfulSync
-                      ? formatDistanceToNow(provider.lastSuccessfulSync)
-                      : "Unknown"}
+                    {formatTimestamp(provider.lastSuccessfulSync)}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Last Attempt</dt>
+                  <dd class="text-foreground">
+                    {formatTimestamp(provider.lastAttempt)}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Status</dt>
+                  <dd class="text-foreground">{statusLabel(provider.status)}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Reason</dt>
+                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                    {provider.reason ?? "Unknown"}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Endpoint</dt>
+                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                    {provider.endpoint ?? "Unknown"}
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">HTTP</dt>
+                  <dd class="text-foreground">{provider.httpStatus ?? "n/a"}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">Last Error</dt>
+                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                    {provider.lastError ?? "None"}
                   </dd>
                 </div>
               </dl>

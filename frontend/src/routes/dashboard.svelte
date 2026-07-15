@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { get_api } from "$lib/api";
   import { BRANDING } from "$lib/branding";
-  import { resolvePosterUrl } from "$lib/artwork";
+  import { ArtworkImage } from "$lib/design-system";
   import { VERSION } from "$lib/version";
   import ErrorBox from "$lib/components/error-box.svelte";
   import Notice from "$lib/components/notice.svelte";
@@ -466,13 +466,13 @@
                     class="overflow-hidden rounded-2xl border border-border bg-background/70"
                   >
                     <div
-                      class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
+                      class="relative aspect-[2/3] w-full bg-secondary/20"
                     >
-                      <img
-                        src={resolvePosterUrl(item.poster_url)}
+                      <ArtworkImage
+                        src={item.poster_url}
                         alt={item.title}
-                        class="h-full w-full object-cover"
-                        loading="lazy"
+                        class="h-full w-full"
+                        imageClass="h-full w-full object-cover"
                       />
                       <div
                         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
@@ -523,13 +523,13 @@
                     class="overflow-hidden rounded-2xl border border-border bg-background/70 shadow-sm"
                   >
                     <div
-                      class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
+                      class="relative aspect-[2/3] w-full bg-secondary/20"
                     >
-                      <img
-                        src={resolvePosterUrl(opportunity.poster_url)}
+                      <ArtworkImage
+                        src={opportunity.poster_url}
                         alt={opportunity.title}
-                        class="h-full w-full object-cover"
-                        loading="lazy"
+                        class="h-full w-full"
+                        imageClass="h-full w-full object-cover"
                       />
                       <div
                         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"

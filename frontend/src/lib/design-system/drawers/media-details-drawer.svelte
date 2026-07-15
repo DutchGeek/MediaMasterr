@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import EpisodeCard from "$lib/design-system/cards/episode-card.svelte";
+  import ArtworkImage from "$lib/design-system/media/artwork-image.svelte";
   import type {
     DetailsDrawerSection,
     MediaObject,
@@ -35,20 +36,12 @@
           <div
             class="overflow-hidden rounded-xl border border-border/70 bg-background/70 aspect-[2/3]"
           >
-            {#if item.posterUrl}
-              <img
-                src={item.posterUrl}
-                alt={item.title}
-                class="h-full w-full object-cover"
-                loading="lazy"
-              />
-            {:else}
-              <div
-                class="flex h-full w-full items-center justify-center text-sm text-muted-foreground"
-              >
-                No artwork
-              </div>
-            {/if}
+            <ArtworkImage
+              src={item.posterUrl}
+              alt={item.title}
+              class="h-full w-full"
+              imageClass="h-full w-full object-cover"
+            />
           </div>
 
           {#if item.kind === "season" && item.episodes && item.episodes.length > 0}

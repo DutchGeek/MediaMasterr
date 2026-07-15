@@ -8,10 +8,9 @@ def test_media_card_shell_does_not_mutate_state_inside_derived() -> None:
         "frontend/src/lib/design-system/cards/media-card-shell.svelte"
     ).read_text(encoding="utf-8")
 
-    # Regression guard: mutating `$state` in `$derived` triggers Svelte
-    # state_unsafe_mutation and keeps Operations/qBittorrent pages stuck on loading.
-    assert "const resolvedPosterUrl = $derived.by(() => {" in source
-    derived_block = source.split("const resolvedPosterUrl = $derived.by(() => {", 1)[1]
-    derived_block = derived_block.split("});", 1)[0]
-    assert "posterLoadFailed =" not in derived_block
-    assert "$effect(() => {" in source
+    # Regression guard: card shell delegates artwork behavior to the shared
+    # component instead of mutating state while deriving image URLs.
+    assert 'import ArtworkImage from "$lib/design-system/media/artwork-image.svelte"' in source
+    assert "<ArtworkImage" in source
+    assert "posterLoadFailed" not in source
+    assert "$derived.by" not in source
