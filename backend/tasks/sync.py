@@ -1671,6 +1671,16 @@ async def _update_movie_tmdb_metadata(
         movie.origin_country = movie_metadata.get("origin_country")
         movie.poster_url = movie_metadata.get("poster_path")
         movie.backdrop_url = movie_metadata.get("backdrop_path")
+        if not movie.poster_url:
+            LOG.debug(
+                "TMDB metadata missing movie poster_path "
+                f"for tmdb_id={tmdb_id}, title={movie.title!r}"
+            )
+        if not movie.backdrop_url:
+            LOG.debug(
+                "TMDB metadata missing movie backdrop_path "
+                f"for tmdb_id={tmdb_id}, title={movie.title!r}"
+            )
         movie.overview = movie_metadata.get("overview")
         movie.genres = movie_metadata.get("genres")
         movie.popularity = movie_metadata.get("popularity")
@@ -3178,6 +3188,16 @@ async def _update_series_tmdb_metadata(
         series.origin_country = series_metadata.get("origin_country")
         series.poster_url = series_metadata.get("poster_path")
         series.backdrop_url = series_metadata.get("backdrop_path")
+        if not series.poster_url:
+            LOG.debug(
+                "TMDB metadata missing series poster_path "
+                f"for tmdb_id={tmdb_id}, title={series.title!r}"
+            )
+        if not series.backdrop_url:
+            LOG.debug(
+                "TMDB metadata missing series backdrop_path "
+                f"for tmdb_id={tmdb_id}, title={series.title!r}"
+            )
         series.overview = series_metadata.get("overview")
         series.genres = series_metadata.get("genres")
         series.popularity = series_metadata.get("popularity")

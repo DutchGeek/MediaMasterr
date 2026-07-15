@@ -13,7 +13,8 @@ from backend.api.routes.settings import services
 from backend.api.routes.settings.services import set_service_settings
 from backend.core.service_manager import service_manager
 from backend.database import Base
-from backend.database.models import User
+from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
+from backend.database.models import Movie, MovieVersion, User
 from backend.enums import Service, UserRole
 from backend.models.settings import ServiceConfigUpdate
 from backend.services.qbittorrent import QBittorrentClient
@@ -123,12 +124,23 @@ class _FakeSession:
 
 @pytest.mark.anyio
 async def test_qbittorrent_overview_is_read_only_summary() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
     previous = service_manager._qbittorrent
     service_manager._qbittorrent = _FakeQBClient()  # type: ignore[assignment]
     try:
-        payload = await get_qbittorrent_overview(_admin_user())
+        async with session_maker() as db:
+            payload = await get_qbittorrent_overview(_admin_user(), db=db)
     finally:
         service_manager._qbittorrent = previous
+        await engine.dispose()
 
     assert payload.app_version == "4.6.7"
     assert payload.webapi_version == "2.9.3"
@@ -141,19 +153,72 @@ async def test_qbittorrent_overview_is_read_only_summary() -> None:
     assert payload.metrics.download_speed == 1234
     assert payload.metrics.upload_speed == 456
     assert len(payload.torrents) == 4
+    assert all(row.poster_url == CENTRAL_PLACEHOLDER_POSTER_URL for row in payload.torrents)
 
 
 @pytest.mark.anyio
 async def test_qbittorrent_overview_requires_runtime_client() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
     previous = service_manager._qbittorrent
     service_manager._qbittorrent = None
     try:
         with pytest.raises(HTTPException) as exc:
-            await get_qbittorrent_overview(_admin_user())
+            async with session_maker() as db:
+                await get_qbittorrent_overview(_admin_user(), db=db)
     finally:
         service_manager._qbittorrent = previous
+        await engine.dispose()
 
     assert exc.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_qbittorrent_overview_uses_correlated_media_poster() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    previous = service_manager._qbittorrent
+    service_manager._qbittorrent = _FakeQBClient()  # type: ignore[assignment]
+    try:
+        async with session_maker() as db:
+            movie = Movie(title="Ubuntu ISO", tmdb_id=99123, poster_url="/u.jpg")
+            db.add(movie)
+            await db.flush()
+
+            db.add(
+                MovieVersion(
+                    movie_id=movie.id,
+                    service=Service.PLEX,
+                    service_item_id="mv-1",
+                    service_media_id="media-1",
+                    library_id="lib-1",
+                    library_name="Movies",
+                    path="/downloads/ubuntu-iso/movie.mkv",
+                )
+            )
+            await db.commit()
+
+            payload = await get_qbittorrent_overview(_admin_user(), db=db)
+    finally:
+        service_manager._qbittorrent = previous
+        await engine.dispose()
+
+    ubuntu_row = next(row for row in payload.torrents if row.name == "Ubuntu ISO")
+    assert ubuntu_row.poster_url == "https://image.tmdb.org/t/p/w342/u.jpg"
 
 
 @pytest.mark.anyio

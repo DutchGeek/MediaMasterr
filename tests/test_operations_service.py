@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
 from backend.database import Base
 from backend.database.models import CleanupPlan, Movie, ReclaimCandidate
 from backend.enums import MediaType
@@ -74,3 +75,58 @@ async def test_operations_cleanup_plan_listing_returns_saved_plan() -> None:
     assert len(response.plans) == 1
     assert response.plans[0].name == "Weekly Cleanup"
     assert response.plans[0].operation_count == 27
+
+
+@pytest.mark.anyio
+async def test_operations_recommendations_resolve_posters() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie_with_poster = Movie(
+            title="With Poster",
+            tmdb_id=3001,
+            poster_url="/poster-a.jpg",
+        )
+        movie_without_poster = Movie(
+            title="Without Poster",
+            tmdb_id=3002,
+            poster_url=None,
+        )
+        db.add_all([movie_with_poster, movie_without_poster])
+        await db.flush()
+
+        db.add_all(
+            [
+                ReclaimCandidate(
+                    media_type=MediaType.MOVIE,
+                    matched_rule_ids=[1],
+                    matched_criteria={"rule": "poster"},
+                    movie_id=movie_with_poster.id,
+                    reason="Poster available",
+                    estimated_space_bytes=1,
+                ),
+                ReclaimCandidate(
+                    media_type=MediaType.MOVIE,
+                    matched_rule_ids=[2],
+                    matched_criteria={"rule": "placeholder"},
+                    movie_id=movie_without_poster.id,
+                    reason="Poster missing",
+                    estimated_space_bytes=2,
+                ),
+            ]
+        )
+        await db.commit()
+
+        response = await OperationsService(db).recommendations()
+
+    await engine.dispose()
+
+    posters = {item.title: item.poster_url for item in response.items}
+    assert posters["Review reclaim candidate #1"] == "https://image.tmdb.org/t/p/w342/poster-a.jpg"
+    assert posters["Review reclaim candidate #2"] == CENTRAL_PLACEHOLDER_POSTER_URL

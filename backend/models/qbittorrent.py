@@ -26,6 +26,8 @@ class QBittorrentTorrentItem(BaseModel):
     upload_speed: int
     tracker: str | None
     save_path: str | None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
 
 
 class QBittorrentOverviewResponse(BaseModel):

@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { get_api } from "$lib/api";
   import { BRANDING } from "$lib/branding";
+  import { resolvePosterUrl } from "$lib/artwork";
   import { VERSION } from "$lib/version";
   import ErrorBox from "$lib/components/error-box.svelte";
   import Notice from "$lib/components/notice.svelte";
@@ -12,7 +13,6 @@
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import Minus from "@lucide/svelte/icons/minus";
-  import Images from "@lucide/svelte/icons/images";
   import type {
     DashboardActivityItem,
     DashboardResponse,
@@ -468,20 +468,12 @@
                     <div
                       class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
                     >
-                      {#if item.poster_url}
-                        <img
-                          src={item.poster_url}
-                          alt={item.title}
-                          class="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      {:else}
-                        <div
-                          class="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary/50 to-background text-muted-foreground"
-                        >
-                          <Images class="size-9 opacity-60" />
-                        </div>
-                      {/if}
+                      <img
+                        src={resolvePosterUrl(item.poster_url)}
+                        alt={item.title}
+                        class="h-full w-full object-cover"
+                        loading="lazy"
+                      />
                       <div
                         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
                       >
@@ -533,20 +525,12 @@
                     <div
                       class="relative aspect-[2/3] w-full overflow-hidden bg-secondary/20"
                     >
-                      {#if opportunity.poster_url}
-                        <img
-                          src={opportunity.poster_url}
-                          alt={opportunity.title}
-                          class="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      {:else}
-                        <div
-                          class="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary/50 to-background text-muted-foreground"
-                        >
-                          <Images class="size-9 opacity-60" />
-                        </div>
-                      {/if}
+                      <img
+                        src={resolvePosterUrl(opportunity.poster_url)}
+                        alt={opportunity.title}
+                        class="h-full w-full object-cover"
+                        loading="lazy"
+                      />
                       <div
                         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
                       >

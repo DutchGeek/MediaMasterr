@@ -3,17 +3,22 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.artwork import resolve_backdrop_url, resolve_poster_url
 from backend.core.auth import require_admin
 from backend.core.service_manager import service_manager
+from backend.database import get_db
 from backend.database.models import User
 from backend.models.qbittorrent import (
     QBittorrentMetrics,
     QBittorrentOverviewResponse,
     QBittorrentTorrentItem,
 )
+from backend.services.correlation import MediaCorrelationService
 
 router = APIRouter(prefix="/api/qbittorrent", tags=["qbittorrent"])
+_correlation_service = MediaCorrelationService()
 
 
 def _state_is_active_download(state: str, download_speed: int) -> bool:
@@ -42,6 +47,7 @@ def _state_is_seeding(state: str) -> bool:
 @router.get("/overview", response_model=QBittorrentOverviewResponse)
 async def get_qbittorrent_overview(
     _current_user: Annotated[User, Depends(require_admin)],
+    db: AsyncSession = Depends(get_db),
 ) -> QBittorrentOverviewResponse:
     client = service_manager.qbittorrent
     if client is None:
@@ -63,11 +69,17 @@ async def get_qbittorrent_overview(
     completed = 0
     stalled = 0
 
-    for item in torrents_raw:
+    for index, item in enumerate(torrents_raw):
         state = str(item.get("state") or "")
         progress = float(item.get("progress") or 0)
         download_speed = int(item.get("dlspeed") or 0)
         upload_speed = int(item.get("upspeed") or 0)
+
+        torrent_summary = _correlation_service.torrent_summary_from_raw(item, index=index)
+        correlated_artwork = await _correlation_service.resolve_torrent_artwork(
+            db,
+            torrent_summary,
+        )
 
         if _state_is_active_download(state, download_speed):
             active_downloads += 1
@@ -105,6 +117,18 @@ async def get_qbittorrent_overview(
                     if isinstance(item.get("save_path"), str)
                     else None
                 ),
+                poster_url=resolve_poster_url(
+                    correlated_artwork.poster_url,
+                    context="qbittorrent.overview",
+                    media_type=(
+                        correlated_artwork.media_type.value
+                        if correlated_artwork.media_type is not None
+                        else None
+                    ),
+                    media_id=correlated_artwork.media_id,
+                    fallback_reason=correlated_artwork.reason,
+                ),
+                backdrop_url=resolve_backdrop_url(correlated_artwork.backdrop_url),
             )
         )
 

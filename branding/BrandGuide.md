@@ -17,6 +17,7 @@ MediaMasterr Branding Guide
 - android-chrome-192x192.png and android-chrome-512x512.png
 - site.webmanifest
 - browserconfig.xml
+- media-placeholder.svg
 
 4. Update procedure
 1. Update source files in branding/source if design edits are needed.

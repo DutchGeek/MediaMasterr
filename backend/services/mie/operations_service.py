@@ -7,6 +7,7 @@ from sqlalchemy import Integer, func, select
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.artwork import resolve_poster_url
 from backend.database.models import (
     CleanupPlan,
     CleanupPlanItem,
@@ -236,8 +237,11 @@ class OperationsService:
                     target_type=row.CleanupPlanItem.target_type,
                     target_id=row.CleanupPlanItem.target_id,
                     estimated_recovery_bytes=row.CleanupPlanItem.estimated_recovery_bytes,
-                    poster_url=
+                    poster_url=resolve_poster_url(
                         row.movie_poster_url or row.series_poster_url,
+                        context="operations.recommendations.cleanup_plan",
+                        media_type="movie" if row.movie_poster_url else "series",
+                    ),
                 )
                 for row in rows
             ]
@@ -267,7 +271,20 @@ class OperationsService:
                 target_type="reclaim_candidate",
                 target_id=str(row.ReclaimCandidate.id),
                 estimated_recovery_bytes=row.ReclaimCandidate.estimated_space_bytes or 0,
-                poster_url=row.movie_poster_url or row.series_poster_url,
+                poster_url=resolve_poster_url(
+                    row.movie_poster_url or row.series_poster_url,
+                    context="operations.recommendations.reclaim_candidate",
+                    media_type=(
+                        "movie"
+                        if row.ReclaimCandidate.movie_id is not None
+                        else "series"
+                    ),
+                    media_id=(
+                        row.ReclaimCandidate.movie_id
+                        if row.ReclaimCandidate.movie_id is not None
+                        else row.ReclaimCandidate.series_id
+                    ),
+                ),
             )
             for row in fallback_rows.all()
         ]

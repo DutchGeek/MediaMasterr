@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Media Placeholder</title>
+  <desc id="desc">Fallback artwork used when no poster can be resolved</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0b1220" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#22d3ee" />
+    </linearGradient>
+  </defs>
+  <rect width="720" height="1080" fill="url(#bg)" />
+  <rect x="60" y="60" width="600" height="960" rx="30" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="4" />
+  <g transform="translate(360 430)">
+    <circle r="150" fill="rgba(255,255,255,0.08)" />
+    <path d="M-120 85l78-98 64 74 54-65 88 89" fill="none" stroke="url(#accent)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="53" cy="-44" r="34" fill="#e2e8f0" opacity="0.92" />
+  </g>
+  <text x="360" y="700" text-anchor="middle" fill="#e2e8f0" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700">MediaMasterr</text>
+  <text x="360" y="760" text-anchor="middle" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="34">Artwork unavailable</text>
+</svg>

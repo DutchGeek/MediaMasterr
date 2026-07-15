@@ -13,5 +13,6 @@ export const BRANDING = {
     androidChrome512: "/branding/android-chrome-512x512.png",
     manifest: "/branding/site.webmanifest",
     openGraphImage: "/branding/logo.png",
+    mediaPlaceholder: "/branding/media-placeholder.svg",
   },
 } as const;

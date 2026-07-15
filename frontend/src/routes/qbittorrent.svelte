@@ -40,6 +40,8 @@
     upload_speed: number;
     tracker: string | null;
     save_path: string | null;
+    poster_url: string | null;
+    backdrop_url: string | null;
   }
 
   interface QBittorrentOverviewResponse {
@@ -174,6 +176,7 @@
           { id: "details", label: "Details" },
           { id: "tracker", label: "Tracker" },
         ],
+        posterUrl: torrent.poster_url,
       }));
   });
 

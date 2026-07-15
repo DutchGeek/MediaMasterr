@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
+from backend.core.artwork import resolve_poster_url
 from backend.core.auth import require_page_access
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database import get_db
@@ -312,11 +313,16 @@ async def build_dashboard_response(
         )
 
     def _poster_url(row: object) -> str | None:
-        return str(
+        return resolve_poster_url(
             getattr(row, "movie_poster_url", None)
-            or getattr(row, "series_poster_url", None)
-            or ""
-        ) or None
+            or getattr(row, "series_poster_url", None),
+            context="dashboard.opportunities",
+            media_type=(
+                "movie"
+                if getattr(row, "movie_poster_url", None)
+                else "series"
+            ),
+        )
 
     ready_today_movies = 0
     ready_today_seasons = 0

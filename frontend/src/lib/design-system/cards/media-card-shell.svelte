@@ -1,5 +1,7 @@
 <script lang="ts">
   import Images from "@lucide/svelte/icons/images";
+  import { BRANDING } from "$lib/branding";
+  import { resolvePosterUrl } from "$lib/artwork";
   import { cn } from "$lib/utils.js";
   import LifecycleBadge from "$lib/design-system/badges/lifecycle-badge.svelte";
   import RecommendationRibbon from "$lib/design-system/ribbons/recommendation-ribbon.svelte";
@@ -49,6 +51,13 @@
     onSelect?: () => void;
     class?: string;
   } = $props();
+
+  let posterLoadFailed = $state(false);
+  const resolvedPosterUrl = $derived.by(() => {
+    posterUrl;
+    posterLoadFailed = false;
+    return resolvePosterUrl(posterUrl);
+  });
 </script>
 
 <button
@@ -74,15 +83,18 @@
         class="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-secondary/40 to-background"
         style={`width:${Math.round(posterSize * 0.58)}px;height:${posterSize}px`}
       >
-        {#if posterUrl}
-          <img
-            src={posterUrl}
-            alt={title}
-            class="h-full w-full object-cover"
-            loading="lazy"
-          />
-        {:else}
-          <div class="absolute inset-0 flex items-center justify-center">
+        <img
+          src={posterLoadFailed ? BRANDING.assets.mediaPlaceholder : resolvedPosterUrl}
+          alt={title}
+          class="h-full w-full object-cover"
+          loading="lazy"
+          onerror={() => {
+            posterLoadFailed = true;
+          }}
+        />
+
+        {#if posterLoadFailed}
+          <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
             <Images class="size-10 text-muted-foreground/60" />
           </div>
         {/if}

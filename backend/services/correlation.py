@@ -19,7 +19,7 @@ from backend.database.models import (
     Series,
     SeriesServiceRef,
 )
-from backend.enums import ProtectionRequestStatus, Service
+from backend.enums import MediaType, ProtectionRequestStatus, Service
 from backend.models.correlation import (
     CorrelationDetailResponse,
     CorrelationNode,
@@ -42,6 +42,15 @@ class _EpisodeMatch:
     series: Series
     season: Season
     episode: Episode
+
+
+@dataclass
+class CorrelatedArtwork:
+    poster_url: str | None
+    backdrop_url: str | None
+    media_type: MediaType | None = None
+    media_id: int | None = None
+    reason: str | None = None
 
 
 class MediaCorrelationService:
@@ -568,3 +577,73 @@ class MediaCorrelationService:
         ]
 
         return CorrelationDetailResponse(torrent=torrent, fields=fields, nodes=nodes)
+
+    async def resolve_torrent_artwork(
+        self,
+        db: AsyncSession,
+        torrent: CorrelationTorrentSummary,
+    ) -> CorrelatedArtwork:
+        """Resolve artwork for a torrent using the same matching pipeline as correlation."""
+        save_path = (
+            normalize_fpath(
+                torrent.save_path or "", strip_ending_slash=True, lower=True
+            )
+            or None
+        )
+        token = self._name_token(torrent.name)
+        category = (torrent.category or "").lower() or None
+
+        best_movie = await self._find_best_movie_match(
+            db,
+            save_path=save_path,
+            token=token,
+            category=category,
+        )
+        best_episode = await self._find_best_episode_match(
+            db,
+            save_path=save_path,
+            token=token,
+            category=category,
+        )
+
+        selected_mode: str | None = None
+        if best_movie and best_episode:
+            selected_mode = (
+                "movie" if best_movie.score >= best_episode.score else "episode"
+            )
+        elif best_movie:
+            selected_mode = "movie"
+        elif best_episode:
+            selected_mode = "episode"
+
+        if selected_mode == "movie" and best_movie:
+            return CorrelatedArtwork(
+                poster_url=best_movie.movie.poster_url,
+                backdrop_url=best_movie.movie.backdrop_url,
+                media_type=MediaType.MOVIE,
+                media_id=best_movie.movie.id,
+                reason=(
+                    None
+                    if best_movie.movie.poster_url
+                    else "movie_match_missing_poster"
+                ),
+            )
+
+        if selected_mode == "episode" and best_episode:
+            return CorrelatedArtwork(
+                poster_url=best_episode.series.poster_url,
+                backdrop_url=best_episode.series.backdrop_url,
+                media_type=MediaType.SERIES,
+                media_id=best_episode.series.id,
+                reason=(
+                    None
+                    if best_episode.series.poster_url
+                    else "series_match_missing_poster"
+                ),
+            )
+
+        return CorrelatedArtwork(
+            poster_url=None,
+            backdrop_url=None,
+            reason="no_matching_media_asset",
+        )
