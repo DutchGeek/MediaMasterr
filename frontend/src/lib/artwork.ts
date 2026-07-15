@@ -7,12 +7,16 @@ export function resolvePosterUrl(posterUrl: string | null | undefined): string {
   if (!raw) return BRANDING.assets.mediaPlaceholder;
 
   const lower = raw.toLowerCase();
-  if (
-    lower.startsWith("http://") ||
-    lower.startsWith("https://") ||
-    raw.startsWith("/branding/")
-  ) {
+  if (lower.startsWith("http://") || lower.startsWith("https://")) {
     return raw;
+  }
+
+  if (raw.startsWith("/branding/") || raw.startsWith("branding/")) {
+    const assetName = raw.replace(/^\/+/, "");
+    const baseUrl = (
+      ((import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL || "/")
+    ).replace(/\/?$/, "/");
+    return `${baseUrl}${assetName}`;
   }
 
   const normalized = raw.startsWith("/") ? raw : `/${raw}`;
