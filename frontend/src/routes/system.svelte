@@ -138,7 +138,7 @@
               ? "qBittorrent"
               : providerKey === "protection"
                 ? "Protection"
-              : providerKey.charAt(0).toUpperCase() + providerKey.slice(1),
+                : providerKey.charAt(0).toUpperCase() + providerKey.slice(1),
           connected,
           version: connected ? "Configured" : "Unknown",
           lastSync: null,

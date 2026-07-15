@@ -117,7 +117,7 @@
 
   const handleAuthMessage = (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return;
-      if (event.data?.type !== "mediamasterr-auth-complete") return;
+    if (event.data?.type !== "mediamasterr-auth-complete") return;
     void finishRedirectAuth(event.data.error ?? null);
   };
 
@@ -158,7 +158,7 @@
       "scrollbars=yes",
     ].join(",");
 
-      authPopup = window.open(url, "mediamasterr-auth", features);
+    authPopup = window.open(url, "mediamasterr-auth", features);
     if (!authPopup) {
       window.location.href = fallbackUrl;
       return;

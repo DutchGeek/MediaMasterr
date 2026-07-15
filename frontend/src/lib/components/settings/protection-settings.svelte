@@ -224,7 +224,8 @@
       <h3 class="text-sm font-semibold text-foreground">Connection Status</h3>
       <div class="grid grid-cols-2 gap-2 text-sm">
         <span class="text-muted-foreground">Provider</span>
-        <span class="text-foreground">{status?.provider ?? "MediaMasterr"}</span>
+        <span class="text-foreground">{status?.provider ?? "MediaMasterr"}</span
+        >
         <span class="text-muted-foreground">Authentication</span>
         <span class="text-foreground"
           >{status?.authenticated ? "Authenticated" : "Not Authenticated"}</span
