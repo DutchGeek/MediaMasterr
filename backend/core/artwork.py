@@ -4,7 +4,7 @@ from backend.core.logger import LOG
 
 TMDB_POSTER_BASE_URL = "https://image.tmdb.org/t/p/w342"
 TMDB_BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/w1280"
-CENTRAL_PLACEHOLDER_POSTER_URL = "/branding/media-placeholder.svg"
+CENTRAL_PLACEHOLDER_POSTER_URL = "/branding/media-placeholder.png"
 
 
 def resolve_poster_url(

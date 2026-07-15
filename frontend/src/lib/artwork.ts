@@ -12,7 +12,7 @@ export function resolvePosterUrl(posterUrl: string | null | undefined): string {
   }
 
   if (raw.startsWith("/branding/") || raw.startsWith("branding/")) {
-    const assetName = raw.replace(/^\/+/, "");
+    const assetName = raw.replace(/^\/+/, "").replace(/\.svg$/i, ".png");
     const baseUrl = (
       ((import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL || "/")
     ).replace(/\/?$/, "/");

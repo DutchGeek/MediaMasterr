@@ -10,8 +10,9 @@ RUN npm ci
 COPY frontend ./
 COPY branding ../branding
 RUN VITE_APP_CHANNEL=${VITE_APP_CHANNEL} npm run build \
-	&& test -f dist/branding/logo.svg \
-	&& test -f dist/branding/media-placeholder.svg
+	&& test -f dist/branding/logo.png \
+	&& test -f dist/branding/media-placeholder.png \
+	&& ! find dist/branding -type f -name '*.svg' | grep -q .
 
 ## backend base image
 FROM python:3.13-slim AS backend-base
