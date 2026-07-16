@@ -289,12 +289,16 @@ class ProtectionService:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         stats: ProtectionStatistics = await provider.getStatistics()
+        # Keep files/rules counts aligned with the same source-of-truth used by
+        # the items/rules endpoints to avoid UI mismatches.
+        items = await provider.getProtectedItems()
+        rules = await provider.getProtectionRules()
         response = ProtectionStatsResponse(
             connected=stats.connected,
             provider=stats.provider,
-            protected_files=stats.protected_files,
+            protected_files=len(items),
             protected_size=stats.protected_size,
-            active_rules=stats.active_rules,
+            active_rules=sum(1 for rule in rules if rule.status == "Active"),
             last_sync=stats.last_sync,
         )
         LOG.info(

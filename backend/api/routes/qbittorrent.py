@@ -127,7 +127,7 @@ async def get_qbittorrent_overview(
                     if progress < 0.999
                     else "Unmapped"
                 ),
-                correlation_reason=correlated_artwork.reason,
+                correlation_reason=correlated_artwork.reason or "unmapped",
                 poster_url=resolve_poster_url(
                     correlated_artwork.poster_url,
                     context="qbittorrent.overview",

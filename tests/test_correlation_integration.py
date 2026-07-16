@@ -13,7 +13,11 @@ from backend.core.service_manager import service_manager
 from backend.database import Base
 from backend.database.models import Movie, MovieVersion, ProtectedMedia, User
 from backend.enums import MediaType, Service, UserRole
-from backend.services.correlation import TorrentSummary, correlation_service
+from backend.models.correlation import CorrelationTorrentSummary
+from backend.services.correlation import MediaCorrelationService
+
+
+correlation_service = MediaCorrelationService()
 
 
 class _FakeQBClient:
@@ -175,14 +179,14 @@ async def test_correlation_prefers_strong_path_identity_and_avoids_cross_title_c
         )
         await db_session.commit()
 
-        summary = TorrentSummary(
+        summary = CorrelationTorrentSummary(
             id="hash-matrix",
+            hash="hash-matrix",
             name="The Matrix 1999 1080p",
             category="radarr",
             state="uploading",
             save_path="/downloads/movies/The Matrix (1999)",
-            progress=1.0,
-            ratio=1.2,
+            provider=Service.QBITTORRENT.value,
         )
         resolved = await correlation_service.resolve_torrent_artwork(db_session, summary)
         assert resolved.media_id == right_movie.id

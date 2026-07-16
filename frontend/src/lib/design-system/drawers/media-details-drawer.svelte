@@ -19,8 +19,8 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-6xl border-ring border-2">
-    <Dialog.Header>
+  <Dialog.Content class="sm:max-w-6xl border-ring border-2 max-h-[92vh] overflow-hidden">
+    <Dialog.Header class="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border/50 pb-3">
       <Dialog.Title>{item?.title ?? "Details"}</Dialog.Title>
       <Dialog.Description>
         Technical workspace for diagnostics, lifecycle, and provider detail.
@@ -28,8 +28,8 @@
     </Dialog.Header>
 
     {#if item}
-      <div class="grid gap-4 p-2 md:grid-cols-[1fr_1.3fr]">
-        <div class="space-y-4 rounded-2xl border border-border/70 bg-card p-4">
+      <div class="grid gap-4 p-2 md:grid-cols-[1fr_1.3fr] max-h-[76vh] overflow-hidden">
+        <div class="space-y-4 rounded-2xl border border-border/70 bg-card p-4 overflow-y-auto">
           <div class="text-xs uppercase tracking-wide text-muted-foreground">
             Artwork
           </div>
@@ -60,7 +60,7 @@
           {/if}
         </div>
 
-        <div class="space-y-3">
+        <div class="space-y-3 overflow-y-auto pr-1">
           {#each sections as section}
             <section class="rounded-2xl border border-border/70 bg-card p-4">
               <h3 class="text-sm font-semibold text-foreground">

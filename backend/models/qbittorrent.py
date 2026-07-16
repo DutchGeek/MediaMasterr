@@ -28,7 +28,7 @@ class QBittorrentTorrentItem(BaseModel):
     tracker: str | None
     save_path: str | None
     imported_status: str
-    correlation_reason: str
+    correlation_reason: str | None = None
     poster_url: str | None = None
     backdrop_url: str | None = None
 

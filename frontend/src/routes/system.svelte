@@ -3,6 +3,7 @@
   import { get_api, post_api } from "$lib/api";
   import { toast } from "svelte-sonner";
   import { formatDistanceToNow } from "$lib/utils/date";
+  import { formatFileSize } from "$lib/utils/formatters";
 
   type HealthResponse = { status: string };
   type VersionResponse = { version: string; program: string; url: string };

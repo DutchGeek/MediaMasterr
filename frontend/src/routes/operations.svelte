@@ -31,6 +31,7 @@
   let drawerOpen = $state(false);
   let displayOptionsOpen = $state(false);
   let posterSize = $state(176);
+  let showHealthyCollections = $state(false);
   let workflowBusyId = $state<string | null>(null);
   let workflowError = $state("");
   let workflowPreview = $state<OperationWorkflowResponse | null>(null);
@@ -81,6 +82,13 @@
     if (safety === "low_risk") return "information" as const;
     if (safety === "medium_risk") return "action" as const;
     return "problem" as const;
+  };
+
+  const recommendationConfidence = (item: OperationsRecommendation): number => {
+    if (item.safety_level === "safe") return 0.99;
+    if (item.safety_level === "low_risk") return 0.94;
+    if (item.safety_level === "medium_risk") return 0.86;
+    return 0.78;
   };
 
   const toLifecycle = (item: OperationsRecommendation) => {
@@ -135,10 +143,26 @@
         },
       ],
       posterUrl:
-        rows.find((item) => item.card_key === card.key)?.poster_url ?? null,
+        null,
       quickActions: [{ id: "open", label: "Open Collection" }],
     }));
   });
+
+  const visibleCollectionCards = $derived.by(() => {
+    if (showHealthyCollections) return collectionCards;
+    return collectionCards.filter((card) => {
+      const source = workspace?.overview.cards.find((row) => row.key === card.id);
+      return (source?.count ?? 0) > 0;
+    });
+  });
+
+  const openComparison = (recommendationId: string) => {
+    const target = mediaMovies.find((item) => item.id === recommendationId) ?? null;
+    if (target) {
+      selectedAsset = target;
+      drawerOpen = true;
+    }
+  };
 
   const mediaMovies = $derived.by((): MovieObject[] => {
     return recommendationsForCollection
@@ -156,7 +180,7 @@
         recommendationSeverity: safetyToSeverity(item.safety_level),
         recommendation: {
           message: item.explanation ?? `${item.summary} Why: ${item.action}.`,
-          confidence: 0.98,
+          confidence: recommendationConfidence(item),
           risk:
             item.safety_level === "high_risk"
               ? "high"
@@ -469,11 +493,55 @@
       </div>
     {:else}
       <section class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold text-foreground">Today's Recommendations</h2>
+          <button
+            type="button"
+            class={`rounded-full border px-3 py-1.5 text-xs ${showHealthyCollections ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
+            onclick={() => (showHealthyCollections = !showHealthyCollections)}
+          >
+            {showHealthyCollections ? "Hide Healthy Collections" : "Show Healthy Collections"}
+          </button>
+        </div>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {#each recommendationsForCollection.slice(0, 9) as recommendation}
+              <article class="rounded-xl border border-border/60 bg-background/70 p-3">
+                <p class="text-sm font-semibold text-foreground">{recommendation.title}</p>
+                <p class="mt-1 text-xs text-muted-foreground">{recommendation.summary}</p>
+                {#if recommendation.reasons.length > 0}
+                  <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
+                    {#each recommendation.reasons.slice(0, 3) as reason}
+                      <li>• {reason}</li>
+                    {/each}
+                  </ul>
+                {/if}
+                <p class="mt-2 text-xs text-muted-foreground">
+                  Risk {recommendation.safety_level.replace("_", " ")} • Potential reclaim
+                  {formatFileSize(recommendation.estimated_recovery_bytes)}
+                </p>
+                <p class="text-xs text-muted-foreground">
+                  Confidence {(recommendationConfidence(recommendation) * 100).toFixed(0)}%
+                </p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
+                    onclick={() => openComparison(recommendation.id)}
+                  >Open Comparison</button>
+                </div>
+              </article>
+            {/each}
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-3">
         <h2 class="text-lg font-semibold text-foreground">
           Operations Collections
         </h2>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {#each collectionCards as item}
+          {#each visibleCollectionCards as item}
             <CollectionCard
               {item}
               selected={selectedCollectionKey === item.id}
@@ -545,31 +613,6 @@
           </div>
         </section>
       {/if}
-
-      <section class="space-y-3">
-        <h2 class="text-lg font-semibold text-foreground">Today's Recommendations</h2>
-        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {#each recommendationsForCollection.slice(0, 9) as recommendation}
-              <article class="rounded-xl border border-border/60 bg-background/70 p-3">
-                <p class="text-sm font-semibold text-foreground">{recommendation.title}</p>
-                <p class="mt-1 text-xs text-muted-foreground">{recommendation.summary}</p>
-                {#if recommendation.reasons.length > 0}
-                  <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {#each recommendation.reasons.slice(0, 3) as reason}
-                      <li>• {reason}</li>
-                    {/each}
-                  </ul>
-                {/if}
-                <p class="mt-2 text-xs text-muted-foreground">
-                  Risk {recommendation.safety_level.replace("_", " ")} • Potential reclaim
-                  {formatFileSize(recommendation.estimated_recovery_bytes)}
-                </p>
-              </article>
-            {/each}
-          </div>
-        </div>
-      </section>
 
       <section class="space-y-3">
         <h2 class="text-lg font-semibold text-foreground">Operation Workflow</h2>
