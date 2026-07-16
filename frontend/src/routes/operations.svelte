@@ -6,7 +6,7 @@
     DisplayOptionsDialog,
     MediaDetailsDrawer,
     MovieCard,
-    SeriesLayout,
+    SeriesCard,
     loadModuleDisplayState,
     type DetailsDrawerSection,
     type MediaObject,
@@ -513,7 +513,9 @@
     {:else}
       <section class="space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-lg font-semibold text-foreground">Today's Recommendations</h2>
+          <h2 class="text-lg font-semibold text-foreground">
+            Operations Collections
+          </h2>
           <button
             type="button"
             class={`rounded-full border px-3 py-1.5 text-xs ${showHealthyCollections ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
@@ -522,43 +524,6 @@
             {showHealthyCollections ? "Hide Healthy Collections" : "Show Healthy Collections"}
           </button>
         </div>
-        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {#each recommendationsForCollection.slice(0, 9) as recommendation}
-              <article class="rounded-xl border border-border/60 bg-background/70 p-3">
-                <p class="text-sm font-semibold text-foreground">{recommendation.title}</p>
-                <p class="mt-1 text-xs text-muted-foreground">{recommendation.summary}</p>
-                {#if recommendation.reasons.length > 0}
-                  <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
-                    {#each recommendation.reasons.slice(0, 3) as reason}
-                      <li>• {reason}</li>
-                    {/each}
-                  </ul>
-                {/if}
-                <p class="mt-2 text-xs text-muted-foreground">
-                  Risk {recommendation.safety_level.replace("_", " ")} • Potential reclaim
-                  {formatFileSize(recommendation.estimated_recovery_bytes)}
-                </p>
-                <p class="text-xs text-muted-foreground">
-                  Confidence {(recommendationConfidence(recommendation) * 100).toFixed(0)}%
-                </p>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
-                    onclick={() => openComparison(recommendation.id)}
-                  >Open Comparison</button>
-                </div>
-              </article>
-            {/each}
-          </div>
-        </div>
-      </section>
-
-      <section class="space-y-3">
-        <h2 class="text-lg font-semibold text-foreground">
-          Operations Collections
-        </h2>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {#each visibleCollectionCards as item}
             <CollectionCard
@@ -573,24 +538,30 @@
         </div>
       </section>
 
-      {#if mediaSeries.length > 0}
-        <section class="space-y-4">
-          <h2 class="text-lg font-semibold text-foreground">Series Context</h2>
-          {#each mediaSeries as series}
-            <SeriesLayout
-              {series}
-              onSelectSeason={(season) => {
-                selectedAsset = season;
-                drawerOpen = true;
-              }}
-            />
-          {/each}
-        </section>
-      {/if}
+      <section class="space-y-3">
+        <h2 class="text-lg font-semibold text-foreground">Affected Assets</h2>
+        {#if mediaSeries.length === 0 && mediaMovies.length === 0}
+          <p class="text-sm text-muted-foreground">
+            Select a collection to populate affected assets.
+          </p>
+        {/if}
 
-      {#if mediaMovies.length > 0}
-        <section class="space-y-3">
-          <h2 class="text-lg font-semibold text-foreground">Movie Actions</h2>
+        {#if mediaSeries.length > 0}
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {#each mediaSeries as series}
+              <SeriesCard
+                item={series}
+                {posterSize}
+                onSelect={() => {
+                  selectedAsset = series;
+                  drawerOpen = true;
+                }}
+              />
+            {/each}
+          </div>
+        {/if}
+
+        {#if mediaMovies.length > 0}
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {#each mediaMovies as item}
               <MovieCard
@@ -604,8 +575,8 @@
               />
             {/each}
           </div>
-        </section>
-      {/if}
+        {/if}
+      </section>
 
       <section class="space-y-3 sticky bottom-0 z-10 bg-background/95 py-2 backdrop-blur border-t border-border/50">
         <h2 class="text-lg font-semibold text-foreground">Operation Workflow</h2>

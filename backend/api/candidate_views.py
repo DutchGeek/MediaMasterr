@@ -24,6 +24,7 @@ from backend.models.media import (
     CandidateReasonPart,
     RulePreviewEntry,
 )
+from backend.services.artwork_service import ArtworkIdentity, artwork_service
 
 _VALUELESS_OPERATORS = {"exists", "not_exists", "is_true", "is_false"}
 _NATURAL_SORT_TOKEN_RE = re.compile(r"(\d+)")
@@ -270,7 +271,7 @@ async def build_rule_preview_items(
         media_year = (
             movie.year if is_movie and movie else series.year if series else None
         )
-        poster_url = (
+        raw_poster_url = (
             movie.poster_url
             if is_movie and movie
             else series.poster_url
@@ -290,13 +291,39 @@ async def build_rule_preview_items(
             record.reason_data,
             library_name_by_id,
         )
+        resolved_poster_url, _backdrop_url, _identity = await artwork_service.resolve(
+            db,
+            context="candidate.preview",
+            identity=ArtworkIdentity(
+                media_type=record.media_type,
+                media_id=media_id,
+                tmdb_id=(
+                    movie.tmdb_id
+                    if is_movie and movie
+                    else series.tmdb_id
+                    if series
+                    else None
+                ),
+                tvdb_id=(series.tvdb_id if series and not is_movie else None),
+                imdb_id=(
+                    movie.imdb_id
+                    if is_movie and movie
+                    else series.imdb_id
+                    if series
+                    else None
+                ),
+            ),
+            poster_url=raw_poster_url,
+            backdrop_url=None,
+        )
+
         items.append(
             RulePreviewEntry(
                 media_type=record.media_type.value,
                 media_id=media_id,
                 media_title=media_title,
                 media_year=media_year,
-                poster_url=poster_url,
+                poster_url=resolved_poster_url,
                 tmdb_id=(
                     movie.tmdb_id
                     if is_movie and movie

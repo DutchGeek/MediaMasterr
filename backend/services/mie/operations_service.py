@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import Integer, and_, cast as sql_cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.artwork import resolve_poster_url
 from backend.core.service_manager import service_manager
 from backend.database.models import (
     CleanupPlan,
@@ -44,6 +43,7 @@ from backend.models.mie import (
     OperationWorkflowValidationCheck,
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
+from backend.services.artwork_service import ArtworkIdentity, artwork_service
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -524,6 +524,15 @@ class OperationsService:
             reasons = [r.strip() for r in item.summary.split(";") if r.strip()] if item.summary else []
             if not reasons and item.summary:
                 reasons = [item.summary]
+            poster, _backdrop, _identity = await artwork_service.resolve(
+                self.db,
+                context="operations.recommendations.cleanup_plan",
+                identity=ArtworkIdentity(
+                    media_type=(MediaType.MOVIE if row.movie_poster_url else MediaType.SERIES),
+                ),
+                poster_url=row.movie_poster_url or row.series_poster_url,
+                backdrop_url=None,
+            )
             items.append(
                 OperationsRecommendation(
                     id=f"plan-item:{item.id}",
@@ -537,11 +546,7 @@ class OperationsService:
                     target_type=item.target_type,
                     target_id=item.target_id,
                     estimated_recovery_bytes=item.estimated_recovery_bytes,
-                    poster_url=resolve_poster_url(
-                        row.movie_poster_url or row.series_poster_url,
-                        context="operations.recommendations.cleanup_plan",
-                        media_type="movie" if row.movie_poster_url else "series",
-                    ),
+                    poster_url=poster,
                 )
             )
         return items
@@ -568,6 +573,16 @@ class OperationsService:
             candidate = row.ReclaimCandidate
             target_title = row.movie_title or row.series_title or f"Candidate #{candidate.id}"
             reasons = [candidate.reason] if candidate.reason else ["Rule engine matched candidate."]
+            poster, _backdrop, _identity = await artwork_service.resolve(
+                self.db,
+                context="operations.recommendations.reclaim_candidate",
+                identity=ArtworkIdentity(
+                    media_type=(MediaType.MOVIE if candidate.movie_id is not None else MediaType.SERIES),
+                    media_id=(candidate.movie_id or candidate.series_id),
+                ),
+                poster_url=row.movie_poster_url or row.series_poster_url,
+                backdrop_url=None,
+            )
             items.append(
                 OperationsRecommendation(
                     id=f"candidate:{candidate.id}",
@@ -586,12 +601,7 @@ class OperationsService:
                     target_type="reclaim_candidate",
                     target_id=str(candidate.id),
                     estimated_recovery_bytes=candidate.estimated_space_bytes or 0,
-                    poster_url=resolve_poster_url(
-                        row.movie_poster_url or row.series_poster_url,
-                        context="operations.recommendations.reclaim_candidate",
-                        media_type="movie" if candidate.movie_id is not None else "series",
-                        media_id=candidate.movie_id or candidate.series_id,
-                    ),
+                    poster_url=poster,
                 )
             )
 
@@ -607,6 +617,13 @@ class OperationsService:
             )
         ).all()
         for movie_id, movie_title, movie_poster, version_count in duplicate_rows:
+            poster, _backdrop, _identity = await artwork_service.resolve(
+                self.db,
+                context="operations.recommendations.duplicate_release",
+                identity=ArtworkIdentity(media_type=MediaType.MOVIE, media_id=movie_id),
+                poster_url=movie_poster,
+                backdrop_url=None,
+            )
             items.append(
                 OperationsRecommendation(
                     id=f"duplicate_release:movie:{movie_id}",
@@ -623,12 +640,7 @@ class OperationsService:
                     target_type="movie",
                     target_id=str(movie_id),
                     estimated_recovery_bytes=0,
-                    poster_url=resolve_poster_url(
-                        movie_poster,
-                        context="operations.recommendations.duplicate_release",
-                        media_type="movie",
-                        media_id=movie_id,
-                    ),
+                    poster_url=poster,
                 )
             )
 
@@ -646,6 +658,14 @@ class OperationsService:
             ratio = float(raw.get("ratio") or 0)
 
             if artwork.media_id is None:
+                orphan_poster, _backdrop, _identity = await artwork_service.resolve(
+                    self.db,
+                    context="operations.recommendations.orphaned_torrent",
+                    identity=ArtworkIdentity(),
+                    poster_url=None,
+                    backdrop_url=None,
+                    fallback_reason="orphaned_torrent",
+                )
                 items.append(
                     OperationsRecommendation(
                         id=f"orphan_torrent:{torrent_id}",
@@ -662,16 +682,22 @@ class OperationsService:
                         target_type="torrent",
                         target_id=torrent_id,
                         estimated_recovery_bytes=int(raw.get("size") or 0),
-                        poster_url=resolve_poster_url(
-                            None,
-                            context="operations.recommendations.orphaned_torrent",
-                            fallback_reason="orphaned_torrent",
-                        ),
+                        poster_url=orphan_poster,
                     )
                 )
                 continue
 
             if self._is_completed(progress) and ratio >= 1:
+                detach_poster, _backdrop, _identity = await artwork_service.resolve(
+                    self.db,
+                    context="operations.recommendations.detach_torrent",
+                    identity=ArtworkIdentity(
+                        media_type=artwork.media_type,
+                        media_id=artwork.media_id,
+                    ),
+                    poster_url=artwork.poster_url,
+                    backdrop_url=artwork.backdrop_url,
+                )
                 items.append(
                     OperationsRecommendation(
                         id=f"detach_torrent:{torrent_id}",
@@ -689,16 +715,18 @@ class OperationsService:
                         target_type="torrent",
                         target_id=torrent_id,
                         estimated_recovery_bytes=0,
-                        poster_url=resolve_poster_url(
-                            artwork.poster_url,
-                            context="operations.recommendations.detach_torrent",
-                            media_type=artwork.media_type.value if artwork.media_type is not None else None,
-                            media_id=artwork.media_id,
-                        ),
+                        poster_url=detach_poster,
                     )
                 )
 
         if not items:
+            healthy_poster, _backdrop, _identity = await artwork_service.resolve(
+                self.db,
+                context="operations.recommendations.healthy",
+                identity=ArtworkIdentity(),
+                poster_url=None,
+                backdrop_url=None,
+            )
             items.append(
                 OperationsRecommendation(
                     id="system:healthy",
@@ -712,7 +740,7 @@ class OperationsService:
                     target_type="system",
                     target_id=None,
                     estimated_recovery_bytes=0,
-                    poster_url=resolve_poster_url(None, context="operations.recommendations.healthy"),
+                    poster_url=healthy_poster,
                 )
             )
 

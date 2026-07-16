@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
-from backend.core.artwork import resolve_poster_url
 from backend.core.auth import require_page_access
 from backend.core.service_manager import service_manager
 from backend.core.utils.datetime_utils import to_utc_isoformat
@@ -47,6 +46,7 @@ from backend.models.dashboard import (
     DashboardViewer,
 )
 from backend.services.mie.operations_service import OperationsService
+from backend.services.artwork_service import ArtworkIdentity, artwork_service
 from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
 
@@ -337,17 +337,21 @@ async def build_dashboard_response(
         [card for card in operations_cards if card.count > 0],
         key=lambda row: (0 if row.severity == "high" else 1, -row.count, row.title.lower()),
     )[:6]:
+        top_poster, _top_backdrop, _identity = await artwork_service.resolve(
+            db,
+            context="dashboard.top_opportunity.collection",
+            identity=ArtworkIdentity(),
+            poster_url=None,
+            backdrop_url=None,
+            fallback_reason=f"collection_{card.key}",
+        )
         top_card_opportunities.append(
             DashboardOpportunity(
                 title=card.title,
                 media_type="collection",
                 scope="Operations Collection",
                 reclaimable_size_bytes=(recoverable_space_bytes if card.key == "space_recovery" else 0),
-                poster_url=resolve_poster_url(
-                    None,
-                    context="dashboard.top_opportunity.collection",
-                    fallback_reason=f"collection_{card.key}",
-                ),
+                poster_url=top_poster,
                 operation_key=card.key,
                 metric_count=card.count,
                 target_path=f"/operations?collection={card.key}",
@@ -357,17 +361,23 @@ async def build_dashboard_response(
     recent_opportunities: list[DashboardOpportunity] = []
     for item in operations_recommendations[:5]:
         media_type = "movie" if item.target_type == "movie" else "series"
+        recent_poster, _recent_backdrop, _identity = await artwork_service.resolve(
+            db,
+            context="dashboard.recent_operations",
+            identity=ArtworkIdentity(
+                media_type=(MediaType.MOVIE if media_type == "movie" else MediaType.SERIES),
+                media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
+            ),
+            poster_url=item.poster_url,
+            backdrop_url=None,
+        )
         recent_opportunities.append(
             DashboardOpportunity(
                 title=item.title,
                 media_type=media_type,
                 scope="Recommendation",
                 reclaimable_size_bytes=int(item.estimated_recovery_bytes or 0),
-                poster_url=resolve_poster_url(
-                    item.poster_url,
-                    context="dashboard.recent_operations",
-                    media_type=media_type,
-                ),
+                poster_url=recent_poster,
                 operation_key=item.card_key,
                 metric_count=None,
                 target_path=(

@@ -5,7 +5,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.artwork import resolve_backdrop_url, resolve_poster_url
 from backend.core.auth import require_admin
 from backend.core.service_manager import service_manager
 from backend.database import get_db
@@ -16,6 +15,7 @@ from backend.models.qbittorrent import (
     QBittorrentTorrentItem,
 )
 from backend.services.correlation import MediaCorrelationService
+from backend.services.artwork_service import ArtworkIdentity, artwork_service
 
 router = APIRouter(prefix="/api/qbittorrent", tags=["qbittorrent"])
 _correlation_service = MediaCorrelationService()
@@ -95,6 +95,17 @@ async def get_qbittorrent_overview(
             stalled += 1
 
         size_value = item.get("size") or item.get("total_size") or 0
+        poster_url, backdrop_url, _identity = await artwork_service.resolve(
+            db,
+            context="qbittorrent.overview",
+            identity=ArtworkIdentity(
+                media_type=correlated_artwork.media_type,
+                media_id=correlated_artwork.media_id,
+            ),
+            poster_url=correlated_artwork.poster_url,
+            backdrop_url=correlated_artwork.backdrop_url,
+            fallback_reason=correlated_artwork.reason,
+        )
 
         torrents.append(
             QBittorrentTorrentItem(
@@ -128,18 +139,8 @@ async def get_qbittorrent_overview(
                     else "Unmapped"
                 ),
                 correlation_reason=correlated_artwork.reason or "unmapped",
-                poster_url=resolve_poster_url(
-                    correlated_artwork.poster_url,
-                    context="qbittorrent.overview",
-                    media_type=(
-                        correlated_artwork.media_type.value
-                        if correlated_artwork.media_type is not None
-                        else None
-                    ),
-                    media_id=correlated_artwork.media_id,
-                    fallback_reason=correlated_artwork.reason,
-                ),
-                backdrop_url=resolve_backdrop_url(correlated_artwork.backdrop_url),
+                poster_url=poster_url,
+                backdrop_url=backdrop_url,
             )
         )
 
