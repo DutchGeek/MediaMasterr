@@ -30,6 +30,8 @@ class DashboardServiceSummary(BaseModel):
     url: str
     enabled: bool
     last_sync_at: str | None
+    status: str
+    status_reason: str | None = None
 
 
 class DashboardActivityItem(BaseModel):

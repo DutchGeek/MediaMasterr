@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio.session import AsyncSession
 
 from backend.core.artwork import resolve_poster_url
 from backend.core.auth import require_page_access
+from backend.core.service_manager import service_manager
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database import get_db
 from backend.database.models import (
@@ -160,6 +161,15 @@ async def build_dashboard_response(
                 .select_from(ReclaimHistory)
                 .scalar_subquery()
                 .label("reclaimed_total_size"),
+                select(func.count())
+                .select_from(TaskRun)
+                .where(
+                    TaskRun.status == TaskStatus.FAILED,
+                    TaskRun.started_at.is_not(None),
+                    TaskRun.started_at >= seven_days_ago,
+                )
+                .scalar_subquery()
+                .label("failed_task_runs_7d"),
             )
         )
     ).one()
@@ -179,9 +189,21 @@ async def build_dashboard_response(
     reclaimed_movies = summary_row.reclaimed_movies or 0
     reclaimed_series = summary_row.reclaimed_series or 0
     reclaimed_total_size = summary_row.reclaimed_total_size or 0
+    failed_task_runs_7d = summary_row.failed_task_runs_7d or 0
 
     services: list[DashboardServiceSummary] = []
     if is_admin:
+        runtime_status = await service_manager.get_status()
+
+        def _service_runtime_health(service_name: str, enabled: bool) -> tuple[str, str | None]:
+            runtime_key = service_name.lower()
+            connected = runtime_status.get(runtime_key, False)
+            if not enabled:
+                return "disabled", "Service disabled"
+            if connected:
+                return "healthy", None
+            return "down", "Configured but runtime client unavailable"
+
         # get last completed SYNC_MEDIA run (single unified sync task)
         last_sync_result = await db.execute(
             select(func.max(TaskRun.completed_at)).where(
@@ -203,21 +225,25 @@ async def build_dashboard_response(
             )
         ).all()
 
-        services = [
-            DashboardServiceSummary(
-                service_type=service_type.value,
-                name=name or service_type.value.title(),
-                url=base_url or "",
-                enabled=enabled,
-                last_sync_at=to_utc_isoformat(last_sync_at)
-                if service_type in MEDIA_SERVERS
-                else None,
+        services = []
+        for service_type, name, enabled, base_url in sorted(
+            service_config_rows,
+            key=lambda r: (r[0].value, (r[1] or "").lower()),
+        ):
+            status, status_reason = _service_runtime_health(service_type.value, enabled)
+            services.append(
+                DashboardServiceSummary(
+                    service_type=service_type.value,
+                    name=name or service_type.value.title(),
+                    url=base_url or "",
+                    enabled=enabled,
+                    last_sync_at=to_utc_isoformat(last_sync_at)
+                    if service_type in MEDIA_SERVERS
+                    else None,
+                    status=status,
+                    status_reason=status_reason,
+                )
             )
-            for service_type, name, enabled, base_url in sorted(
-                service_config_rows,
-                key=lambda r: (r[0].value, (r[1] or "").lower()),
-            )
-        ]
 
     media_activity, system_activity = await EventEngine.build_dashboard_activity(
         db,
@@ -389,7 +415,7 @@ async def build_dashboard_response(
         blocked=DashboardBlockedSummary(
             protected=active_protected_count,
             waiting=pending_requests,
-            attention_required=0,
+            attention_required=int(failed_task_runs_7d),
         ),
         top_opportunities=candidate_opportunities,
         libraries=[

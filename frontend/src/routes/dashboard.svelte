@@ -168,6 +168,20 @@
   const formatSigned = (value: number) =>
     value > 0 ? `+${value}` : `${value}`;
 
+  const serviceStatusClass = (status: string) => {
+    if (status === "healthy") return "bg-green-500/20 text-green-500";
+    if (status === "degraded") return "bg-yellow-500/20 text-yellow-500";
+    if (status === "disabled") return "bg-muted text-muted-foreground";
+    return "bg-destructive/20 text-destructive";
+  };
+
+  const serviceStatusLabel = (status: string) => {
+    if (status === "healthy") return "healthy";
+    if (status === "degraded") return "degraded";
+    if (status === "disabled") return "disabled";
+    return "down";
+  };
+
   // activity helpers
   const getActivityLabel = (item: DashboardActivityItem) => {
     if (item.type === "request") {
@@ -809,9 +823,10 @@
                               {capitalizeFirstLetter(service.name)}
                             </p>
                             <span
-                              class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500"
+                              class={`text-xs px-2 py-0.5 rounded-full ${serviceStatusClass(service.status)}`}
+                              title={service.status_reason ?? undefined}
                             >
-                              healthy
+                              {serviceStatusLabel(service.status)}
                             </span>
                           </div>
                           <span

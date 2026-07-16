@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchAPI, get_api, post_api } from "$lib/api";
+  import { get_api, post_api } from "$lib/api";
   import { toast } from "svelte-sonner";
   import { formatDistanceToNow } from "$lib/utils/date";
 
@@ -59,6 +59,32 @@
     reason: string | null;
     lastError: string | null;
     httpStatus: number | null;
+    apiVersion?: string | null;
+  };
+
+  type SystemDiagnosticsResponse = {
+    health: {
+      backend: "healthy" | "degraded" | "down";
+      database: "healthy" | "degraded" | "down";
+      scheduler: "healthy" | "degraded" | "down";
+      decision_engine: "healthy" | "degraded" | "down";
+      event_engine: "healthy" | "degraded" | "down";
+    };
+    providers: ProviderDiagnostic[];
+    scheduler: {
+      running: boolean;
+      job_count: number;
+      total_tasks: number;
+      enabled_tasks: number;
+      running_jobs: number;
+    };
+    diagnostics: {
+      database_size_bytes: number | null;
+      cached_objects: number;
+      memory_usage_mb: number | null;
+      running_jobs: number;
+      queue_size: number;
+    };
   };
 
   let loading = $state(true);
@@ -69,11 +95,12 @@
   let schedulerStatus = $state<"healthy" | "degraded" | "down">("healthy");
   let decisionEngineStatus = $state<"healthy" | "degraded" | "down">("healthy");
   let eventEngineStatus = $state<"healthy" | "degraded" | "down">("healthy");
-  let apiVersion = $state("Unknown");
+  let apiVersion = $state("n/a");
   let programName = $state("MediaMasterr");
   let startedAt = $state(Date.now());
 
   let providers = $state<ProviderDiagnostic[]>([]);
+  let systemDiagnostics = $state<SystemDiagnosticsResponse | null>(null);
 
   let tasks = $state<TaskItem[]>([]);
   let logs = $state<string[]>([]);
@@ -99,14 +126,14 @@
   };
 
   const formatTimestamp = (value: string | null): string => {
-    if (!value) return "Unknown";
+    if (!value) return "n/a";
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
     return parsed.toLocaleString();
   };
 
   const formatResponseTime = (value: number | null): string => {
-    if (value == null) return "Unknown";
+    if (value == null) return "n/a";
     return `${value.toFixed(0)} ms`;
   };
 
@@ -120,171 +147,29 @@
     }
   };
 
-  const toProviderName = (key: string): string => {
-    if (key === "qbittorrent") return "qBittorrent";
-    if (key === "protection") return "Protection";
-    return key.charAt(0).toUpperCase() + key.slice(1);
-  };
-
-  const extractErrorMessage = (payload: any, fallback: string): string => {
-    const detail = payload?.detail;
-    if (typeof detail === "string" && detail.trim()) return detail;
-    const message = payload?.message;
-    if (typeof message === "string" && message.trim()) return message;
-    return fallback;
-  };
-
-  const probeProtectionDiagnostics = async (
-    endpoint: string | null,
-  ): Promise<ProviderDiagnostic> => {
-    const started = performance.now();
-    const attemptedAt = new Date().toISOString();
-
-    try {
-      const response = await fetchAPI("/api/protection/status");
-      const responseTimeMs = performance.now() - started;
-      const payload = (await response
-        .json()
-        .catch(() => null)) as ProtectionStatus | null;
-
-      if (!response.ok || !payload) {
-        const reason = extractErrorMessage(
-          payload,
-          `Request failed with status ${response.status}`,
-        );
-        return {
-          key: "protection",
-          name: "Protection",
-          endpoint,
-          connected: false,
-          version: "Unknown",
-          responseTimeMs,
-          lastSuccessfulSync: null,
-          lastAttempt: attemptedAt,
-          status: response.status >= 500 ? "down" : "degraded",
-          reason,
-          lastError: reason,
-          httpStatus: response.status,
-        };
-      }
-
-      const connected = !!payload.connected;
-      const reason = connected
-        ? payload.message || "Connected"
-        : payload.message || payload.connection_status || "Provider unavailable";
-
-      return {
-        key: "protection",
-        name: "Protection",
-        endpoint: payload.base_url || endpoint,
-        connected,
-        version: payload.provider_version || "Unknown",
-        responseTimeMs,
-        lastSuccessfulSync: payload.last_sync,
-        lastAttempt: attemptedAt,
-        status: connected ? "healthy" : "degraded",
-        reason,
-        lastError: connected ? null : reason,
-        httpStatus: response.status,
-      };
-    } catch (err: any) {
-      const responseTimeMs = performance.now() - started;
-      const reason = err?.message ?? "Protection status probe failed";
-      return {
-        key: "protection",
-        name: "Protection",
-        endpoint,
-        connected: false,
-        version: "Unknown",
-        responseTimeMs,
-        lastSuccessfulSync: null,
-        lastAttempt: attemptedAt,
-        status: "down",
-        reason,
-        lastError: reason,
-        httpStatus: null,
-      };
-    }
-  };
-
-  const buildServiceDiagnostics = (
-    servicesPayload: Record<
-      string,
-      ServiceInstance | { instances?: ServiceInstance[] }
-    >,
-  ): ProviderDiagnostic[] => {
-    const knownProviders = [
-      "sonarr",
-      "radarr",
-      "qbittorrent",
-      "plex",
-      "tautulli",
-      "protection",
-    ];
-
-    return knownProviders.map((providerKey) => {
-      const payload = servicesPayload[providerKey];
-      let instance: ServiceInstance | null = null;
-      if (
-        payload &&
-        "instances" in payload &&
-        Array.isArray(payload.instances)
-      ) {
-        instance = payload.instances[0] ?? null;
-      } else if (payload && "enabled" in payload) {
-        instance = payload as ServiceInstance;
-      }
-
-      const connected = !!instance?.enabled;
-      return {
-        key: providerKey,
-        name: toProviderName(providerKey),
-        endpoint: instance?.base_url || null,
-        connected,
-        version: "Unknown",
-        responseTimeMs: null,
-        lastSuccessfulSync: null,
-        lastAttempt: null,
-        status: connected ? "healthy" : "degraded",
-        reason: connected
-          ? "Connected"
-          : "Service disabled or not configured",
-        lastError: connected ? null : "Service disabled or not configured",
-        httpStatus: null,
-      };
-    });
-  };
-
   const loadAll = async () => {
     loading = true;
     error = "";
     try {
-      const [health, version, servicesPayload, taskPayload] = await Promise.all([
+      const [health, version, diagnostics, taskPayload] = await Promise.all([
         get_api<HealthResponse>("/api/info/health"),
         get_api<VersionResponse>("/api/info/version"),
-        get_api<
-          Record<string, ServiceInstance | { instances?: ServiceInstance[] }>
-        >("/api/settings/services"),
+        get_api<SystemDiagnosticsResponse>("/api/system/diagnostics"),
         get_api<TasksResponse>("/api/tasks/tasks"),
       ]);
 
-      backendStatus = health.status === "ok" ? "healthy" : "degraded";
-      databaseStatus = "healthy";
-      schedulerStatus = "healthy";
-      decisionEngineStatus = "healthy";
-      eventEngineStatus = "healthy";
+      backendStatus =
+        diagnostics.health.backend ??
+        (health.status === "ok" ? "healthy" : "degraded");
+      databaseStatus = diagnostics.health.database ?? "degraded";
+      schedulerStatus = diagnostics.health.scheduler ?? "degraded";
+      decisionEngineStatus = diagnostics.health.decision_engine ?? "degraded";
+      eventEngineStatus = diagnostics.health.event_engine ?? "degraded";
       apiVersion = version.version;
       programName = version.program;
+      systemDiagnostics = diagnostics;
 
-      const providerRows = buildServiceDiagnostics(servicesPayload);
-      const protectionSeed = providerRows.find((row) => row.key === "protection");
-      const protectionDiagnostics = await probeProtectionDiagnostics(
-        protectionSeed?.endpoint ?? null,
-      );
-
-      providers = providerRows.map((row) =>
-        row.key === "protection" ? protectionDiagnostics : row,
-      );
+      providers = diagnostics.providers;
 
       tasks = taskPayload.tasks;
 
@@ -421,19 +306,23 @@
                   </dd>
                 </div>
                 <div class="flex justify-between gap-2">
+                  <dt class="text-muted-foreground">API Version</dt>
+                  <dd class="text-foreground">{provider.apiVersion ?? "n/a"}</dd>
+                </div>
+                <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Status</dt>
                   <dd class="text-foreground">{statusLabel(provider.status)}</dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Reason</dt>
                   <dd class="text-foreground text-right max-w-[65%] break-words">
-                    {provider.reason ?? "Unknown"}
+                    {provider.reason ?? "n/a"}
                   </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Endpoint</dt>
                   <dd class="text-foreground text-right max-w-[65%] break-words">
-                    {provider.endpoint ?? "Unknown"}
+                    {provider.endpoint ?? "n/a"}
                   </dd>
                 </div>
                 <div class="flex justify-between gap-2">
@@ -573,15 +462,23 @@
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Database Size</dt>
-              <dd class="text-foreground">Unknown</dd>
+              <dd class="text-foreground">
+                {systemDiagnostics?.diagnostics.database_size_bytes != null
+                  ? formatFileSize(systemDiagnostics.diagnostics.database_size_bytes)
+                  : "n/a"}
+              </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Cached Objects</dt>
-              <dd class="text-foreground">Unknown</dd>
+              <dd class="text-foreground">{systemDiagnostics?.diagnostics.cached_objects ?? 0}</dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Memory Usage</dt>
-              <dd class="text-foreground">Unknown</dd>
+              <dd class="text-foreground">
+                {systemDiagnostics?.diagnostics.memory_usage_mb != null
+                  ? `${systemDiagnostics.diagnostics.memory_usage_mb.toFixed(1)} MB`
+                  : "n/a"}
+              </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Running Jobs</dt>
@@ -592,7 +489,7 @@
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Queue Sizes</dt>
-              <dd class="text-foreground">Derived from task statuses</dd>
+              <dd class="text-foreground">{systemDiagnostics?.diagnostics.queue_size ?? 0}</dd>
             </div>
           </dl>
         </article>

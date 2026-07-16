@@ -98,6 +98,7 @@ async def get_qbittorrent_overview(
 
         torrents.append(
             QBittorrentTorrentItem(
+                id=torrent_summary.id,
                 name=str(item.get("name") or ""),
                 category=str(item.get("category") or ""),
                 state=state,
@@ -108,8 +109,8 @@ async def get_qbittorrent_overview(
                 download_speed=download_speed,
                 upload_speed=upload_speed,
                 tracker=(
-                    str(item.get("tracker"))
-                    if isinstance(item.get("tracker"), str)
+                    str(item.get("tracker") or item.get("tracker_domain"))
+                    if isinstance(item.get("tracker") or item.get("tracker_domain"), str)
                     else None
                 ),
                 save_path=(
@@ -117,6 +118,16 @@ async def get_qbittorrent_overview(
                     if isinstance(item.get("save_path"), str)
                     else None
                 ),
+                imported_status=(
+                    "Imported"
+                    if correlated_artwork.media_id is not None and progress >= 0.999
+                    else "Correlated"
+                    if correlated_artwork.media_id is not None
+                    else "Pending"
+                    if progress < 0.999
+                    else "Unmapped"
+                ),
+                correlation_reason=correlated_artwork.reason,
                 poster_url=resolve_poster_url(
                     correlated_artwork.poster_url,
                     context="qbittorrent.overview",

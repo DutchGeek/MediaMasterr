@@ -41,6 +41,26 @@
       ? formatDistanceToNow(status.last_sync)
       : "Not synchronized",
   );
+  const manualRuleCount = $derived(
+    rules.filter((rule) => rule.source.toLowerCase().includes("manual")).length,
+  );
+  const automatedRuleCount = $derived(
+    rules.filter((rule) => !rule.source.toLowerCase().includes("manual")).length,
+  );
+  const activeProtectedItems = $derived(
+    items.filter((item) => item.status.toLowerCase() === "active").length,
+  );
+  const expiringSoon = $derived.by(() => {
+    const now = Date.now();
+    const cutoff = now + 7 * 24 * 60 * 60 * 1000;
+    return items
+      .filter((item) => {
+        if (!item.expiration) return false;
+        const parsed = Date.parse(item.expiration);
+        return !Number.isNaN(parsed) && parsed >= now && parsed <= cutoff;
+      })
+      .slice(0, 5);
+  });
 
   const loadData = async () => {
     loading = true;
@@ -232,19 +252,41 @@
           <h2 class="text-lg font-semibold text-foreground">
             Decision Statistics
           </h2>
-          <p class="mt-2 text-sm text-muted-foreground">
-            Decision-linked protection analytics remain available through
-            dashboard decision summaries.
-          </p>
+          <dl class="mt-3 space-y-2 text-sm">
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Manual Rules</dt>
+              <dd class="text-foreground">{manualRuleCount}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Automated Rules</dt>
+              <dd class="text-foreground">{automatedRuleCount}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Active Protected Items</dt>
+              <dd class="text-foreground">{activeProtectedItems}</dd>
+            </div>
+          </dl>
         </article>
         <article class="bg-card rounded-lg border border-border p-5">
           <h2 class="text-lg font-semibold text-foreground">
             Upcoming Expirations
           </h2>
-          <p class="mt-2 text-sm text-muted-foreground">
-            Placeholder: expiration forecasting panel will be added in a
-            follow-up release.
-          </p>
+          {#if expiringSoon.length === 0}
+            <p class="mt-2 text-sm text-muted-foreground">
+              No protected items are scheduled to expire in the next 7 days.
+            </p>
+          {:else}
+            <ul class="mt-2 space-y-2 text-sm">
+              {#each expiringSoon as item}
+                <li class="rounded-md border border-border/60 bg-background/40 p-2">
+                  <p class="text-foreground truncate">{item.path}</p>
+                  <p class="text-xs text-muted-foreground">
+                    Expires {item.expiration ? formatDistanceToNow(item.expiration) : "n/a"}
+                  </p>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </article>
       </section>
     {/if}

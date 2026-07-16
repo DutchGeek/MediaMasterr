@@ -29,6 +29,7 @@
   }
 
   interface QBittorrentTorrentItem {
+    id: string;
     name: string;
     category: string;
     state: string;
@@ -40,6 +41,8 @@
     upload_speed: number;
     tracker: string | null;
     save_path: string | null;
+    imported_status: string;
+    correlation_reason: string;
     poster_url: string | null;
     backdrop_url: string | null;
   }
@@ -109,7 +112,16 @@
   });
 
   const collectionCards = $derived.by(() => {
-    return categories.map((bucket) => ({
+    return categories.map((bucket) => {
+      const representative = (overview?.torrents ?? [])
+        .filter(
+          (torrent) =>
+            (torrent.category?.trim() || "uncategorized") === bucket.category,
+        )
+        .sort((left, right) => right.progress - left.progress)
+        .find((torrent) => !!torrent.poster_url);
+
+      return {
       id: bucket.category,
       kind: "movie_collection" as const,
       title: bucket.category,
@@ -117,8 +129,7 @@
       lifecycleState: "imported" as const,
       recommendationSeverity: "information" as const,
       recommendation: {
-        message:
-          "Category keeps visual grouping while details remain in drawer.",
+        message: "Category groups live torrents with correlation-backed artwork.",
         confidence: 0.99,
         risk: "low" as const,
       },
@@ -130,7 +141,9 @@
         },
       ],
       quickActions: [{ id: "open", label: "Open Category" }],
-    }));
+      posterUrl: representative?.poster_url ?? null,
+    };
+    });
   });
 
   const torrentCards = $derived.by((): MovieObject[] => {
@@ -141,14 +154,14 @@
       })
       .sort((left, right) => right.progress - left.progress)
       .map((torrent) => ({
-        id: torrent.name,
+        id: torrent.id,
         kind: "movie",
         title: torrent.name,
         subtitle: `${torrent.category || "uncategorized"} • ${formatTorrentProgress(torrent.progress)}`,
         lifecycleState: lifecycleForTorrent(torrent),
         recommendationSeverity: stateSeverity(torrent.state),
         recommendation: {
-          message: `State ${torrent.state}. ETA ${formatTorrentEta(torrent.eta)}. Ratio ${torrent.ratio.toFixed(2)}.`,
+          message: `State ${torrent.state}. ${torrent.imported_status}. ETA ${formatTorrentEta(torrent.eta)}. Ratio ${torrent.ratio.toFixed(2)}.`,
           confidence: 0.97,
           risk: stateRisk(torrent.state),
           recoverableBytes: torrent.size,
@@ -171,6 +184,11 @@
             label: "Path",
             explanation: torrent.save_path || "n/a",
           },
+          {
+            kind: "imported",
+            label: "Import",
+            explanation: `${torrent.imported_status} (${torrent.correlation_reason})`,
+          },
         ],
         quickActions: [
           { id: "details", label: "Details" },
@@ -184,7 +202,7 @@
     const currentAsset = selectedAsset;
     if (!currentAsset) return [];
     const torrent = (overview?.torrents ?? []).find(
-      (row) => row.name === currentAsset.id,
+      (row) => row.id === currentAsset.id,
     );
     if (!torrent) return [];
     return [
@@ -199,7 +217,7 @@
           },
           {
             key: "Imported",
-            value: torrent.progress >= 1 ? "Complete" : "Pending",
+            value: torrent.imported_status,
           },
           {
             key: "Protected",
@@ -236,6 +254,7 @@
           { key: "Upload", value: `${formatFileSize(torrent.upload_speed)}/s` },
           { key: "Ratio", value: torrent.ratio.toFixed(2) },
           { key: "Tracker", value: torrent.tracker || "n/a" },
+          { key: "Correlation", value: torrent.correlation_reason },
         ],
       },
       {

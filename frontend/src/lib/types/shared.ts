@@ -1258,6 +1258,8 @@ export interface DashboardServiceSummary {
   url: string;
   enabled: boolean;
   last_sync_at: string | null;
+  status: "healthy" | "degraded" | "down" | "disabled";
+  status_reason: string | null;
 }
 
 export interface DashboardActivityItem {

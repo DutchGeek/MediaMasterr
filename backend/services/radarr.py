@@ -177,6 +177,17 @@ class RadarrClient:
         except Exception:
             return False
 
+    async def get_system_status(self) -> dict[str, Any]:
+        """Return Radarr system status payload."""
+        _, data = await self._make_request("GET", "system/status")
+        return dict(data) if isinstance(data, Mapping) else {}
+
+    async def get_app_version(self) -> str | None:
+        """Return Radarr application version if available."""
+        status = await self.get_system_status()
+        value = status.get("version")
+        return str(value).strip() if value else None
+
     async def get_movie(self, movie_id: int) -> RadarrMovie:
         """Get movie by ID."""
         status_code, data = await self._make_request("GET", f"movie/{movie_id}")

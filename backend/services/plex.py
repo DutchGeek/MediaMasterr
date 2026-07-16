@@ -164,6 +164,29 @@ class PlexService:
             pass
         return False
 
+    async def get_identity(self) -> dict[str, object]:
+        """Return Plex identity payload."""
+        response, _ = await self._make_request("identity")
+        return response if isinstance(response, dict) else {}
+
+    async def get_app_version(self) -> str | None:
+        """Return Plex app version from identity payload."""
+        identity = await self.get_identity()
+        media_container = identity.get("MediaContainer")
+        if not isinstance(media_container, Mapping):
+            return None
+        value = media_container.get("version")
+        return str(value).strip() if value else None
+
+    async def get_api_version(self) -> str | None:
+        """Return Plex API version from identity payload."""
+        identity = await self.get_identity()
+        media_container = identity.get("MediaContainer")
+        if not isinstance(media_container, Mapping):
+            return None
+        value = media_container.get("apiVersion")
+        return str(value).strip() if value else None
+
     async def delete_item(self, rating_key: str) -> None:
         """Delete an item (movie or series) from Plex.
 

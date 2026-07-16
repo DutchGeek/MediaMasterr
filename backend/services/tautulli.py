@@ -90,6 +90,22 @@ class TautulliClient:
         except Exception:
             return False
 
+    async def get_status(self) -> dict[str, object]:
+        """Return status payload from Tautulli."""
+        payload = await self._make_request("status")
+        return payload if isinstance(payload, dict) else {}
+
+    async def get_app_version(self) -> str | None:
+        """Return Tautulli version when present in status payload."""
+        status_payload = await self.get_status()
+        response = _mapping_from(status_payload, "response")
+        data = _mapping_from(response, "data") if response else None
+        for key in ("tautulli_version", "version", "app_version"):
+            value = data.get(key) if data else None
+            if value:
+                return str(value).strip()
+        return None
+
     async def get_history(
         self,
         media_type: str | None = None,

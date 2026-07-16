@@ -199,6 +199,17 @@ class SonarrClient:
         except Exception:
             return False
 
+    async def get_system_status(self) -> dict[str, Any]:
+        """Return Sonarr system status payload."""
+        _, data = await self._make_request("GET", "system/status")
+        return dict(data) if isinstance(data, Mapping) else {}
+
+    async def get_app_version(self) -> str | None:
+        """Return Sonarr application version if available."""
+        status = await self.get_system_status()
+        value = status.get("version")
+        return str(value).strip() if value else None
+
     async def get_series(self, series_id: int) -> SonarrSeries:
         """Get series by ID.
 

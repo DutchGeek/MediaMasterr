@@ -15,6 +15,7 @@ class QBittorrentMetrics(BaseModel):
 
 
 class QBittorrentTorrentItem(BaseModel):
+    id: str
     name: str
     category: str
     state: str
@@ -26,6 +27,8 @@ class QBittorrentTorrentItem(BaseModel):
     upload_speed: int
     tracker: str | None
     save_path: str | None
+    imported_status: str
+    correlation_reason: str
     poster_url: str | None = None
     backdrop_url: str | None = None
 
