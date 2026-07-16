@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import require_admin
@@ -51,9 +51,20 @@ async def get_qbittorrent_overview(
 ) -> QBittorrentOverviewResponse:
     client = service_manager.qbittorrent
     if client is None:
-        raise HTTPException(
-            status_code=404,
-            detail="qBittorrent is not configured or not enabled",
+        return QBittorrentOverviewResponse(
+            app_version="",
+            webapi_version="",
+            metrics=QBittorrentMetrics(
+                active_downloads=0,
+                active_uploads=0,
+                seeding=0,
+                paused=0,
+                completed=0,
+                stalled=0,
+                download_speed=0,
+                upload_speed=0,
+            ),
+            torrents=[],
         )
 
     app_version = await client.get_app_version()

@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import niquests.exceptions as niq_exceptions
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.api.routes.qbittorrent import get_qbittorrent_overview
@@ -171,14 +170,23 @@ async def test_qbittorrent_overview_requires_runtime_client() -> None:
     previous = service_manager._qbittorrent
     service_manager._qbittorrent = None
     try:
-        with pytest.raises(HTTPException) as exc:
-            async with session_maker() as db:
-                await get_qbittorrent_overview(_admin_user(), db=db)
+        async with session_maker() as db:
+            payload = await get_qbittorrent_overview(_admin_user(), db=db)
     finally:
         service_manager._qbittorrent = previous
         await engine.dispose()
 
-    assert exc.value.status_code == 404
+    assert payload.app_version == ""
+    assert payload.webapi_version == ""
+    assert payload.metrics.active_downloads == 0
+    assert payload.metrics.active_uploads == 0
+    assert payload.metrics.seeding == 0
+    assert payload.metrics.paused == 0
+    assert payload.metrics.completed == 0
+    assert payload.metrics.stalled == 0
+    assert payload.metrics.download_speed == 0
+    assert payload.metrics.upload_speed == 0
+    assert payload.torrents == []
 
 
 @pytest.mark.anyio
