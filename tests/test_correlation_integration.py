@@ -193,3 +193,58 @@ async def test_correlation_prefers_strong_path_identity_and_avoids_cross_title_c
         assert resolved.poster_url == "/right.jpg"
 
     await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "torrent_name",
+    [
+        "Ballerina 2025 1080p",
+        "Captain America Brave New World 2025 1080p",
+        "Anaconda 2024 1080p",
+        "Dr Pimple Popper S01E01 1080p",
+    ],
+)
+async def test_correlation_never_reuses_other_title_artwork_for_unmatched_identity(
+    torrent_name: str,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with session_maker() as db_session:
+        spider_movie = Movie(title="Spider-Man", tmdb_id=1200001, year=2002, poster_url="/spider.jpg")
+        db_session.add(spider_movie)
+        await db_session.flush()
+        db_session.add(
+            MovieVersion(
+                movie_id=spider_movie.id,
+                service=Service.PLEX,
+                service_item_id="spider-1",
+                service_media_id="spider-1",
+                library_id="movies",
+                library_name="Movies",
+                path="/library/movies/Spider-Man (2002)/Spider.Man.2002.mkv",
+                size=100,
+            )
+        )
+        await db_session.commit()
+
+        summary = CorrelationTorrentSummary(
+            id=f"hash-{torrent_name}",
+            hash=f"hash-{torrent_name}",
+            name=torrent_name,
+            category="radarr",
+            state="uploading",
+            save_path="/downloads/incoming/unmatched",
+            provider=Service.QBITTORRENT.value,
+        )
+
+        resolved = await correlation_service.resolve_torrent_artwork(db_session, summary)
+        assert resolved.media_id is None
+        assert resolved.poster_url is None
+        assert resolved.reason == "no_matching_media_asset"
+
+    await engine.dispose()

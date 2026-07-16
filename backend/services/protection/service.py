@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from dataclasses import asdict
 from datetime import UTC, datetime
 
@@ -22,6 +23,13 @@ from .schemas import (
     ProtectionStatsResponse,
     ProtectionStatusResponse,
 )
+@dataclass(slots=True)
+class _ProtectionSnapshot:
+    stats: ProtectionStatistics
+    rules: list[ProtectionRuleResponse]
+    items: list[ProtectionItemResponse]
+    reconciled_rule_items: int
+    unmatched_items: int
 
 
 class ProtectionService:
@@ -285,54 +293,13 @@ class ProtectionService:
 
         return self._to_status_response(status)
 
-    async def get_stats(self) -> ProtectionStatsResponse:
+    async def _snapshot(self) -> _ProtectionSnapshot:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         stats: ProtectionStatistics = await provider.getStatistics()
-        # Keep files/rules counts aligned with the same source-of-truth used by
-        # the items/rules endpoints to avoid UI mismatches.
-        items = await provider.getProtectedItems()
-        rules = await provider.getProtectionRules()
-        response = ProtectionStatsResponse(
-            connected=stats.connected,
-            provider=stats.provider,
-            protected_files=len(items),
-            protected_size=stats.protected_size,
-            active_rules=sum(1 for rule in rules if rule.status == "Active"),
-            last_sync=stats.last_sync,
-        )
-        LOG.info(
-            "Protection API return count: endpoint=/api/protection/stats "
-            f"protected_files={response.protected_files} protected_size={response.protected_size} "
-            f"active_rules={response.active_rules}"
-        )
-        return response
 
-    async def get_rules(self) -> list[ProtectionRuleResponse]:
-        config = await self._get_or_create_config()
-        provider = self._provider_from_config(config)
-        rules = await provider.getProtectionRules()
-        response = [
-            ProtectionRuleResponse(
-                rule=rule.rule,
-                source=rule.source,
-                protected_items=rule.protected_items,
-                status=rule.status,
-                last_updated=rule.last_updated,
-            )
-            for rule in rules
-        ]
-        LOG.info(
-            "Protection API return count: endpoint=/api/protection/rules "
-            f"records={len(response)}"
-        )
-        return response
-
-    async def get_items(self) -> list[ProtectionItemResponse]:
-        config = await self._get_or_create_config()
-        provider = self._provider_from_config(config)
         items = await provider.getProtectedItems()
-        response = [
+        item_responses = [
             ProtectionItemResponse(
                 path=item.path,
                 reason=item.reason,
@@ -342,6 +309,84 @@ class ProtectionService:
             )
             for item in items
         ]
+
+        rules = await provider.getProtectionRules()
+        provider_has_rule_counts = any((rule.protected_items or 0) > 0 for rule in rules)
+        item_reasons = [((item.reason or "").strip().lower(), idx) for idx, item in enumerate(item_responses)]
+
+        rule_responses: list[ProtectionRuleResponse] = []
+        matched_item_indexes: set[int] = set()
+        for rule in rules:
+            protected_items: int | None = rule.protected_items
+            if not provider_has_rule_counts:
+                rule_key = (rule.rule or "").strip().lower()
+                inferred_indexes = {
+                    idx
+                    for reason, idx in item_reasons
+                    if rule_key and (reason == rule_key or rule_key in reason)
+                }
+                if inferred_indexes:
+                    protected_items = len(inferred_indexes)
+                    matched_item_indexes.update(inferred_indexes)
+                else:
+                    protected_items = None
+
+            rule_responses.append(
+                ProtectionRuleResponse(
+                    rule=rule.rule,
+                    source=rule.source,
+                    protected_items=protected_items,
+                    status=rule.status,
+                    last_updated=rule.last_updated,
+                )
+            )
+
+        reconciled_rule_items = sum(
+            response.protected_items or 0 for response in rule_responses
+        )
+        if provider_has_rule_counts:
+            reconciled_rule_items = min(reconciled_rule_items, len(item_responses))
+            unmatched_items = max(0, len(item_responses) - reconciled_rule_items)
+        else:
+            unmatched_items = max(0, len(item_responses) - len(matched_item_indexes))
+
+        return _ProtectionSnapshot(
+            stats=stats,
+            rules=rule_responses,
+            items=item_responses,
+            reconciled_rule_items=reconciled_rule_items,
+            unmatched_items=unmatched_items,
+        )
+
+    async def get_stats(self) -> ProtectionStatsResponse:
+        snapshot = await self._snapshot()
+        response = ProtectionStatsResponse(
+            connected=snapshot.stats.connected,
+            provider=snapshot.stats.provider,
+            protected_files=len(snapshot.items),
+            protected_size=snapshot.stats.protected_size,
+            active_rules=sum(1 for rule in snapshot.rules if rule.status == "Active"),
+            last_sync=snapshot.stats.last_sync,
+            reconciled_rule_items=snapshot.reconciled_rule_items,
+            unmatched_items=snapshot.unmatched_items,
+        )
+        LOG.info(
+            "Protection API return count: endpoint=/api/protection/stats "
+            f"protected_files={response.protected_files} protected_size={response.protected_size} "
+            f"active_rules={response.active_rules}"
+        )
+        return response
+
+    async def get_rules(self) -> list[ProtectionRuleResponse]:
+        response = (await self._snapshot()).rules
+        LOG.info(
+            "Protection API return count: endpoint=/api/protection/rules "
+            f"records={len(response)}"
+        )
+        return response
+
+    async def get_items(self) -> list[ProtectionItemResponse]:
+        response = (await self._snapshot()).items
         LOG.info(
             "Protection API return count: endpoint=/api/protection/items "
             f"records={len(response)}"

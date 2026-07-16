@@ -15,7 +15,6 @@ from backend.core.service_manager import service_manager
 from backend.database import get_db
 from backend.database.models import (
     BackgroundJob,
-    ProtectedMedia,
     ReclaimCandidate,
     ServiceConfig,
     TaskRun,
@@ -219,7 +218,9 @@ async def get_system_diagnostics(
             )
         )
 
-    protection_status = await ProtectionService(db).get_status()
+    protection_service = ProtectionService(db)
+    protection_status = await protection_service.get_status()
+    protection_stats = await protection_service.get_stats()
     providers.append(
         {
             "key": "protection",
@@ -234,9 +235,10 @@ async def get_system_diagnostics(
             "status": (
                 "healthy" if protection_status.connected else "degraded"
             ),
-            "reason": protection_status.message
-            or protection_status.connection_status
-            or "Protection status unavailable",
+            "reason": (
+                protection_status.message
+                or f"Protected files {protection_stats.protected_files}; unmatched {protection_stats.unmatched_items}"
+            ),
             "lastError": None if protection_status.connected else protection_status.message,
             "httpStatus": 200 if protection_status.connected else None,
         }
@@ -269,7 +271,7 @@ async def get_system_diagnostics(
         database_size_bytes = os.path.getsize(db_path)
 
     reclaim_candidates = int((await db.execute(select(func.count()).select_from(ReclaimCandidate))).scalar() or 0)
-    protected_items = int((await db.execute(select(func.count()).select_from(ProtectedMedia))).scalar() or 0)
+    protected_items = int(protection_stats.protected_files)
 
     return {
         "health": {

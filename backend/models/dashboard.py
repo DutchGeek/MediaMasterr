@@ -69,12 +69,19 @@ class DashboardOpportunity(BaseModel):
     scope: str
     reclaimable_size_bytes: int
     poster_url: str | None = None
+    operation_key: str | None = None
+    metric_count: int | None = None
+    target_path: str | None = None
 
 
 class DashboardLibraryBucket(BaseModel):
     label: str
     reclaimable_size_bytes: int
     item_count: int
+    library_size_bytes: int = 0
+    title_count: int = 0
+    reclaimable_count: int = 0
+    health: str = "healthy"
 
 
 class DashboardDecisionSummary(BaseModel):

@@ -62,12 +62,14 @@ class ProtectionStatsResponse(BaseModel):
     protected_size: int
     active_rules: int
     last_sync: str | None
+    reconciled_rule_items: int = 0
+    unmatched_items: int = 0
 
 
 class ProtectionRuleResponse(BaseModel):
     rule: str
     source: str
-    protected_items: int
+    protected_items: int | None
     status: str
     last_updated: str | None
 

@@ -51,6 +51,22 @@
     }
   };
 
+  const applyHashSelection = () => {
+    const hash = window.location.hash || "";
+    const queryIndex = hash.indexOf("?");
+    if (queryIndex < 0) return;
+    const params = new URLSearchParams(hash.slice(queryIndex + 1));
+    const collection = params.get("collection");
+    const recommendation = params.get("recommendation");
+    if (collection) {
+      selectedCollectionKey = collection;
+      showHealthyCollections = true;
+    }
+    if (recommendation) {
+      selectedRecommendationId = recommendation;
+    }
+  };
+
   const runWorkflow = async (
     recommendationId: string,
     action: "preview" | "validate" | "execute",
@@ -450,6 +466,7 @@
   onMount(async () => {
     refreshDisplay();
     await load();
+    applyHashSelection();
   });
 </script>
 

@@ -14,7 +14,7 @@
   type ProtectionRule = {
     rule: string;
     source: string;
-    protected_items: number;
+    protected_items: number | null;
     status: string;
     last_updated: string | null;
   };
@@ -190,7 +190,7 @@
                   <tr class="border-b border-border/60">
                     <td class="py-2 text-foreground">{rule.rule}</td>
                     <td class="py-2 text-muted-foreground">{rule.source}</td>
-                    <td class="py-2 text-foreground">{rule.protected_items}</td>
+                    <td class="py-2 text-foreground">{rule.protected_items ?? "Unknown"}</td>
                     <td class="py-2 text-foreground">{rule.status}</td>
                     <td class="py-2 text-muted-foreground"
                       >{rule.last_updated
@@ -264,6 +264,14 @@
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Active Protected Items</dt>
               <dd class="text-foreground">{activeProtectedItems}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Rule Mapped Items</dt>
+              <dd class="text-foreground">{stats?.reconciled_rule_items ?? 0}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-muted-foreground">Unmatched Protected Items</dt>
+              <dd class="text-foreground">{stats?.unmatched_items ?? 0}</dd>
             </div>
           </dl>
         </article>

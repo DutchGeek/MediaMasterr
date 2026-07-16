@@ -14,11 +14,13 @@ from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database import get_db
 from backend.database.models import (
     Movie,
+    MovieVersion,
     ProtectedMedia,
     ProtectionRequest,
     ReclaimCandidate,
     ReclaimHistory,
     Series,
+    SeriesServiceRef,
     ServiceConfig,
     TaskRun,
     User,
@@ -44,6 +46,7 @@ from backend.models.dashboard import (
     DashboardServiceSummary,
     DashboardViewer,
 )
+from backend.services.mie.operations_service import OperationsService
 from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
 
@@ -191,6 +194,34 @@ async def build_dashboard_response(
     reclaimed_total_size = summary_row.reclaimed_total_size or 0
     failed_task_runs_7d = summary_row.failed_task_runs_7d or 0
 
+    operations_workspace = await OperationsService(db).workspace()
+    operations_cards = operations_workspace.overview.cards
+    operations_recommendations = operations_workspace.recommendations.items
+    card_by_key = {card.key: card for card in operations_cards}
+
+    reclaimable_movies_bytes = int(
+        sum(
+            item.estimated_recovery_bytes
+            for item in operations_recommendations
+            if item.target_type == "movie"
+        )
+    )
+    reclaimable_series_bytes = int(
+        sum(
+            item.estimated_recovery_bytes
+            for item in operations_recommendations
+            if item.target_type in {"series", "season", "episode"}
+        )
+    )
+    if reclaimable_movies_bytes == 0:
+        reclaimable_movies_bytes = int(movie_size_total)
+    if reclaimable_series_bytes == 0:
+        reclaimable_series_bytes = int(series_size_total)
+    recoverable_space_bytes = int(
+        (card_by_key.get("space_recovery").count if card_by_key.get("space_recovery") else 0)
+        or (reclaimable_movies_bytes + reclaimable_series_bytes)
+    )
+
     services: list[DashboardServiceSummary] = []
     if is_admin:
         runtime_status = await service_manager.get_status()
@@ -262,9 +293,9 @@ async def build_dashboard_response(
         total_series=series_count,
         total_movies_size_bytes=int(all_movies_size),
         total_series_size_bytes=int(all_series_size),
-        reclaimable_movies_bytes=int(movie_size_total),
-        reclaimable_series_bytes=int(series_size_total),
-        reclaimable_total_bytes=int(movie_size_total + series_size_total),
+        reclaimable_movies_bytes=reclaimable_movies_bytes,
+        reclaimable_series_bytes=reclaimable_series_bytes,
+        reclaimable_total_bytes=recoverable_space_bytes,
         reclaimed_movies=reclaimed_movies,
         reclaimed_series=reclaimed_series,
         reclaimed_total_bytes=int(reclaimed_total_size),
@@ -292,144 +323,254 @@ async def build_dashboard_response(
             )
         ).scalar_one()
     )
-    candidate_rows = (
+
+    ready_to_detach_count = int(card_by_key.get("ready_to_detach").count if card_by_key.get("ready_to_detach") else 0)
+    import_pending_count = int(card_by_key.get("import_pending").count if card_by_key.get("import_pending") else 0)
+    protected_seeding_count = int(card_by_key.get("protected_seeding").count if card_by_key.get("protected_seeding") else 0)
+    attention_required_count = int(
+        sum(card.count for card in operations_cards if card.severity == "high")
+        or failed_task_runs_7d
+    )
+
+    top_card_opportunities: list[DashboardOpportunity] = []
+    for card in sorted(
+        [card for card in operations_cards if card.count > 0],
+        key=lambda row: (0 if row.severity == "high" else 1, -row.count, row.title.lower()),
+    )[:6]:
+        top_card_opportunities.append(
+            DashboardOpportunity(
+                title=card.title,
+                media_type="collection",
+                scope="Operations Collection",
+                reclaimable_size_bytes=(recoverable_space_bytes if card.key == "space_recovery" else 0),
+                poster_url=resolve_poster_url(
+                    None,
+                    context="dashboard.top_opportunity.collection",
+                    fallback_reason=f"collection_{card.key}",
+                ),
+                operation_key=card.key,
+                metric_count=card.count,
+                target_path=f"/operations?collection={card.key}",
+            )
+        )
+
+    recent_opportunities: list[DashboardOpportunity] = []
+    for item in operations_recommendations[:5]:
+        media_type = "movie" if item.target_type == "movie" else "series"
+        recent_opportunities.append(
+            DashboardOpportunity(
+                title=item.title,
+                media_type=media_type,
+                scope="Recommendation",
+                reclaimable_size_bytes=int(item.estimated_recovery_bytes or 0),
+                poster_url=resolve_poster_url(
+                    item.poster_url,
+                    context="dashboard.recent_operations",
+                    media_type=media_type,
+                ),
+                operation_key=item.card_key,
+                metric_count=None,
+                target_path=(
+                    f"/operations?collection={item.card_key}&recommendation={item.id}"
+                ),
+            )
+        )
+
+    movie_library_rows = (
         await db.execute(
             select(
-                ReclaimCandidate.media_type,
-                ReclaimCandidate.season_id,
-                ReclaimCandidate.episode_id,
-                ReclaimCandidate.estimated_space_bytes,
-                ReclaimCandidate.created_at,
-                Movie.title.label("movie_title"),
-                Movie.poster_url.label("movie_poster_url"),
-                Movie.arr_tags.label("movie_tags"),
-                Series.title.label("series_title"),
-                Series.poster_url.label("series_poster_url"),
-                Series.arr_tags.label("series_tags"),
+                MovieVersion.library_name,
+                func.coalesce(func.sum(MovieVersion.size), 0),
+                func.count(func.distinct(MovieVersion.movie_id)),
             )
-            .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
-            .outerjoin(Series, Series.id == ReclaimCandidate.series_id)
+            .where(MovieVersion.library_name.is_not(None), MovieVersion.library_name != "")
+            .group_by(MovieVersion.library_name)
+        )
+    ).all()
+    series_library_rows = (
+        await db.execute(
+            select(SeriesServiceRef.library_name, Series.id, Series.size)
+            .join(Series, Series.id == SeriesServiceRef.series_id)
+            .where(
+                Series.removed_at.is_(None),
+                SeriesServiceRef.library_name.is_not(None),
+                SeriesServiceRef.library_name != "",
+            )
         )
     ).all()
 
-    def _bucket_label(row: object) -> str:
-        tags = []
-        movie_tags = getattr(row, "movie_tags", None)
-        series_tags = getattr(row, "series_tags", None)
-        if isinstance(movie_tags, list):
-            tags.extend([str(tag).strip() for tag in movie_tags if str(tag).strip()])
-        if isinstance(series_tags, list):
-            tags.extend([str(tag).strip() for tag in series_tags if str(tag).strip()])
-        return tags[0] if tags else "Ungrouped"
-
-    def _scope_label(row: object) -> str:
-        if getattr(row, "episode_id", None) is not None:
-            return "Episode"
-        if getattr(row, "season_id", None) is not None:
-            return "Season"
-        if getattr(row, "media_type", None) is MediaType.MOVIE:
-            return "Movie"
-        return "Series"
-
-    def _title(row: object) -> str:
-        return str(
-            getattr(row, "movie_title", None)
-            or getattr(row, "series_title", None)
-            or "Unknown"
+    library_state: dict[str, dict[str, object]] = {}
+    for library_name, size_total, title_count in movie_library_rows:
+        key = str(library_name)
+        entry = library_state.setdefault(
+            key,
+            {
+                "label": key,
+                "library_size_bytes": 0,
+                "title_count": 0,
+                "reclaimable_size_bytes": 0,
+                "reclaimable_ids": set(),
+            },
         )
+        entry["library_size_bytes"] = int(entry["library_size_bytes"]) + int(size_total or 0)
+        entry["title_count"] = int(entry["title_count"]) + int(title_count or 0)
 
-    def _poster_url(row: object) -> str | None:
-        return resolve_poster_url(
-            getattr(row, "movie_poster_url", None)
-            or getattr(row, "series_poster_url", None),
-            context="dashboard.opportunities",
-            media_type=(
-                "movie"
-                if getattr(row, "movie_poster_url", None)
-                else "series"
-            ),
+    series_seen_by_library: dict[str, set[int]] = {}
+    for library_name, series_id, series_size in series_library_rows:
+        key = str(library_name)
+        entry = library_state.setdefault(
+            key,
+            {
+                "label": key,
+                "library_size_bytes": 0,
+                "title_count": 0,
+                "reclaimable_size_bytes": 0,
+                "reclaimable_ids": set(),
+            },
         )
+        seen_ids = series_seen_by_library.setdefault(key, set())
+        if int(series_id) in seen_ids:
+            continue
+        seen_ids.add(int(series_id))
+        entry["library_size_bytes"] = int(entry["library_size_bytes"]) + int(series_size or 0)
+        entry["title_count"] = int(entry["title_count"]) + 1
 
-    ready_today_movies = 0
-    ready_today_seasons = 0
-    ready_today_episodes = 0
-    library_buckets: dict[str, tuple[int, int]] = {}
-    candidate_opportunities: list[DashboardOpportunity] = []
-    recent_opportunities: list[DashboardOpportunity] = []
-    sorted_by_size = sorted(
-        candidate_rows,
-        key=lambda row: int(getattr(row, "estimated_space_bytes", 0) or 0),
-        reverse=True,
-    )
-    sorted_by_recent = sorted(
-        candidate_rows,
-        key=lambda row: getattr(row, "created_at", now) or now,
-        reverse=True,
-    )
-    for row in candidate_rows:
-        if getattr(row, "episode_id", None) is not None:
-            ready_today_episodes += 1
-        elif getattr(row, "season_id", None) is not None:
-            ready_today_seasons += 1
-        elif getattr(row, "media_type", None) is MediaType.MOVIE:
-            ready_today_movies += 1
+    movie_target_ids: set[int] = set()
+    series_target_ids: set[int] = set()
+    reclaim_candidate_target_ids: set[int] = set()
+    for item in operations_recommendations:
+        if item.target_id is None or not item.target_id.isdigit():
+            continue
+        target_id = int(item.target_id)
+        if item.target_type == "movie":
+            movie_target_ids.add(target_id)
+        elif item.target_type in {"series", "season", "episode"}:
+            series_target_ids.add(target_id)
+        elif item.target_type == "reclaim_candidate":
+            reclaim_candidate_target_ids.add(target_id)
 
-        label = _bucket_label(row)
-        size = int(getattr(row, "estimated_space_bytes", 0) or 0)
-        current_size, current_count = library_buckets.get(label, (0, 0))
-        library_buckets[label] = (current_size + size, current_count + 1)
-
-    for row in sorted_by_size[:5]:
-        candidate_opportunities.append(
-            DashboardOpportunity(
-                title=_title(row),
-                media_type=getattr(row, "media_type", MediaType.MOVIE).value,
-                scope=_scope_label(row),
-                reclaimable_size_bytes=int(
-                    getattr(row, "estimated_space_bytes", 0) or 0
-                ),
-                poster_url=_poster_url(row),
+    if reclaim_candidate_target_ids:
+        candidate_targets = (
+            await db.execute(
+                select(ReclaimCandidate.id, ReclaimCandidate.movie_id, ReclaimCandidate.series_id).where(
+                    ReclaimCandidate.id.in_(reclaim_candidate_target_ids)
+                )
             )
-        )
+        ).all()
+        for _candidate_id, movie_id, series_id in candidate_targets:
+            if movie_id is not None:
+                movie_target_ids.add(int(movie_id))
+            if series_id is not None:
+                series_target_ids.add(int(series_id))
 
-    for row in sorted_by_recent[:5]:
-        recent_opportunities.append(
-            DashboardOpportunity(
-                title=_title(row),
-                media_type=getattr(row, "media_type", MediaType.MOVIE).value,
-                scope=_scope_label(row),
-                reclaimable_size_bytes=int(
-                    getattr(row, "estimated_space_bytes", 0) or 0
-                ),
-                poster_url=_poster_url(row),
+    movie_libraries_by_id: dict[int, set[str]] = {}
+    if movie_target_ids:
+        for movie_id, library_name in (
+            await db.execute(
+                select(MovieVersion.movie_id, MovieVersion.library_name)
+                .where(
+                    MovieVersion.movie_id.in_(movie_target_ids),
+                    MovieVersion.library_name.is_not(None),
+                    MovieVersion.library_name != "",
+                )
+                .distinct()
+            )
+        ).all():
+            movie_libraries_by_id.setdefault(int(movie_id), set()).add(str(library_name))
+
+    series_libraries_by_id: dict[int, set[str]] = {}
+    if series_target_ids:
+        for series_id, library_name in (
+            await db.execute(
+                select(SeriesServiceRef.series_id, SeriesServiceRef.library_name)
+                .where(
+                    SeriesServiceRef.series_id.in_(series_target_ids),
+                    SeriesServiceRef.library_name.is_not(None),
+                    SeriesServiceRef.library_name != "",
+                )
+                .distinct()
+            )
+        ).all():
+            series_libraries_by_id.setdefault(int(series_id), set()).add(str(library_name))
+
+    for item in operations_recommendations:
+        if item.target_id is None or not item.target_id.isdigit():
+            continue
+        target_id = int(item.target_id)
+        linked_libraries: set[str] = set()
+        if item.target_type == "movie":
+            linked_libraries = movie_libraries_by_id.get(target_id, set())
+        elif item.target_type in {"series", "season", "episode"}:
+            linked_libraries = series_libraries_by_id.get(target_id, set())
+
+        for library_name in linked_libraries:
+            entry = library_state.setdefault(
+                library_name,
+                {
+                    "label": library_name,
+                    "library_size_bytes": 0,
+                    "title_count": 0,
+                    "reclaimable_size_bytes": 0,
+                    "reclaimable_ids": set(),
+                },
+            )
+            entry["reclaimable_size_bytes"] = int(entry["reclaimable_size_bytes"]) + int(
+                item.estimated_recovery_bytes or 0
+            )
+            reclaimable_ids = entry["reclaimable_ids"]
+            if isinstance(reclaimable_ids, set):
+                reclaimable_ids.add(f"{item.target_type}:{target_id}")
+
+    library_buckets: list[DashboardLibraryBucket] = []
+    for entry in sorted(
+        library_state.values(),
+        key=lambda row: (
+            -int(row.get("reclaimable_size_bytes", 0) or 0),
+            str(row.get("label", "")).lower(),
+        ),
+    ):
+        reclaimable_ids = entry.get("reclaimable_ids", set())
+        reclaimable_count = len(reclaimable_ids) if isinstance(reclaimable_ids, set) else 0
+        if reclaimable_count == 0:
+            health = "healthy"
+        elif reclaimable_count <= 3:
+            health = "degraded"
+        else:
+            health = "attention"
+        library_buckets.append(
+            DashboardLibraryBucket(
+                label=str(entry.get("label") or "Unknown"),
+                reclaimable_size_bytes=int(entry.get("reclaimable_size_bytes", 0) or 0),
+                item_count=reclaimable_count,
+                library_size_bytes=int(entry.get("library_size_bytes", 0) or 0),
+                title_count=int(entry.get("title_count", 0) or 0),
+                reclaimable_count=reclaimable_count,
+                health=health,
             )
         )
 
     decision_summary = DashboardDecisionSummary(
-        recoverable_space_bytes=int(movie_size_total + series_size_total),
+        recoverable_space_bytes=recoverable_space_bytes,
         ready_today=DashboardReadyToday(
-            movies=ready_today_movies,
-            tv_seasons=ready_today_seasons,
-            episodes=ready_today_episodes,
+            movies=ready_to_detach_count,
+            tv_seasons=sum(
+                1
+                for item in operations_recommendations
+                if item.target_type == "season" and item.card_key in {"ready_to_detach", "import_pending"}
+            ),
+            episodes=sum(
+                1
+                for item in operations_recommendations
+                if item.target_type == "episode" and item.card_key in {"ready_to_detach", "import_pending"}
+            ),
         ),
         blocked=DashboardBlockedSummary(
-            protected=active_protected_count,
-            waiting=pending_requests,
-            attention_required=int(failed_task_runs_7d),
+            protected=max(active_protected_count, protected_seeding_count),
+            waiting=import_pending_count,
+            attention_required=attention_required_count,
         ),
-        top_opportunities=candidate_opportunities,
-        libraries=[
-            DashboardLibraryBucket(
-                label=label,
-                reclaimable_size_bytes=size,
-                item_count=count,
-            )
-            for label, (size, count) in sorted(
-                library_buckets.items(),
-                key=lambda item: item[1][0],
-                reverse=True,
-            )[:6]
-        ],
+        top_opportunities=top_card_opportunities,
+        libraries=library_buckets,
         recently_reclaimable=recent_opportunities,
     )
     viewer = DashboardViewer(

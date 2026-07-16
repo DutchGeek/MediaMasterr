@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,31 @@ from backend.models.correlation import (
     CorrelationStatus,
     CorrelationTorrentSummary,
 )
+
+_CORRELATION_NOISE_TOKENS = {
+    "1080p",
+    "720p",
+    "2160p",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "bluray",
+    "brrip",
+    "webrip",
+    "webdl",
+    "web",
+    "proper",
+    "repack",
+    "remux",
+    "hdr",
+    "dv",
+    "dts",
+    "aac",
+    "ac3",
+    "yify",
+}
 
 
 @dataclass
@@ -133,6 +159,58 @@ class MediaCorrelationService:
         }
         parts = [p for p in token.split() if p and p not in noise and not p.isdigit()]
         return " ".join(parts[:8])[:96]
+
+    @staticmethod
+    def _normalize_identity_text(value: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+        return " ".join(cleaned.split())
+
+    @staticmethod
+    def _parse_torrent_identity(name: str) -> tuple[str, int | None]:
+        lowered = (name or "").lower()
+        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", lowered)
+        year = int(year_match.group(1)) if year_match else None
+
+        base = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", lowered)
+        base = re.sub(r"\b(s\d{1,2}e\d{1,2}|season\s*\d+|episode\s*\d+)\b", " ", base)
+        tokens = [
+            t
+            for t in re.split(r"[^a-z0-9]+", base)
+            if t and t not in _CORRELATION_NOISE_TOKENS and not t.isdigit()
+        ]
+        return (" ".join(tokens[:8]).strip(), year)
+
+    @staticmethod
+    def _titles_compatible(parsed_title: str, candidate_title: str) -> bool:
+        parsed = MediaCorrelationService._normalize_identity_text(parsed_title)
+        candidate = MediaCorrelationService._normalize_identity_text(candidate_title)
+        if not parsed or not candidate:
+            return False
+        return parsed == candidate or parsed.startswith(candidate) or candidate.startswith(parsed)
+
+    @staticmethod
+    def _movie_identity_confident(
+        *,
+        parsed_title: str,
+        parsed_year: int | None,
+        save_path: str | None,
+        candidate: _MovieMatch,
+    ) -> bool:
+        title_match = MediaCorrelationService._titles_compatible(parsed_title, candidate.movie.title)
+        year_match = parsed_year is None or candidate.movie.year is None or candidate.movie.year == parsed_year
+        path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.version.path)
+        return (title_match and year_match) or path_overlap >= 2
+
+    @staticmethod
+    def _episode_identity_confident(
+        *,
+        parsed_title: str,
+        save_path: str | None,
+        candidate: _EpisodeMatch,
+    ) -> bool:
+        title_match = MediaCorrelationService._titles_compatible(parsed_title, candidate.series.title)
+        path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.episode.path)
+        return title_match or path_overlap >= 2
 
     @staticmethod
     def _path_overlap_depth(left: str | None, right: str | None) -> int:
@@ -429,6 +507,7 @@ class MediaCorrelationService:
             or None
         )
         token = self._name_token(torrent.name)
+        parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
         category = (torrent.category or "").lower() or None
 
         best_movie = await self._find_best_movie_match(
@@ -644,6 +723,7 @@ class MediaCorrelationService:
             or None
         )
         token = self._name_token(torrent.name)
+        parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
         category = (torrent.category or "").lower() or None
 
         best_movie = await self._find_best_movie_match(
@@ -669,7 +749,12 @@ class MediaCorrelationService:
         elif best_episode:
             selected_mode = "episode"
 
-        if selected_mode == "movie" and best_movie:
+        if selected_mode == "movie" and best_movie and self._movie_identity_confident(
+            parsed_title=parsed_title,
+            parsed_year=parsed_year,
+            save_path=save_path,
+            candidate=best_movie,
+        ):
             return CorrelatedArtwork(
                 poster_url=best_movie.movie.poster_url,
                 backdrop_url=best_movie.movie.backdrop_url,
@@ -682,7 +767,11 @@ class MediaCorrelationService:
                 ),
             )
 
-        if selected_mode == "episode" and best_episode:
+        if selected_mode == "episode" and best_episode and self._episode_identity_confident(
+            parsed_title=parsed_title,
+            save_path=save_path,
+            candidate=best_episode,
+        ):
             return CorrelatedArtwork(
                 poster_url=best_episode.series.poster_url,
                 backdrop_url=best_episode.series.backdrop_url,

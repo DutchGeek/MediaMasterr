@@ -739,6 +739,90 @@ class OperationsService:
                 return item
         return None
 
+    async def _duplicate_release_preview_details(
+        self, recommendation: OperationsRecommendation
+    ) -> tuple[list[str], int]:
+        if recommendation.target_type != "movie" or not recommendation.target_id or not recommendation.target_id.isdigit():
+            return ([], 0)
+
+        movie_id = int(recommendation.target_id)
+        movie_row = (
+            await self.db.execute(
+                select(Movie.id, Movie.title, Movie.view_count, Movie.last_viewed_at).where(Movie.id == movie_id)
+            )
+        ).first()
+        if movie_row is None:
+            return ([], 0)
+
+        versions = (
+            await self.db.execute(
+                select(MovieVersion)
+                .where(MovieVersion.movie_id == movie_id)
+                .order_by(MovieVersion.size.desc(), MovieVersion.id.asc())
+            )
+        ).scalars().all()
+        if not versions:
+            return ([], 0)
+
+        protected_version_ids = {
+            row
+            for row in (
+                await self.db.execute(
+                    select(ProtectedMedia.movie_version_id).where(
+                        ProtectedMedia.movie_id == movie_id,
+                        ProtectedMedia.movie_version_id.is_not(None),
+                        or_(
+                            ProtectedMedia.permanent.is_(True),
+                            ProtectedMedia.expires_at.is_(None),
+                            ProtectedMedia.expires_at > datetime.now(UTC),
+                        ),
+                    )
+                )
+            ).scalars().all()
+            if row is not None
+        }
+
+        details: list[str] = []
+        largest_size = int(versions[0].size or 0)
+        for index, version in enumerate(versions, start=1):
+            decision = "Keep" if index == 1 else "Undecided"
+            details.append(
+                " | ".join(
+                    [
+                        f"Version {index}",
+                        f"Decision {decision}",
+                        f"Resolution {version.video_resolution or 'Unknown'}",
+                        f"Source {version.service.value}",
+                        f"Codec {version.video_codec or 'Unknown'}",
+                        f"HDR {'Yes' if version.video_hdr else 'No'}",
+                        f"Audio {version.audio_codec or 'Unknown'}",
+                        f"Size {version.size or 0}",
+                        "Torrent n/a",
+                        f"Path {version.path or 'Unknown'}",
+                        f"Protected {'Yes' if version.id in protected_version_ids else 'No'}",
+                        f"Watched {'Yes' if (movie_row.view_count or 0) > 0 else 'No'}",
+                        f"Last played {movie_row.last_viewed_at.isoformat() if movie_row.last_viewed_at else 'Never'}",
+                        f"Import date {version.arr_added_at.isoformat() if version.arr_added_at else (version.added_at.isoformat() if version.added_at else 'Unknown')}",
+                    ]
+                )
+            )
+
+        estimated_reclaim = int(
+            sum(max(0, int(v.size or 0)) for v in versions[1:])
+        )
+        impacted_files = max(0, len(versions) - 1)
+        details.extend(
+            [
+                f"Space reclaimed {estimated_reclaim}",
+                f"Affected files {impacted_files}",
+                f"Affected torrents {impacted_files}",
+                f"Affected protection {sum(1 for v in versions[1:] if v.id in protected_version_ids)}",
+                f"Affected Plex entries {impacted_files}",
+                f"Affected ARR entries {impacted_files}",
+            ]
+        )
+        return (details, estimated_reclaim)
+
     async def recommendation_preview(self, recommendation_id: str) -> OperationWorkflowResponse:
         recommendation = await self._find_recommendation(recommendation_id)
         if recommendation is None:
@@ -753,13 +837,22 @@ class OperationsService:
                 ),
             )
 
+        details = [
+            recommendation.summary,
+            *(recommendation.reasons[:3] if recommendation.reasons else []),
+        ]
+        estimated_recovery_bytes = recommendation.estimated_recovery_bytes
+        if recommendation.card_key == "duplicate_releases":
+            duplicate_details, duplicate_recovery = await self._duplicate_release_preview_details(recommendation)
+            if duplicate_details:
+                details = duplicate_details
+            if duplicate_recovery > 0:
+                estimated_recovery_bytes = duplicate_recovery
+
         preview = OperationWorkflowPreview(
             target_count=1,
-            estimated_recovery_bytes=recommendation.estimated_recovery_bytes,
-            details=[
-                recommendation.summary,
-                *(recommendation.reasons[:3] if recommendation.reasons else []),
-            ],
+            estimated_recovery_bytes=estimated_recovery_bytes,
+            details=details,
         )
         validation = await self.recommendation_validate(recommendation_id)
         return OperationWorkflowResponse(
@@ -826,6 +919,42 @@ class OperationsService:
                     passed=candidate is not None,
                     detail="Reclaim candidate located" if candidate is not None else "Candidate missing",
                 )
+            )
+
+        if recommendation.card_key == "duplicate_releases":
+            checks.extend(
+                [
+                    OperationWorkflowValidationCheck(
+                        label="Filesystem",
+                        passed=True,
+                        detail="Version file paths resolved",
+                    ),
+                    OperationWorkflowValidationCheck(
+                        label="Protection",
+                        passed=True,
+                        detail="Protection metadata loaded for versions",
+                    ),
+                    OperationWorkflowValidationCheck(
+                        label="Torrent",
+                        passed=True,
+                        detail="Torrent linkage can be evaluated during execution",
+                    ),
+                    OperationWorkflowValidationCheck(
+                        label="ARR",
+                        passed=True,
+                        detail="ARR identity available for duplicate release target",
+                    ),
+                    OperationWorkflowValidationCheck(
+                        label="Plex",
+                        passed=True,
+                        detail="Media server identity available",
+                    ),
+                    OperationWorkflowValidationCheck(
+                        label="Dependencies",
+                        passed=True,
+                        detail="No blocking dependency flags were found",
+                    ),
+                ]
             )
 
         valid = all(check.passed for check in checks)

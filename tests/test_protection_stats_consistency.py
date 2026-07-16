@@ -110,5 +110,58 @@ async def test_protection_stats_use_same_source_of_truth_as_items_and_rules(
 
         assert response.protected_files == 2
         assert response.active_rules == 1
+        assert response.reconciled_rule_items == 2
+        assert response.unmatched_items == 0
+
+        rules = await service.get_rules()
+        assert rules[0].protected_items == 1
+        assert rules[1].protected_items == 1
+
+    await engine.dispose()
+
+
+class _UnknownMembershipProvider(_FakeProvider):
+    async def getProtectedItems(self) -> list[ProtectionItemRecord]:
+        return [
+            ProtectionItemRecord(
+                path="/library/movies/C.mkv",
+                reason="Manual protect",
+                provider="Reclaimerr",
+                expiration=None,
+                status="Active",
+            )
+        ]
+
+    async def getProtectionRules(self) -> list[ProtectionRuleRecord]:
+        return [
+            ProtectionRuleRecord(
+                rule="Rule X",
+                source="Reclaimerr",
+                protected_items=0,
+                status="Active",
+                last_updated=None,
+            )
+        ]
+
+
+@pytest.mark.anyio
+async def test_protection_rules_report_unknown_when_membership_unverifiable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with session_maker() as db:
+        service = ProtectionService(db)
+        monkeypatch.setattr(service, "_provider_from_config", lambda _cfg: _UnknownMembershipProvider())
+
+        rules = await service.get_rules()
+        stats = await service.get_stats()
+
+        assert rules[0].protected_items is None
+        assert stats.protected_files == 1
+        assert stats.unmatched_items == 1
 
     await engine.dispose()

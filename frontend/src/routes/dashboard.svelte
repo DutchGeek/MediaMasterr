@@ -237,6 +237,11 @@
     window.location.hash = `#${route}${q ? `?${q}` : ""}`;
   };
 
+  const openHashPath = (targetPath: string | null | undefined) => {
+    if (!targetPath) return;
+    window.location.hash = `#${targetPath}`;
+  };
+
   // determine if we should show last sync info for a service
   // (only for emby, plex, jellyfin for now since those are the only ones that uses the main sync)
   const shouldShowServiceSync = (serviceType: string) =>
@@ -476,7 +481,9 @@
               <p class="text-sm text-muted-foreground">Recently Reclaimable</p>
               <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 {#each dashboard.decision_summary.recently_reclaimable.slice(0, 3) as item}
-                  <div
+                  <button
+                    type="button"
+                    onclick={() => openHashPath(item.target_path)}
                     class="overflow-hidden rounded-2xl border border-border bg-background/70"
                   >
                     <div
@@ -515,7 +522,7 @@
                         {formatSize(item.reclaimable_size_bytes)}
                       </span>
                     </div>
-                  </div>
+                  </button>
                 {/each}
                 {#if dashboard.decision_summary.recently_reclaimable.length === 0}
                   <p class="text-xs text-muted-foreground">
@@ -533,7 +540,9 @@
               </h2>
               <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {#each dashboard.decision_summary.top_opportunities as opportunity}
-                  <div
+                  <button
+                    type="button"
+                    onclick={() => openHashPath(opportunity.target_path)}
                     class="overflow-hidden rounded-2xl border border-border bg-background/70 shadow-sm"
                   >
                     <div
@@ -566,13 +575,21 @@
                       <span
                         class="rounded-full border border-border px-2 py-1 text-muted-foreground"
                       >
-                        Top Opportunity
+                        {opportunity.operation_key
+                          ? formatLibraryDisplayName(opportunity.operation_key)
+                          : "Top Opportunity"}
                       </span>
-                      <span class="font-semibold text-emerald-500">
-                        {formatSize(opportunity.reclaimable_size_bytes)}
-                      </span>
+                      {#if opportunity.media_type === "collection"}
+                        <span class="font-semibold text-primary">
+                          {opportunity.metric_count ?? 0}
+                        </span>
+                      {:else}
+                        <span class="font-semibold text-emerald-500">
+                          {formatSize(opportunity.reclaimable_size_bytes)}
+                        </span>
+                      {/if}
                     </div>
-                  </div>
+                  </button>
                 {/each}
                 {#if dashboard.decision_summary.top_opportunities.length === 0}
                   <p class="text-sm text-muted-foreground">
@@ -593,21 +610,26 @@
                       <p class="font-medium text-foreground truncate">
                         {formatLibraryDisplayName(library.label)}
                       </p>
+                      <p class="text-xs text-muted-foreground">{library.title_count} titles</p>
                       <p class="text-xs text-muted-foreground">
-                        {library.item_count} reclaimable item{library.item_count ===
-                        1
-                          ? ""
-                          : "s"}
+                        Reclaimable {library.reclaimable_count} • Health {capitalizeFirstLetter(
+                          library.health,
+                        )}
                       </p>
                     </div>
-                    <span class="shrink-0 text-sm font-semibold text-primary">
-                      {formatSize(library.reclaimable_size_bytes)}
-                    </span>
+                    <div class="shrink-0 text-right">
+                      <p class="text-sm font-semibold text-foreground">
+                        {formatSize(library.library_size_bytes)}
+                      </p>
+                      <p class="text-xs font-medium text-primary">
+                        {formatSize(library.reclaimable_size_bytes)} reclaimable
+                      </p>
+                    </div>
                   </div>
                 {/each}
                 {#if dashboard.decision_summary.libraries.length === 0}
                   <p class="text-sm text-muted-foreground">
-                    No grouped reclaimable libraries yet.
+                    No library rows are available yet.
                   </p>
                 {/if}
               </div>

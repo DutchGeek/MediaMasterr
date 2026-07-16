@@ -1297,12 +1297,19 @@ export interface DashboardOpportunity {
   scope: string;
   reclaimable_size_bytes: number;
   poster_url: string | null;
+  operation_key: string | null;
+  metric_count: number | null;
+  target_path: string | null;
 }
 
 export interface DashboardLibraryBucket {
   label: string;
   reclaimable_size_bytes: number;
   item_count: number;
+  library_size_bytes: number;
+  title_count: number;
+  reclaimable_count: number;
+  health: string;
 }
 
 export interface DashboardDecisionSummary {
@@ -1418,6 +1425,8 @@ export interface ProtectionStatsResponse {
   protected_size: number;
   active_rules: number;
   last_sync: string | null;
+  reconciled_rule_items: number;
+  unmatched_items: number;
   reclaimable_size?: number | null;
   reclaimable_bytes?: number | null;
   reclaimable_total?: number | null;

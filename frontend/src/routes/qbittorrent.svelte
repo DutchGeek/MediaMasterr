@@ -99,6 +99,10 @@
     return "requested" as const;
   };
 
+  const importPossible = (torrent: QBittorrentTorrentItem): boolean => {
+    return torrent.progress >= 0.999 && torrent.imported_status !== "Imported";
+  };
+
   const categories = $derived.by(() => {
     const map = new Map<string, number>();
     for (const torrent of overview?.torrents ?? []) {
@@ -157,11 +161,11 @@
         id: torrent.id,
         kind: "movie",
         title: torrent.name,
-        subtitle: `${torrent.category || "uncategorized"} • ${formatTorrentProgress(torrent.progress)}`,
+        subtitle: `${torrent.category || "uncategorized"} • ${torrent.state} • ${formatTorrentProgress(torrent.progress)}`,
         lifecycleState: lifecycleForTorrent(torrent),
         recommendationSeverity: stateSeverity(torrent.state),
         recommendation: {
-          message: `State ${torrent.state}. ${torrent.imported_status}. ETA ${formatTorrentEta(torrent.eta)}. Ratio ${torrent.ratio.toFixed(2)}.`,
+          message: `State: ${torrent.state} | Import: ${torrent.imported_status} | ETA: ${formatTorrentEta(torrent.eta)} | Ratio: ${torrent.ratio.toFixed(2)}`,
           confidence: 0.97,
           risk: stateRisk(torrent.state),
           recoverableBytes: torrent.size,
@@ -191,6 +195,9 @@
           },
         ],
         quickActions: [
+          ...(importPossible(torrent)
+            ? [{ id: "import", label: "Import" as const }]
+            : []),
           { id: "details", label: "Details" },
           { id: "tracker", label: "Tracker" },
         ],
