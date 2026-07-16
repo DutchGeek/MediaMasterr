@@ -13,6 +13,7 @@ from backend.core.service_manager import service_manager
 from backend.database import Base
 from backend.database.models import Movie, MovieVersion, ProtectedMedia, User
 from backend.enums import MediaType, Service, UserRole
+from backend.services.correlation import TorrentSummary, correlation_service
 
 
 class _FakeQBClient:
@@ -130,3 +131,61 @@ async def test_correlation_requires_qbittorrent_runtime_client() -> None:
         assert exc.value.status_code == 404
     finally:
         service_manager._qbittorrent = previous
+
+
+@pytest.mark.anyio
+async def test_correlation_prefers_strong_path_identity_and_avoids_cross_title_collision() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with session_maker() as db_session:
+        wrong_movie = Movie(title="Matrix Revisited", tmdb_id=999001, year=2001, poster_url="/wrong.jpg")
+        right_movie = Movie(title="The Matrix", tmdb_id=603, year=1999, poster_url="/right.jpg")
+        db_session.add_all([wrong_movie, right_movie])
+        await db_session.flush()
+
+        # Wrong candidate shares token noise but no stable path overlap.
+        db_session.add(
+            MovieVersion(
+                movie_id=wrong_movie.id,
+                service=Service.PLEX,
+                service_item_id="wrong-1",
+                service_media_id="wrong-1",
+                library_id="movies",
+                library_name="Movies",
+                path="/library/other/Matrix.Revisited.2001.1080p.mkv",
+                size=100,
+            )
+        )
+        # Right candidate has deterministic save_path/path overlap.
+        db_session.add(
+            MovieVersion(
+                movie_id=right_movie.id,
+                service=Service.PLEX,
+                service_item_id="right-1",
+                service_media_id="right-1",
+                library_id="movies",
+                library_name="Movies",
+                path="/downloads/movies/The Matrix (1999)/The.Matrix.1999.1080p.mkv",
+                size=100,
+            )
+        )
+        await db_session.commit()
+
+        summary = TorrentSummary(
+            id="hash-matrix",
+            name="The Matrix 1999 1080p",
+            category="radarr",
+            state="uploading",
+            save_path="/downloads/movies/The Matrix (1999)",
+            progress=1.0,
+            ratio=1.2,
+        )
+        resolved = await correlation_service.resolve_torrent_artwork(db_session, summary)
+        assert resolved.media_id == right_movie.id
+        assert resolved.poster_url == "/right.jpg"
+
+    await engine.dispose()

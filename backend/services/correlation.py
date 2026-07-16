@@ -108,7 +108,44 @@ class MediaCorrelationService:
         token = name.lower().strip()
         if token.startswith("[") and "]" in token:
             token = token.split("]", 1)[1].strip()
-        return token[:96]
+        token = token.replace(".", " ").replace("_", " ").replace("-", " ")
+        noise = {
+            "1080p",
+            "720p",
+            "2160p",
+            "x264",
+            "x265",
+            "h264",
+            "h265",
+            "hevc",
+            "bluray",
+            "brrip",
+            "webrip",
+            "webdl",
+            "proper",
+            "repack",
+            "remux",
+            "dts",
+            "aac",
+            "ac3",
+            "hdr",
+            "dv",
+        }
+        parts = [p for p in token.split() if p and p not in noise and not p.isdigit()]
+        return " ".join(parts[:8])[:96]
+
+    @staticmethod
+    def _path_overlap_depth(left: str | None, right: str | None) -> int:
+        if not left or not right:
+            return 0
+        left_parts = [p for p in normalize_fpath(left, strip_ending_slash=True, lower=True).split("/") if p]
+        right_parts = [p for p in normalize_fpath(right, strip_ending_slash=True, lower=True).split("/") if p]
+        depth = 0
+        for l, r in zip(left_parts, right_parts):
+            if l != r:
+                break
+            depth += 1
+        return depth
 
     @staticmethod
     def _movie_match_score(
@@ -123,6 +160,13 @@ class MediaCorrelationService:
         normalized_path = normalize_fpath(
             version_path or "", strip_ending_slash=True, lower=True
         )
+        overlap_depth = MediaCorrelationService._path_overlap_depth(save_path, normalized_path)
+        if overlap_depth >= 3:
+            score += 110
+        elif overlap_depth == 2:
+            score += 70
+        elif overlap_depth == 1:
+            score += 30
         if save_path and normalized_path and normalized_path.startswith(save_path):
             score += 75
         if token and normalized_path and token in normalized_path:
@@ -151,6 +195,13 @@ class MediaCorrelationService:
         normalized_path = normalize_fpath(
             episode_path or "", strip_ending_slash=True, lower=True
         )
+        overlap_depth = MediaCorrelationService._path_overlap_depth(save_path, normalized_path)
+        if overlap_depth >= 3:
+            score += 110
+        elif overlap_depth == 2:
+            score += 70
+        elif overlap_depth == 1:
+            score += 30
         if save_path and normalized_path and normalized_path.startswith(save_path):
             score += 75
         if token and normalized_path and token in normalized_path:
@@ -189,7 +240,7 @@ class MediaCorrelationService:
                 select(MovieVersion, Movie)
                 .join(Movie, MovieVersion.movie_id == Movie.id)
                 .where(MovieVersion.path.is_not(None), or_(*filters))
-                .limit(40)
+                .limit(120)
             )
         ).all()
 
@@ -202,7 +253,8 @@ class MediaCorrelationService:
                 token=token,
                 category=category,
             )
-            if score <= 0:
+            # Require strong evidence to avoid cross-title artwork collisions.
+            if score < 80:
                 continue
             candidate = _MovieMatch(score=score, movie=movie, version=version)
             if best is None or candidate.score > best.score:
@@ -233,7 +285,7 @@ class MediaCorrelationService:
                 .join(Season, Episode.season_id == Season.id)
                 .join(Series, Season.series_id == Series.id)
                 .where(Episode.path.is_not(None), or_(*filters))
-                .limit(60)
+                .limit(150)
             )
         ).all()
 
@@ -247,7 +299,8 @@ class MediaCorrelationService:
                 token=token,
                 category=category,
             )
-            if score <= 0:
+            # Require strong evidence to avoid cross-title artwork collisions.
+            if score < 80:
                 continue
             candidate = _EpisodeMatch(
                 score=score, episode=episode, season=season, series=series

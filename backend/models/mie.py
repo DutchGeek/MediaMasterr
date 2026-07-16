@@ -30,12 +30,60 @@ class OperationsRecommendation(BaseModel):
     card_key: str
     title: str
     summary: str
+    explanation: str | None = None
+    reasons: list[str] = Field(default_factory=list)
     action: str
     safety_level: SafetyLevel
     target_type: str
     target_id: str | None = None
     estimated_recovery_bytes: int = 0
     poster_url: str | None = None
+
+
+class OperationWorkflowPreview(BaseModel):
+    target_count: int = 0
+    estimated_recovery_bytes: int = 0
+    details: list[str] = Field(default_factory=list)
+
+
+class OperationWorkflowValidationCheck(BaseModel):
+    label: str
+    passed: bool
+    detail: str
+
+
+class OperationWorkflowValidation(BaseModel):
+    checks: list[OperationWorkflowValidationCheck] = Field(default_factory=list)
+    valid: bool = False
+
+
+class OperationWorkflowExecution(BaseModel):
+    executed: bool = False
+    result: str = "pending"
+    message: str = ""
+    operation_history_id: int | None = None
+
+
+class OperationWorkflowResponse(BaseModel):
+    recommendation_id: str
+    preview: OperationWorkflowPreview
+    validation: OperationWorkflowValidation
+    execution: OperationWorkflowExecution
+
+
+class OperationAuditEntryResponse(BaseModel):
+    id: int
+    action: str
+    target_type: str
+    target_id: str | None = None
+    result: str
+    safety_level: str
+    recovery_bytes: int
+    created_at: datetime
+
+
+class OperationAuditListResponse(BaseModel):
+    items: list[OperationAuditEntryResponse] = Field(default_factory=list)
 
 
 class OperationsRecommendationsResponse(BaseModel):

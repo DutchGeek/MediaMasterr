@@ -128,5 +128,57 @@ async def test_operations_recommendations_resolve_posters() -> None:
     await engine.dispose()
 
     posters = {item.title: item.poster_url for item in response.items}
-    assert posters["Review reclaim candidate #1"] == "https://image.tmdb.org/t/p/w342/poster-a.jpg"
-    assert posters["Review reclaim candidate #2"] == CENTRAL_PLACEHOLDER_POSTER_URL
+    assert posters["With Poster"] == "https://image.tmdb.org/t/p/w342/poster-a.jpg"
+    assert posters["Without Poster"] == CENTRAL_PLACEHOLDER_POSTER_URL
+
+    explainability = {item.title: item.reasons for item in response.items}
+    assert explainability["With Poster"]
+    assert explainability["Without Poster"]
+
+
+@pytest.mark.anyio
+async def test_operations_workflow_validate_execute_and_audit() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(title="Workflow Movie", tmdb_id=4001, poster_url="/wf.jpg")
+        db.add(movie)
+        await db.flush()
+
+        db.add(
+            ReclaimCandidate(
+                media_type=MediaType.MOVIE,
+                matched_rule_ids=[11],
+                matched_criteria={"rule": "workflow"},
+                movie_id=movie.id,
+                reason="Workflow candidate",
+                estimated_space_bytes=123456,
+                approved_for_deletion=True,
+            )
+        )
+        await db.commit()
+
+        service = OperationsService(db)
+        recommendations = await service.recommendations()
+        assert recommendations.items
+
+        recommendation_id = recommendations.items[0].id
+        validated = await service.recommendation_validate(recommendation_id)
+        assert validated.validation.valid
+
+        executed = await service.recommendation_execute(recommendation_id)
+        assert executed.execution.executed is True
+        assert executed.execution.result == "completed"
+        assert executed.execution.operation_history_id is not None
+
+        audit = await service.audit_log()
+        assert audit.items
+        assert audit.items[0].id == executed.execution.operation_history_id
+
+    await engine.dispose()

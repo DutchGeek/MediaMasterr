@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { get_api } from "$lib/api";
+  import { get_api, post_api } from "$lib/api";
   import {
     CollectionCard,
     DisplayOptionsDialog,
@@ -17,6 +17,8 @@
   } from "$lib/design-system";
   import type {
     MieOperationsResponse,
+    OperationAuditListResponse,
+    OperationWorkflowResponse,
     OperationsRecommendation,
   } from "$lib/types/shared";
   import { formatFileSize } from "$lib/utils/formatters";
@@ -29,16 +31,46 @@
   let drawerOpen = $state(false);
   let displayOptionsOpen = $state(false);
   let posterSize = $state(176);
+  let workflowBusyId = $state<string | null>(null);
+  let workflowError = $state("");
+  let workflowPreview = $state<OperationWorkflowResponse | null>(null);
+  let auditTrail = $state<OperationAuditListResponse | null>(null);
 
   const load = async () => {
     loading = true;
     error = "";
     try {
       workspace = await get_api<MieOperationsResponse>("/api/mie/operations");
+      auditTrail = await get_api<OperationAuditListResponse>("/api/operations/audit");
     } catch (e: any) {
       error = e?.message ?? "Failed to load Operations data";
     } finally {
       loading = false;
+    }
+  };
+
+  const runWorkflow = async (
+    recommendationId: string,
+    action: "preview" | "validate" | "execute",
+  ) => {
+    workflowBusyId = recommendationId;
+    workflowError = "";
+    try {
+      const url =
+        action === "execute"
+          ? `/api/operations/recommendations/${recommendationId}/execute`
+          : `/api/operations/recommendations/${recommendationId}/${action}`;
+      workflowPreview =
+        action === "execute"
+          ? await post_api<OperationWorkflowResponse>(url, {})
+          : await get_api<OperationWorkflowResponse>(url);
+      if (action === "execute") {
+        auditTrail = await get_api<OperationAuditListResponse>("/api/operations/audit");
+      }
+    } catch (e: any) {
+      workflowError = e?.message ?? `Failed to ${action} operation`;
+    } finally {
+      workflowBusyId = null;
     }
   };
 
@@ -123,7 +155,7 @@
         lifecycleState: toLifecycle(item),
         recommendationSeverity: safetyToSeverity(item.safety_level),
         recommendation: {
-          message: `${item.summary} Why: ${item.action}.`,
+          message: item.explanation ?? `${item.summary} Why: ${item.action}.`,
           confidence: 0.98,
           risk:
             item.safety_level === "high_risk"
@@ -132,7 +164,9 @@
                 ? "medium"
                 : "low",
           recoverableBytes: item.estimated_recovery_bytes,
-          explanation: `Recommendation is based on media lifecycle, protection status, and recoverable space (${formatFileSize(item.estimated_recovery_bytes)}).`,
+          explanation:
+            item.explanation ??
+            `Recommendation is based on media lifecycle, protection status, and recoverable space (${formatFileSize(item.estimated_recovery_bytes)}).`,
         },
         healthSignals: [
           {
@@ -147,8 +181,9 @@
           },
         ],
         quickActions: [
-          { id: "explain", label: "Explain" },
-          { id: "review", label: "Review" },
+          { id: "preview", label: "Preview" },
+          { id: "validate", label: "Validate" },
+          { id: "execute", label: "Execute" },
         ],
         posterUrl: item.poster_url,
       }));
@@ -373,8 +408,8 @@
         id: "actions",
         title: "Actions",
         rows: [
-          { key: "Primary", value: "Review and apply recommendation" },
-          { key: "Secondary", value: "Open technical diagnostics" },
+          { key: "Primary", value: "Preview, validate, then execute" },
+          { key: "Secondary", value: "Review audit trail for completed operations" },
         ],
       },
     ];
@@ -471,18 +506,119 @@
           <h2 class="text-lg font-semibold text-foreground">Movie Actions</h2>
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {#each mediaMovies as item}
-              <MovieCard
-                {item}
-                {posterSize}
-                onSelect={() => {
-                  selectedAsset = item;
-                  drawerOpen = true;
-                }}
-              />
+              <div class="space-y-2">
+                <MovieCard
+                  {item}
+                  {posterSize}
+                  onSelect={() => {
+                    selectedAsset = item;
+                    drawerOpen = true;
+                  }}
+                />
+                <div class="rounded-xl border border-border/60 bg-card/60 p-2">
+                  <p class="text-xs text-muted-foreground">
+                    {item.recommendation?.message}
+                  </p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
+                      onclick={() => runWorkflow(item.id, "preview")}
+                      disabled={workflowBusyId === item.id}
+                    >Preview</button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
+                      onclick={() => runWorkflow(item.id, "validate")}
+                      disabled={workflowBusyId === item.id}
+                    >Validate</button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-primary bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20"
+                      onclick={() => runWorkflow(item.id, "execute")}
+                      disabled={workflowBusyId === item.id}
+                    >Execute</button>
+                  </div>
+                </div>
+              </div>
             {/each}
           </div>
         </section>
       {/if}
+
+      <section class="space-y-3">
+        <h2 class="text-lg font-semibold text-foreground">Today's Recommendations</h2>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {#each recommendationsForCollection.slice(0, 9) as recommendation}
+              <article class="rounded-xl border border-border/60 bg-background/70 p-3">
+                <p class="text-sm font-semibold text-foreground">{recommendation.title}</p>
+                <p class="mt-1 text-xs text-muted-foreground">{recommendation.summary}</p>
+                {#if recommendation.reasons.length > 0}
+                  <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
+                    {#each recommendation.reasons.slice(0, 3) as reason}
+                      <li>• {reason}</li>
+                    {/each}
+                  </ul>
+                {/if}
+                <p class="mt-2 text-xs text-muted-foreground">
+                  Risk {recommendation.safety_level.replace("_", " ")} • Potential reclaim
+                  {formatFileSize(recommendation.estimated_recovery_bytes)}
+                </p>
+              </article>
+            {/each}
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="text-lg font-semibold text-foreground">Operation Workflow</h2>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4 text-sm">
+          {#if workflowError}
+            <p class="text-destructive">{workflowError}</p>
+          {/if}
+          {#if workflowPreview}
+            <p class="font-medium text-foreground">Recommendation {workflowPreview.recommendation_id}</p>
+            <p class="text-muted-foreground">
+              Preview: {workflowPreview.preview.target_count} target •
+              {formatFileSize(workflowPreview.preview.estimated_recovery_bytes)}
+            </p>
+            <p class="mt-2 text-muted-foreground">
+              Validation: {workflowPreview.validation.valid ? "Passed" : "Failed"}
+            </p>
+            <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
+              {#each workflowPreview.validation.checks as check}
+                <li>{check.passed ? "✓" : "✗"} {check.label}: {check.detail}</li>
+              {/each}
+            </ul>
+            <p class="mt-2 text-muted-foreground">
+              Execution: {workflowPreview.execution.result} • {workflowPreview.execution.message}
+            </p>
+          {:else}
+            <p class="text-muted-foreground">
+              Select a recommendation and run Preview → Validate → Execute.
+            </p>
+          {/if}
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="text-lg font-semibold text-foreground">Audit Log</h2>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          {#if auditTrail && auditTrail.items.length > 0}
+            <div class="space-y-2 text-xs">
+              {#each auditTrail.items.slice(0, 10) as row}
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2">
+                  <span class="text-foreground">{row.action} • {row.target_type}#{row.target_id ?? "n/a"}</span>
+                  <span class="text-muted-foreground">{row.result} • {formatFileSize(row.recovery_bytes)}</span>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="text-sm text-muted-foreground">No operation history yet.</p>
+          {/if}
+        </div>
+      </section>
     {/if}
   </div>
 </div>

@@ -111,12 +111,60 @@ export interface OperationsRecommendation {
   card_key: string;
   title: string;
   summary: string;
+  explanation: string | null;
+  reasons: string[];
   action: string;
   safety_level: "safe" | "low_risk" | "medium_risk" | "high_risk";
   target_type: string;
   target_id: string | null;
   estimated_recovery_bytes: number;
   poster_url: string | null;
+}
+
+export interface OperationWorkflowValidationCheck {
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface OperationWorkflowPreview {
+  target_count: number;
+  estimated_recovery_bytes: number;
+  details: string[];
+}
+
+export interface OperationWorkflowValidation {
+  checks: OperationWorkflowValidationCheck[];
+  valid: boolean;
+}
+
+export interface OperationWorkflowExecution {
+  executed: boolean;
+  result: string;
+  message: string;
+  operation_history_id: number | null;
+}
+
+export interface OperationWorkflowResponse {
+  recommendation_id: string;
+  preview: OperationWorkflowPreview;
+  validation: OperationWorkflowValidation;
+  execution: OperationWorkflowExecution;
+}
+
+export interface OperationAuditEntry {
+  id: number;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  result: string;
+  safety_level: string;
+  recovery_bytes: number;
+  created_at: string;
+}
+
+export interface OperationAuditListResponse {
+  items: OperationAuditEntry[];
 }
 
 export interface OperationsRecommendationsResponse {

@@ -15,6 +15,8 @@ from backend.models.mie import (
     CleanupPlanListResponse,
     FilesystemConfigResponse,
     FilesystemConfigUpdateRequest,
+    OperationAuditListResponse,
+    OperationWorkflowResponse,
     OperationsOverviewResponse,
     OperationsRecommendationsResponse,
 )
@@ -89,3 +91,47 @@ async def get_cleanup_plans(
     db: AsyncSession = Depends(get_db),
 ) -> CleanupPlanListResponse:
     return await OperationsService(db).cleanup_plans()
+
+
+@router.get(
+    "/recommendations/{recommendation_id}/preview",
+    response_model=OperationWorkflowResponse,
+)
+async def preview_recommendation_operation(
+    recommendation_id: str,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationWorkflowResponse:
+    return await OperationsService(db).recommendation_preview(recommendation_id)
+
+
+@router.get(
+    "/recommendations/{recommendation_id}/validate",
+    response_model=OperationWorkflowResponse,
+)
+async def validate_recommendation_operation(
+    recommendation_id: str,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationWorkflowResponse:
+    return await OperationsService(db).recommendation_validate(recommendation_id)
+
+
+@router.post(
+    "/recommendations/{recommendation_id}/execute",
+    response_model=OperationWorkflowResponse,
+)
+async def execute_recommendation_operation(
+    recommendation_id: str,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationWorkflowResponse:
+    return await OperationsService(db).recommendation_execute(recommendation_id)
+
+
+@router.get("/audit", response_model=OperationAuditListResponse)
+async def get_operations_audit_log(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationAuditListResponse:
+    return await OperationsService(db).audit_log()
