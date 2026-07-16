@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.encryption import fer_decrypt, fer_encrypt
 from backend.core.logger import LOG
-from backend.database.models import ProtectionProviderConfig
+from backend.database.models import ProtectedMedia, ProtectionProviderConfig, ReclaimRule
 
 from .models import ProtectionProviderStatus, ProtectionStatistics
 from .provider import ProtectionProvider
@@ -297,6 +297,7 @@ class ProtectionService:
         config = await self._get_or_create_config()
         provider = self._provider_from_config(config)
         stats: ProtectionStatistics = await provider.getStatistics()
+        provider_is_reclaimerr = (stats.provider or "").strip().lower() == "reclaimerr"
 
         items = await provider.getProtectedItems()
         item_responses = [
@@ -311,14 +312,53 @@ class ProtectionService:
         ]
 
         rules = await provider.getProtectionRules()
+        local_rule_counts_by_name: dict[str, int] = {}
+        if provider_is_reclaimerr:
+            now = datetime.now(UTC)
+            local_rows = (
+                await self._db.execute(
+                    select(ReclaimRule.name, func.count(ProtectedMedia.id))
+                    .join(
+                        ProtectedMedia,
+                        and_(
+                            ProtectedMedia.source_rule_id == ReclaimRule.id,
+                            ProtectedMedia.source == "rule",
+                            (
+                                ProtectedMedia.permanent.is_(True)
+                                | ProtectedMedia.expires_at.is_(None)
+                                | (ProtectedMedia.expires_at > now)
+                            ),
+                        ),
+                    )
+                    .group_by(ReclaimRule.name)
+                )
+            ).all()
+            local_rule_counts_by_name = {
+                (str(rule_name).strip().lower()): int(count or 0)
+                for rule_name, count in local_rows
+                if rule_name
+            }
+
         provider_has_rule_counts = any((rule.protected_items or 0) > 0 for rule in rules)
         item_reasons = [((item.reason or "").strip().lower(), idx) for idx, item in enumerate(item_responses)]
 
         rule_responses: list[ProtectionRuleResponse] = []
         matched_item_indexes: set[int] = set()
         for rule in rules:
-            protected_items: int | None = rule.protected_items
-            if not provider_has_rule_counts:
+            protected_items: int | None
+            rule_key = (rule.rule or "").strip().lower()
+            if provider_is_reclaimerr:
+                # Reclaimerr protection membership is always derivable from synced local mappings.
+                if rule_key in local_rule_counts_by_name:
+                    protected_items = local_rule_counts_by_name[rule_key]
+                elif rule.protected_items is not None:
+                    protected_items = int(rule.protected_items)
+                else:
+                    protected_items = 0
+            else:
+                protected_items = rule.protected_items
+
+            if not provider_is_reclaimerr and not provider_has_rule_counts:
                 rule_key = (rule.rule or "").strip().lower()
                 inferred_indexes = {
                     idx
@@ -344,7 +384,7 @@ class ProtectionService:
         reconciled_rule_items = sum(
             response.protected_items or 0 for response in rule_responses
         )
-        if provider_has_rule_counts:
+        if provider_is_reclaimerr or provider_has_rule_counts:
             reconciled_rule_items = min(reconciled_rule_items, len(item_responses))
             unmatched_items = max(0, len(item_responses) - reconciled_rule_items)
         else:

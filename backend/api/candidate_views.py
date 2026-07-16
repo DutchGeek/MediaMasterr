@@ -6,9 +6,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.artwork import resolve_poster_url
 from backend.core.utils.misc import normalize_genre_names
 from backend.database.models import (
     Episode,
+    MediaAsset,
     Movie,
     MovieVersion,
     Season,
@@ -24,7 +26,6 @@ from backend.models.media import (
     CandidateReasonPart,
     RulePreviewEntry,
 )
-from backend.services.artwork_service import ArtworkIdentity, artwork_service
 
 _VALUELESS_OPERATORS = {"exists", "not_exists", "is_true", "is_false"}
 _NATURAL_SORT_TOKEN_RE = re.compile(r"(\d+)")
@@ -255,6 +256,39 @@ async def build_rule_preview_items(
                 )
             )
 
+    asset_rows = (
+        await db.execute(
+            select(
+                MediaAsset.media_type,
+                MediaAsset.movie_id,
+                MediaAsset.series_id,
+                MediaAsset.poster_url,
+            ).where(
+                (MediaAsset.media_type == MediaType.MOVIE)
+                & MediaAsset.movie_id.in_(movie_ids)
+                | (MediaAsset.media_type == MediaType.SERIES)
+                & MediaAsset.series_id.in_(series_ids)
+            )
+        )
+    ).all()
+    movie_asset_posters: dict[int, str] = {}
+    series_asset_posters: dict[int, str] = {}
+    for media_type, movie_id, series_id, poster_url in asset_rows:
+        if media_type == MediaType.MOVIE and movie_id is not None:
+            movie_asset_posters[int(movie_id)] = resolve_poster_url(
+                poster_url,
+                context="candidate.preview.asset",
+                media_type=MediaType.MOVIE.value,
+                media_id=int(movie_id),
+            )
+        elif media_type == MediaType.SERIES and series_id is not None:
+            series_asset_posters[int(series_id)] = resolve_poster_url(
+                poster_url,
+                context="candidate.preview.asset",
+                media_type=MediaType.SERIES.value,
+                media_id=int(series_id),
+            )
+
     items: list[RulePreviewEntry] = []
     for record in records:
         is_movie = record.media_type is MediaType.MOVIE
@@ -272,10 +306,10 @@ async def build_rule_preview_items(
             movie.year if is_movie and movie else series.year if series else None
         )
         raw_poster_url = (
-            movie.poster_url
-            if is_movie and movie
-            else series.poster_url
-            if series
+            movie_asset_posters.get(media_id)
+            if is_movie and media_id is not None
+            else series_asset_posters.get(media_id)
+            if media_id is not None
             else None
         )
         if media_id is None or media_title is None:
@@ -291,30 +325,12 @@ async def build_rule_preview_items(
             record.reason_data,
             library_name_by_id,
         )
-        resolved_poster_url, _backdrop_url, _identity = await artwork_service.resolve(
-            db,
-            context="candidate.preview",
-            identity=ArtworkIdentity(
-                media_type=record.media_type,
-                media_id=media_id,
-                tmdb_id=(
-                    movie.tmdb_id
-                    if is_movie and movie
-                    else series.tmdb_id
-                    if series
-                    else None
-                ),
-                tvdb_id=(series.tvdb_id if series and not is_movie else None),
-                imdb_id=(
-                    movie.imdb_id
-                    if is_movie and movie
-                    else series.imdb_id
-                    if series
-                    else None
-                ),
-            ),
+        resolved_poster_url = resolve_poster_url(
             poster_url=raw_poster_url,
-            backdrop_url=None,
+            context="candidate.preview",
+            media_type=record.media_type.value,
+            media_id=media_id,
+            fallback_reason="missing_media_asset_artwork",
         )
 
         items.append(

@@ -145,7 +145,7 @@ class _UnknownMembershipProvider(_FakeProvider):
 
 
 @pytest.mark.anyio
-async def test_protection_rules_report_unknown_when_membership_unverifiable(
+async def test_protection_rules_report_zero_when_reclaimerr_membership_unmapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
@@ -160,7 +160,7 @@ async def test_protection_rules_report_unknown_when_membership_unverifiable(
         rules = await service.get_rules()
         stats = await service.get_stats()
 
-        assert rules[0].protected_items is None
+        assert rules[0].protected_items == 0
         assert stats.protected_files == 1
         assert stats.unmatched_items == 1
 

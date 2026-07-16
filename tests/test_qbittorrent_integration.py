@@ -14,8 +14,8 @@ from backend.api.routes.settings.services import set_service_settings
 from backend.core.service_manager import service_manager
 from backend.database import Base
 from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
-from backend.database.models import Movie, MovieVersion, User
-from backend.enums import Service, UserRole
+from backend.database.models import MediaAsset, Movie, MovieVersion, User
+from backend.enums import MediaType, Service, UserRole
 from backend.models.settings import ServiceConfigUpdate
 from backend.services.qbittorrent import QBittorrentClient
 
@@ -209,6 +209,13 @@ async def test_qbittorrent_overview_uses_correlated_media_poster() -> None:
                     library_id="lib-1",
                     library_name="Movies",
                     path="/downloads/ubuntu-iso/movie.mkv",
+                )
+            )
+            db.add(
+                MediaAsset(
+                    media_type=MediaType.MOVIE,
+                    movie_id=movie.id,
+                    poster_url=movie.poster_url,
                 )
             )
             await db.commit()

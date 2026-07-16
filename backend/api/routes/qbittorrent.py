@@ -3,19 +3,21 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.artwork import resolve_backdrop_url, resolve_poster_url
 from backend.core.auth import require_admin
 from backend.core.service_manager import service_manager
 from backend.database import get_db
-from backend.database.models import User
+from backend.database.models import MediaAsset, User
+from backend.enums import MediaType
 from backend.models.qbittorrent import (
     QBittorrentMetrics,
     QBittorrentOverviewResponse,
     QBittorrentTorrentItem,
 )
 from backend.services.correlation import MediaCorrelationService
-from backend.services.artwork_service import ArtworkIdentity, artwork_service
 
 router = APIRouter(prefix="/api/qbittorrent", tags=["qbittorrent"])
 _correlation_service = MediaCorrelationService()
@@ -69,17 +71,61 @@ async def get_qbittorrent_overview(
     completed = 0
     stalled = 0
 
+    torrent_rows: list[tuple[dict[str, Any], Any, Any]] = []
+    movie_asset_ids: set[int] = set()
+    series_asset_ids: set[int] = set()
     for index, item in enumerate(torrents_raw):
-        state = str(item.get("state") or "")
-        progress = float(item.get("progress") or 0)
-        download_speed = int(item.get("dlspeed") or 0)
-        upload_speed = int(item.get("upspeed") or 0)
-
+        if not isinstance(item, dict):
+            continue
         torrent_summary = _correlation_service.torrent_summary_from_raw(item, index=index)
         correlated_artwork = await _correlation_service.resolve_torrent_artwork(
             db,
             torrent_summary,
         )
+        torrent_rows.append((item, torrent_summary, correlated_artwork))
+        if correlated_artwork.media_type is not None and correlated_artwork.media_id is not None:
+            if correlated_artwork.media_type.value == "movie":
+                movie_asset_ids.add(int(correlated_artwork.media_id))
+            elif correlated_artwork.media_type.value == "series":
+                series_asset_ids.add(int(correlated_artwork.media_id))
+
+    asset_rows: list[tuple[MediaType, int | None, int | None, str | None, str | None]] = []
+    asset_filters = []
+    if movie_asset_ids:
+        asset_filters.append(
+            (MediaAsset.media_type == MediaType.MOVIE)
+            & MediaAsset.movie_id.in_(movie_asset_ids)
+        )
+    if series_asset_ids:
+        asset_filters.append(
+            (MediaAsset.media_type == MediaType.SERIES)
+            & MediaAsset.series_id.in_(series_asset_ids)
+        )
+    if asset_filters:
+        asset_rows = (
+            await db.execute(
+                select(
+                    MediaAsset.media_type,
+                    MediaAsset.movie_id,
+                    MediaAsset.series_id,
+                    MediaAsset.poster_url,
+                    MediaAsset.backdrop_url,
+                ).where(or_(*asset_filters))
+            )
+        ).all()
+    movie_artwork_by_id: dict[int, tuple[str | None, str | None]] = {}
+    series_artwork_by_id: dict[int, tuple[str | None, str | None]] = {}
+    for media_type, movie_id, series_id, poster_url, backdrop_url in asset_rows:
+        if media_type.value == "movie" and movie_id is not None:
+            movie_artwork_by_id[int(movie_id)] = (poster_url, backdrop_url)
+        if media_type.value == "series" and series_id is not None:
+            series_artwork_by_id[int(series_id)] = (poster_url, backdrop_url)
+
+    for item, torrent_summary, correlated_artwork in torrent_rows:
+        state = str(item.get("state") or "")
+        progress = float(item.get("progress") or 0)
+        download_speed = int(item.get("dlspeed") or 0)
+        upload_speed = int(item.get("upspeed") or 0)
 
         if _state_is_active_download(state, download_speed):
             active_downloads += 1
@@ -95,17 +141,28 @@ async def get_qbittorrent_overview(
             stalled += 1
 
         size_value = item.get("size") or item.get("total_size") or 0
-        poster_url, backdrop_url, _identity = await artwork_service.resolve(
-            db,
+        raw_poster_url: str | None = None
+        raw_backdrop_url: str | None = None
+        if correlated_artwork.media_type is not None and correlated_artwork.media_id is not None:
+            if correlated_artwork.media_type.value == "movie":
+                raw_poster_url, raw_backdrop_url = movie_artwork_by_id.get(
+                    int(correlated_artwork.media_id),
+                    (None, None),
+                )
+            elif correlated_artwork.media_type.value == "series":
+                raw_poster_url, raw_backdrop_url = series_artwork_by_id.get(
+                    int(correlated_artwork.media_id),
+                    (None, None),
+                )
+
+        poster_url = resolve_poster_url(
+            raw_poster_url,
             context="qbittorrent.overview",
-            identity=ArtworkIdentity(
-                media_type=correlated_artwork.media_type,
-                media_id=correlated_artwork.media_id,
-            ),
-            poster_url=correlated_artwork.poster_url,
-            backdrop_url=correlated_artwork.backdrop_url,
+            media_type=(correlated_artwork.media_type.value if correlated_artwork.media_type is not None else None),
+            media_id=correlated_artwork.media_id,
             fallback_reason=correlated_artwork.reason,
         )
+        backdrop_url = resolve_backdrop_url(raw_backdrop_url)
 
         torrents.append(
             QBittorrentTorrentItem(

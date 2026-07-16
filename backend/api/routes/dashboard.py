@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
+from backend.core.artwork import resolve_poster_url
 from backend.core.auth import require_page_access
 from backend.core.service_manager import service_manager
 from backend.core.utils.datetime_utils import to_utc_isoformat
@@ -46,7 +47,6 @@ from backend.models.dashboard import (
     DashboardViewer,
 )
 from backend.services.mie.operations_service import OperationsService
-from backend.services.artwork_service import ArtworkIdentity, artwork_service
 from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
 
@@ -198,6 +198,13 @@ async def build_dashboard_response(
     operations_cards = operations_workspace.overview.cards
     operations_recommendations = operations_workspace.recommendations.items
     card_by_key = {card.key: card for card in operations_cards}
+    first_recommendation_poster_by_card: dict[str, str] = {}
+    for item in operations_recommendations:
+        if item.card_key not in first_recommendation_poster_by_card:
+            first_recommendation_poster_by_card[item.card_key] = resolve_poster_url(
+                item.poster_url,
+                context="dashboard.operations_recommendations",
+            )
 
     reclaimable_movies_bytes = int(
         sum(
@@ -337,12 +344,9 @@ async def build_dashboard_response(
         [card for card in operations_cards if card.count > 0],
         key=lambda row: (0 if row.severity == "high" else 1, -row.count, row.title.lower()),
     )[:6]:
-        top_poster, _top_backdrop, _identity = await artwork_service.resolve(
-            db,
+        top_poster = first_recommendation_poster_by_card.get(card.key) or resolve_poster_url(
+            None,
             context="dashboard.top_opportunity.collection",
-            identity=ArtworkIdentity(),
-            poster_url=None,
-            backdrop_url=None,
             fallback_reason=f"collection_{card.key}",
         )
         top_card_opportunities.append(
@@ -361,15 +365,11 @@ async def build_dashboard_response(
     recent_opportunities: list[DashboardOpportunity] = []
     for item in operations_recommendations[:5]:
         media_type = "movie" if item.target_type == "movie" else "series"
-        recent_poster, _recent_backdrop, _identity = await artwork_service.resolve(
-            db,
-            context="dashboard.recent_operations",
-            identity=ArtworkIdentity(
-                media_type=(MediaType.MOVIE if media_type == "movie" else MediaType.SERIES),
-                media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
-            ),
+        recent_poster = resolve_poster_url(
             poster_url=item.poster_url,
-            backdrop_url=None,
+            context="dashboard.recent_operations",
+            media_type=media_type,
+            media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
         )
         recent_opportunities.append(
             DashboardOpportunity(

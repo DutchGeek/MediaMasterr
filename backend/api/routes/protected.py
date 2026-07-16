@@ -8,11 +8,13 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.core.artwork import resolve_poster_url
 from backend.core.auth import get_current_user, has_permission, require_page_access
 from backend.core.utils.datetime_utils import to_utc_isoformat
 from backend.database import get_db
 from backend.database.models import (
     Episode,
+    MediaAsset,
     Movie,
     MovieVersion,
     ProtectedMedia,
@@ -111,6 +113,41 @@ def can_manage_protection(user: User) -> bool:
     """Check if the user has permission to manage protected media entries."""
     return user.role is UserRole.ADMIN or has_permission(
         user, Permission.MANAGE_PROTECTION
+    )
+
+
+async def _media_asset_poster(
+    db: AsyncSession,
+    *,
+    media_type: MediaType,
+    media_id: int,
+    context: str,
+) -> str:
+    if media_type is MediaType.MOVIE:
+        poster = (
+            await db.execute(
+                select(MediaAsset.poster_url).where(
+                    MediaAsset.media_type == MediaType.MOVIE,
+                    MediaAsset.movie_id == media_id,
+                )
+            )
+        ).scalar_one_or_none()
+    else:
+        poster = (
+            await db.execute(
+                select(MediaAsset.poster_url).where(
+                    MediaAsset.media_type == MediaType.SERIES,
+                    MediaAsset.series_id == media_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    return resolve_poster_url(
+        poster,
+        context=context,
+        media_type=media_type.value,
+        media_id=media_id,
+        fallback_reason="missing_media_asset_artwork",
     )
 
 
@@ -277,6 +314,49 @@ async def get_protected_entries(
     )
     rows = result.all()
 
+    movie_ids = {
+        int(row[0].movie_id)
+        for row in rows
+        if row[0].media_type is MediaType.MOVIE and row[0].movie_id is not None
+    }
+    series_ids = {
+        int(row[0].series_id)
+        for row in rows
+        if row[0].media_type is MediaType.SERIES and row[0].series_id is not None
+    }
+    asset_rows = (
+        await db.execute(
+            select(
+                MediaAsset.media_type,
+                MediaAsset.movie_id,
+                MediaAsset.series_id,
+                MediaAsset.poster_url,
+            ).where(
+                (MediaAsset.media_type == MediaType.MOVIE)
+                & MediaAsset.movie_id.in_(movie_ids)
+                | (MediaAsset.media_type == MediaType.SERIES)
+                & MediaAsset.series_id.in_(series_ids)
+            )
+        )
+    ).all()
+    movie_asset_posters: dict[int, str] = {}
+    series_asset_posters: dict[int, str] = {}
+    for media_type_value, movie_id_value, series_id_value, poster_url_value in asset_rows:
+        if media_type_value is MediaType.MOVIE and movie_id_value is not None:
+            movie_asset_posters[int(movie_id_value)] = resolve_poster_url(
+                poster_url_value,
+                context="protected.entries.asset",
+                media_type=MediaType.MOVIE.value,
+                media_id=int(movie_id_value),
+            )
+        elif media_type_value is MediaType.SERIES and series_id_value is not None:
+            series_asset_posters[int(series_id_value)] = resolve_poster_url(
+                poster_url_value,
+                context="protected.entries.asset",
+                media_type=MediaType.SERIES.value,
+                media_id=int(series_id_value),
+            )
+
     responses: list[ProtectedEntryResponse] = []
     for row in rows:
         entry: ProtectedMedia = row[0]
@@ -287,9 +367,9 @@ async def get_protected_entries(
             row.movie_year if entry.media_type is MediaType.MOVIE else row.series_year
         )
         poster_url = (
-            row.movie_poster_url
+            movie_asset_posters.get(int(entry.movie_id or -1))
             if entry.media_type is MediaType.MOVIE
-            else row.series_poster_url
+            else series_asset_posters.get(int(entry.series_id or -1))
         )
         tmdb_id = (
             row.movie_tmdb_id
@@ -417,6 +497,14 @@ async def get_protected_entries(
 
         if media_title is None or media_year is None or media_id is None:
             continue
+
+        poster_url = resolve_poster_url(
+            poster_url,
+            context="protected.entries",
+            media_type=entry.media_type.value,
+            media_id=media_id,
+            fallback_reason="missing_media_asset_artwork",
+        )
 
         responses.append(
             ProtectedEntryResponse(
@@ -617,7 +705,12 @@ async def create_protection_entry(
         episode_name=episode.name if episode else None,
         media_title=media.title,
         media_year=media.year,
-        poster_url=media.poster_url,
+        poster_url=await _media_asset_poster(
+            db,
+            media_type=new_entry.media_type,
+            media_id=request_data.media_id,
+            context="protected.create",
+        ),
         tmdb_id=media.tmdb_id,
         vote_average=media.vote_average,
         vote_count=media.vote_count,
@@ -745,7 +838,12 @@ async def update_protection_duration(
         episode_name=episode.name if episode else None,
         media_title=media.title,
         media_year=media.year,
-        poster_url=media.poster_url,
+        poster_url=await _media_asset_poster(
+            db,
+            media_type=entry.media_type,
+            media_id=media_id,
+            context="protected.update_duration",
+        ),
         tmdb_id=media.tmdb_id,
         vote_average=media.vote_average,
         vote_count=media.vote_count,

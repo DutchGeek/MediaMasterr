@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
 from backend.database import Base
-from backend.database.models import CleanupPlan, Movie, ReclaimCandidate
+from backend.database.models import CleanupPlan, MediaAsset, Movie, ReclaimCandidate
 from backend.enums import MediaType
 from backend.services.mie.operations_service import OperationsService
 
@@ -100,6 +100,20 @@ async def test_operations_recommendations_resolve_posters() -> None:
         )
         db.add_all([movie_with_poster, movie_without_poster])
         await db.flush()
+        db.add_all(
+            [
+                MediaAsset(
+                    media_type=MediaType.MOVIE,
+                    movie_id=movie_with_poster.id,
+                    poster_url=movie_with_poster.poster_url,
+                ),
+                MediaAsset(
+                    media_type=MediaType.MOVIE,
+                    movie_id=movie_without_poster.id,
+                    poster_url=movie_without_poster.poster_url,
+                ),
+            ]
+        )
 
         db.add_all(
             [

@@ -508,6 +508,8 @@ class MediaAsset(Base):
     has_torrent: Mapped[bool] = mapped_column(Boolean, default=False)
     has_filesystem_objects: Mapped[bool] = mapped_column(Boolean, default=False)
     is_protected: Mapped[bool] = mapped_column(Boolean, default=False)
+    poster_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    backdrop_url: Mapped[str | None] = mapped_column(String(500), default=None)
     recommendation: Mapped[str | None] = mapped_column(String(255), default=None)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     updated_at: Mapped[datetime] = mapped_column(
