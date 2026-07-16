@@ -265,7 +265,7 @@ class LeavingSoonEmbyCollectionSyncTests(unittest.IsolatedAsyncioTestCase):
                 raise AssertionError("No collection should be deleted")
 
         fake = FakeService()
-        with self.assertLogs("reclaimerr", level="WARNING") as logs:
+        with self.assertLogs("mediamasterr", level="WARNING") as logs:
             await EmbyServiceBase._sync_leaving_soon_collection(
                 fake,  # type: ignore[arg-type]
                 collection_title="Leaving Soon [Movies]",

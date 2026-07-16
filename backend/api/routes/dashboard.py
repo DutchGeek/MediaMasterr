@@ -164,7 +164,7 @@ async def build_dashboard_response(
                 select(func.count())
                 .select_from(TaskRun)
                 .where(
-                    TaskRun.status == TaskStatus.FAILED,
+                    TaskRun.status == TaskStatus.ERROR,
                     TaskRun.started_at.is_not(None),
                     TaskRun.started_at >= seven_days_ago,
                 )

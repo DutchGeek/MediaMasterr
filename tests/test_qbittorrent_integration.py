@@ -154,6 +154,7 @@ async def test_qbittorrent_overview_is_read_only_summary() -> None:
     assert payload.metrics.upload_speed == 456
     assert len(payload.torrents) == 4
     assert all(row.poster_url == CENTRAL_PLACEHOLDER_POSTER_URL for row in payload.torrents)
+    assert all((row.correlation_reason or "").strip() for row in payload.torrents)
 
 
 @pytest.mark.anyio

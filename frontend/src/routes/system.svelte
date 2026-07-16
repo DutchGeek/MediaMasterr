@@ -138,6 +138,33 @@
     return `${value.toFixed(0)} ms`;
   };
 
+  const normalizeProviderStatus = (
+    value: string | null | undefined,
+  ): ProviderDiagnosticStatus => {
+    const lowered = (value ?? "").toLowerCase();
+    if (lowered === "healthy" || lowered === "connected") return "healthy";
+    if (lowered === "degraded" || lowered === "warning") return "degraded";
+    return "down";
+  };
+
+  const probeProtectionDiagnostics = (
+    protectionStatus: ProtectionStatus,
+  ): ProviderDiagnostic => ({
+    key: "protection",
+    name: "Protection",
+    endpoint: protectionStatus.base_url,
+    connected: protectionStatus.connected && protectionStatus.authenticated,
+    version: protectionStatus.provider_version ?? "n/a",
+    responseTimeMs: null,
+    lastSuccessfulSync: protectionStatus.last_sync,
+    lastAttempt: protectionStatus.last_login,
+    status: normalizeProviderStatus(protectionStatus.connection_status),
+    reason: protectionStatus.message,
+    lastError: protectionStatus.message,
+    httpStatus: null,
+    apiVersion: null,
+  });
+
   const runMaintenanceAction = async (taskId: string, label: string) => {
     try {
       await post_api(`/api/tasks/tasks/${taskId}/run`, {});
@@ -152,11 +179,12 @@
     loading = true;
     error = "";
     try {
-      const [health, version, diagnostics, taskPayload] = await Promise.all([
+      const [health, version, diagnostics, taskPayload, protectionStatus] = await Promise.all([
         get_api<HealthResponse>("/api/info/health"),
         get_api<VersionResponse>("/api/info/version"),
         get_api<SystemDiagnosticsResponse>("/api/system/diagnostics"),
         get_api<TasksResponse>("/api/tasks/tasks"),
+        get_api<ProtectionStatus>("/api/protection/status"),
       ]);
 
       backendStatus =
@@ -170,7 +198,13 @@
       programName = version.program;
       systemDiagnostics = diagnostics;
 
-      providers = diagnostics.providers;
+      const diagnosticsProviders = diagnostics.providers;
+      const hasProtectionProvider = diagnosticsProviders.some(
+        (provider) => provider.key === "protection",
+      );
+      providers = hasProtectionProvider
+        ? diagnosticsProviders
+        : [...diagnosticsProviders, probeProtectionDiagnostics(protectionStatus)];
 
       tasks = taskPayload.tasks;
 

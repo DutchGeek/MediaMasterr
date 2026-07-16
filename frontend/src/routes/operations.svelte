@@ -36,6 +36,7 @@
   let workflowError = $state("");
   let workflowPreview = $state<OperationWorkflowResponse | null>(null);
   let auditTrail = $state<OperationAuditListResponse | null>(null);
+  let selectedRecommendationId = $state<string | null>(null);
 
   const load = async () => {
     loading = true;
@@ -54,6 +55,7 @@
     recommendationId: string,
     action: "preview" | "validate" | "execute",
   ) => {
+    selectedRecommendationId = recommendationId;
     workflowBusyId = recommendationId;
     workflowError = "";
     try {
@@ -157,6 +159,7 @@
   });
 
   const openComparison = (recommendationId: string) => {
+    selectedRecommendationId = recommendationId;
     const target = mediaMovies.find((item) => item.id === recommendationId) ?? null;
     if (target) {
       selectedAsset = target;
@@ -205,9 +208,8 @@
           },
         ],
         quickActions: [
-          { id: "preview", label: "Preview" },
-          { id: "validate", label: "Validate" },
-          { id: "execute", label: "Execute" },
+          { id: "details", label: "Details" },
+          { id: "comparison", label: "Open Comparison" },
         ],
         posterUrl: item.poster_url,
       }));
@@ -574,49 +576,43 @@
           <h2 class="text-lg font-semibold text-foreground">Movie Actions</h2>
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {#each mediaMovies as item}
-              <div class="space-y-2">
-                <MovieCard
-                  {item}
-                  {posterSize}
-                  onSelect={() => {
-                    selectedAsset = item;
-                    drawerOpen = true;
-                  }}
-                />
-                <div class="rounded-xl border border-border/60 bg-card/60 p-2">
-                  <p class="text-xs text-muted-foreground">
-                    {item.recommendation?.message}
-                  </p>
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
-                      onclick={() => runWorkflow(item.id, "preview")}
-                      disabled={workflowBusyId === item.id}
-                    >Preview</button>
-                    <button
-                      type="button"
-                      class="rounded-full border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary/40"
-                      onclick={() => runWorkflow(item.id, "validate")}
-                      disabled={workflowBusyId === item.id}
-                    >Validate</button>
-                    <button
-                      type="button"
-                      class="rounded-full border border-primary bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20"
-                      onclick={() => runWorkflow(item.id, "execute")}
-                      disabled={workflowBusyId === item.id}
-                    >Execute</button>
-                  </div>
-                </div>
-              </div>
+              <MovieCard
+                {item}
+                {posterSize}
+                onSelect={() => {
+                  selectedRecommendationId = item.id;
+                  selectedAsset = item;
+                  drawerOpen = true;
+                }}
+              />
             {/each}
           </div>
         </section>
       {/if}
 
-      <section class="space-y-3">
+      <section class="space-y-3 sticky bottom-0 z-10 bg-background/95 py-2 backdrop-blur border-t border-border/50">
         <h2 class="text-lg font-semibold text-foreground">Operation Workflow</h2>
         <div class="rounded-2xl border border-border/70 bg-card/60 p-4 text-sm">
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "preview")}
+              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
+            >Preview</button>
+            <button
+              type="button"
+              class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "validate")}
+              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
+            >Validate</button>
+            <button
+              type="button"
+              class="rounded-full border border-primary bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20"
+              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "execute")}
+              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
+            >Execute</button>
+          </div>
           {#if workflowError}
             <p class="text-destructive">{workflowError}</p>
           {/if}
