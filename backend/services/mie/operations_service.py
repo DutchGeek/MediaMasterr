@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import Integer, and_, cast as sql_cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.artwork import resolve_poster_url
 from backend.core.service_manager import service_manager
 from backend.database.models import (
     CleanupPlan,
@@ -44,6 +43,7 @@ from backend.models.mie import (
     OperationWorkflowValidationCheck,
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
+from backend.services.media_asset_artwork import media_asset_artwork_resolver
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -214,60 +214,6 @@ class OperationsService:
         protected_movies = {int(movie_id) for movie_id, _ in rows if movie_id is not None}
         protected_series = {int(series_id) for _, series_id in rows if series_id is not None}
         return protected_movies, protected_series
-
-    async def _media_asset_posters(
-        self,
-    ) -> tuple[dict[int, str], dict[int, str]]:
-        rows = (
-            await self.db.execute(
-                select(
-                    MediaAsset.media_type,
-                    MediaAsset.movie_id,
-                    MediaAsset.series_id,
-                    MediaAsset.poster_url,
-                )
-            )
-        ).all()
-        movie_posters: dict[int, str] = {}
-        series_posters: dict[int, str] = {}
-        for media_type, movie_id, series_id, poster_url in rows:
-            if media_type == MediaType.MOVIE and movie_id is not None:
-                movie_posters[int(movie_id)] = resolve_poster_url(
-                    poster_url,
-                    context="operations.media_assets",
-                    media_type=MediaType.MOVIE.value,
-                    media_id=int(movie_id),
-                )
-            elif media_type == MediaType.SERIES and series_id is not None:
-                series_posters[int(series_id)] = resolve_poster_url(
-                    poster_url,
-                    context="operations.media_assets",
-                    media_type=MediaType.SERIES.value,
-                    media_id=int(series_id),
-                )
-        return movie_posters, series_posters
-
-    @staticmethod
-    def _recommendation_poster_for_target(
-        *,
-        target_type: str,
-        target_id: str | None,
-        movie_posters: dict[int, str],
-        series_posters: dict[int, str],
-        context: str,
-        fallback_reason: str,
-    ) -> str:
-        if target_id and target_id.isdigit():
-            numeric_id = int(target_id)
-            if target_type == "movie" and numeric_id in movie_posters:
-                return movie_posters[numeric_id]
-            if target_type in {"series", "season", "episode"} and numeric_id in series_posters:
-                return series_posters[numeric_id]
-        return resolve_poster_url(
-            None,
-            context=context,
-            fallback_reason=fallback_reason,
-        )
 
     async def _refresh_media_assets_snapshot(
         self,
@@ -563,7 +509,6 @@ class OperationsService:
         return OperationsOverviewResponse(cards=cards, generated_at=datetime.now(UTC))
 
     async def _cleanup_plan_recommendations(self) -> list[OperationsRecommendation]:
-        movie_posters, series_posters = await self._media_asset_posters()
         rows = (
             await self.db.execute(
                 select(
@@ -585,12 +530,19 @@ class OperationsService:
             reasons = [r.strip() for r in item.summary.split(";") if r.strip()] if item.summary else []
             if not reasons and item.summary:
                 reasons = [item.summary]
-            poster = self._recommendation_poster_for_target(
-                target_type=item.target_type,
-                target_id=item.target_id,
-                movie_posters=movie_posters,
-                series_posters=series_posters,
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
                 context="operations.recommendations.cleanup_plan",
+                media_type=(
+                    MediaType.MOVIE
+                    if item.target_type == "movie"
+                    else MediaType.SERIES
+                    if item.target_type in {"series", "season", "episode"}
+                    else None
+                ),
+                media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
+                provider_poster_url=None,
+                provider_backdrop_url=None,
                 fallback_reason=f"cleanup_plan_{item.card_key}",
             )
             items.append(
@@ -606,13 +558,12 @@ class OperationsService:
                     target_type=item.target_type,
                     target_id=item.target_id,
                     estimated_recovery_bytes=item.estimated_recovery_bytes,
-                    poster_url=poster,
+                    poster_url=resolved_artwork.poster_url,
                 )
             )
         return items
 
     async def _fallback_recommendations(self) -> list[OperationsRecommendation]:
-        movie_posters, series_posters = await self._media_asset_posters()
         rows = (
             await self.db.execute(
                 select(
@@ -633,17 +584,13 @@ class OperationsService:
             target_title = row.movie_title or row.series_title or f"Candidate #{candidate.id}"
             reasons = [candidate.reason] if candidate.reason else ["Rule engine matched candidate."]
             media_id = candidate.movie_id or candidate.series_id
-            if candidate.movie_id is not None and media_id is not None:
-                poster = movie_posters.get(media_id)
-            elif candidate.series_id is not None and media_id is not None:
-                poster = series_posters.get(media_id)
-            else:
-                poster = None
-            poster = resolve_poster_url(
-                poster,
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
                 context="operations.recommendations.reclaim_candidate",
-                media_type=(MediaType.MOVIE.value if candidate.movie_id is not None else MediaType.SERIES.value),
+                media_type=(MediaType.MOVIE if candidate.movie_id is not None else MediaType.SERIES),
                 media_id=media_id,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
                 fallback_reason="reclaim_candidate_missing_asset_artwork",
             )
             items.append(
@@ -664,7 +611,7 @@ class OperationsService:
                     target_type="reclaim_candidate",
                     target_id=str(candidate.id),
                     estimated_recovery_bytes=candidate.estimated_space_bytes or 0,
-                    poster_url=poster,
+                    poster_url=resolved_artwork.poster_url,
                 )
             )
 
@@ -680,11 +627,13 @@ class OperationsService:
             )
         ).all()
         for movie_id, movie_title, version_count in duplicate_rows:
-            poster = resolve_poster_url(
-                movie_posters.get(int(movie_id)),
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
                 context="operations.recommendations.duplicate_release",
-                media_type=MediaType.MOVIE.value,
+                media_type=MediaType.MOVIE,
                 media_id=int(movie_id),
+                provider_poster_url=None,
+                provider_backdrop_url=None,
                 fallback_reason="duplicate_release_missing_asset_artwork",
             )
             items.append(
@@ -703,7 +652,7 @@ class OperationsService:
                     target_type="movie",
                     target_id=str(movie_id),
                     estimated_recovery_bytes=0,
-                    poster_url=poster,
+                    poster_url=resolved_artwork.poster_url,
                 )
             )
 
@@ -721,9 +670,13 @@ class OperationsService:
             ratio = float(raw.get("ratio") or 0)
 
             if artwork.media_id is None:
-                orphan_poster = resolve_poster_url(
-                    None,
+                orphan_artwork = await media_asset_artwork_resolver.resolve(
+                    self.db,
                     context="operations.recommendations.orphaned_torrent",
+                    media_type=None,
+                    media_id=None,
+                    provider_poster_url=None,
+                    provider_backdrop_url=None,
                     fallback_reason="orphaned_torrent",
                 )
                 items.append(
@@ -742,23 +695,19 @@ class OperationsService:
                         target_type="torrent",
                         target_id=torrent_id,
                         estimated_recovery_bytes=int(raw.get("size") or 0),
-                        poster_url=orphan_poster,
+                        poster_url=orphan_artwork.poster_url,
                     )
                 )
                 continue
 
             if self._is_completed(progress) and ratio >= 1:
-                detach_poster = resolve_poster_url(
-                    (
-                        movie_posters.get(int(artwork.media_id))
-                        if artwork.media_type == MediaType.MOVIE and artwork.media_id is not None
-                        else series_posters.get(int(artwork.media_id))
-                        if artwork.media_type == MediaType.SERIES and artwork.media_id is not None
-                        else None
-                    ),
+                resolved_artwork = await media_asset_artwork_resolver.resolve(
+                    self.db,
                     context="operations.recommendations.detach_torrent",
-                    media_type=artwork.media_type.value if artwork.media_type is not None else None,
+                    media_type=artwork.media_type,
                     media_id=artwork.media_id,
+                    provider_poster_url=artwork.poster_url,
+                    provider_backdrop_url=artwork.backdrop_url,
                     fallback_reason="detach_torrent_missing_asset_artwork",
                 )
                 items.append(
@@ -778,14 +727,18 @@ class OperationsService:
                         target_type="torrent",
                         target_id=torrent_id,
                         estimated_recovery_bytes=0,
-                        poster_url=detach_poster,
+                        poster_url=resolved_artwork.poster_url,
                     )
                 )
 
         if not items:
-            healthy_poster = resolve_poster_url(
-                None,
+            healthy_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
                 context="operations.recommendations.healthy",
+                media_type=None,
+                media_id=None,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
                 fallback_reason="healthy_state",
             )
             items.append(
@@ -801,7 +754,7 @@ class OperationsService:
                     target_type="system",
                     target_id=None,
                     estimated_recovery_bytes=0,
-                    poster_url=healthy_poster,
+                    poster_url=healthy_artwork.poster_url,
                 )
             )
 

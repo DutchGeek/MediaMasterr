@@ -19,6 +19,7 @@ from backend.models.mie import (
     OperationWorkflowResponse,
     OperationsOverviewResponse,
     OperationsRecommendationsResponse,
+    OperationsWorkspaceResponse,
 )
 from backend.services.mie.operations_service import OperationsService
 
@@ -31,6 +32,15 @@ async def get_operations_overview(
     db: AsyncSession = Depends(get_db),
 ) -> OperationsOverviewResponse:
     return await OperationsService(db).overview()
+
+
+@router.get("/workspace", response_model=OperationsWorkspaceResponse)
+async def get_operations_workspace_compat(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationsWorkspaceResponse:
+    """Compatibility endpoint for legacy clients expecting /api/operations/workspace."""
+    return await OperationsService(db).workspace()
 
 
 @router.get("/recommendations", response_model=OperationsRecommendationsResponse)

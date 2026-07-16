@@ -161,7 +161,9 @@ async def test_protection_rules_report_zero_when_reclaimerr_membership_unmapped(
         stats = await service.get_stats()
 
         assert rules[0].protected_items == 0
+        assert any(rule.rule == "Unmapped" and rule.protected_items == 1 for rule in rules)
         assert stats.protected_files == 1
         assert stats.unmatched_items == 1
+        assert sum((rule.protected_items or 0) for rule in rules) == stats.protected_files
 
     await engine.dispose()

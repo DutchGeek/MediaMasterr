@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
-from backend.core.artwork import resolve_poster_url
 from backend.core.auth import require_page_access
 from backend.core.service_manager import service_manager
 from backend.core.utils.datetime_utils import to_utc_isoformat
@@ -46,6 +45,7 @@ from backend.models.dashboard import (
     DashboardServiceSummary,
     DashboardViewer,
 )
+from backend.services.media_asset_artwork import media_asset_artwork_resolver
 from backend.services.mie.operations_service import OperationsService
 from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
@@ -198,13 +198,32 @@ async def build_dashboard_response(
     operations_cards = operations_workspace.overview.cards
     operations_recommendations = operations_workspace.recommendations.items
     card_by_key = {card.key: card for card in operations_cards}
+
+    def _recommendation_media_identity(target_type: str, target_id: str | None) -> tuple[MediaType | None, int | None]:
+        if not target_id or not target_id.isdigit():
+            return None, None
+        parsed_target_id = int(target_id)
+        if target_type == "movie":
+            return MediaType.MOVIE, parsed_target_id
+        if target_type in {"series", "season", "episode"}:
+            return MediaType.SERIES, parsed_target_id
+        return None, None
+
     first_recommendation_poster_by_card: dict[str, str] = {}
     for item in operations_recommendations:
         if item.card_key not in first_recommendation_poster_by_card:
-            first_recommendation_poster_by_card[item.card_key] = resolve_poster_url(
-                item.poster_url,
-                context="dashboard.operations_recommendations",
+            media_type, media_id = _recommendation_media_identity(
+                item.target_type, item.target_id
             )
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                db,
+                context="dashboard.operations_recommendations",
+                media_type=media_type,
+                media_id=media_id,
+                provider_poster_url=item.poster_url,
+                fallback_reason=f"recommendation_{item.card_key}",
+            )
+            first_recommendation_poster_by_card[item.card_key] = resolved_artwork.poster_url
 
     reclaimable_movies_bytes = int(
         sum(
@@ -344,11 +363,16 @@ async def build_dashboard_response(
         [card for card in operations_cards if card.count > 0],
         key=lambda row: (0 if row.severity == "high" else 1, -row.count, row.title.lower()),
     )[:6]:
-        top_poster = first_recommendation_poster_by_card.get(card.key) or resolve_poster_url(
-            None,
-            context="dashboard.top_opportunity.collection",
-            fallback_reason=f"collection_{card.key}",
-        )
+        top_poster = first_recommendation_poster_by_card.get(card.key)
+        if top_poster is None:
+            top_artwork = await media_asset_artwork_resolver.resolve(
+                db,
+                context="dashboard.top_opportunity.collection",
+                media_type=None,
+                media_id=None,
+                fallback_reason=f"collection_{card.key}",
+            )
+            top_poster = top_artwork.poster_url
         top_card_opportunities.append(
             DashboardOpportunity(
                 title=card.title,
@@ -365,11 +389,16 @@ async def build_dashboard_response(
     recent_opportunities: list[DashboardOpportunity] = []
     for item in operations_recommendations[:5]:
         media_type = "movie" if item.target_type == "movie" else "series"
-        recent_poster = resolve_poster_url(
-            poster_url=item.poster_url,
+        rec_media_type, rec_media_id = _recommendation_media_identity(
+            item.target_type, item.target_id
+        )
+        recent_artwork = await media_asset_artwork_resolver.resolve(
+            db,
             context="dashboard.recent_operations",
-            media_type=media_type,
-            media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
+            media_type=rec_media_type,
+            media_id=rec_media_id,
+            provider_poster_url=item.poster_url,
+            fallback_reason=f"recommendation_{item.card_key}",
         )
         recent_opportunities.append(
             DashboardOpportunity(
@@ -377,7 +406,7 @@ async def build_dashboard_response(
                 media_type=media_type,
                 scope="Recommendation",
                 reclaimable_size_bytes=int(item.estimated_recovery_bytes or 0),
-                poster_url=recent_poster,
+                poster_url=recent_artwork.poster_url,
                 operation_key=item.card_key,
                 metric_count=None,
                 target_path=(

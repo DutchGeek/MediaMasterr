@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from granian.utils.proxies import wrap_asgi_with_proxy_headers
@@ -213,6 +213,8 @@ if settings.frontend_dist and settings.frontend_dist.is_dir():
 
     @fastapi_app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API route not found")
         candidate = fe_dist / full_path
         if candidate.is_file():
             return FileResponse(candidate)

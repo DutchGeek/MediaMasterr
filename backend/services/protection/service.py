@@ -390,6 +390,18 @@ class ProtectionService:
         else:
             unmatched_items = max(0, len(item_responses) - len(matched_item_indexes))
 
+        if unmatched_items > 0:
+            rule_responses.append(
+                ProtectionRuleResponse(
+                    rule="Unmapped",
+                    source="Derived",
+                    protected_items=unmatched_items,
+                    status="Active",
+                    last_updated=stats.last_sync,
+                )
+            )
+            reconciled_rule_items += unmatched_items
+
         return _ProtectionSnapshot(
             stats=stats,
             rules=rule_responses,

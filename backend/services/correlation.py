@@ -181,6 +181,19 @@ class MediaCorrelationService:
         return (" ".join(tokens[:8]).strip(), year)
 
     @staticmethod
+    def _parse_torrent_external_ids(
+        name: str,
+    ) -> tuple[str | None, int | None, str | None]:
+        lowered = (name or "").lower()
+        imdb_match = re.search(r"\btt\d{7,10}\b", lowered)
+        tmdb_match = re.search(r"\btmdb\D*(\d{3,10})\b", lowered)
+        tvdb_match = re.search(r"\btvdb\D*(\d{3,10})\b", lowered)
+        imdb_id = imdb_match.group(0) if imdb_match else None
+        tmdb_id = int(tmdb_match.group(1)) if tmdb_match else None
+        tvdb_id = tvdb_match.group(1) if tvdb_match else None
+        return imdb_id, tmdb_id, tvdb_id
+
+    @staticmethod
     def _titles_compatible(parsed_title: str, candidate_title: str) -> bool:
         parsed = MediaCorrelationService._normalize_identity_text(parsed_title)
         candidate = MediaCorrelationService._normalize_identity_text(candidate_title)
@@ -193,24 +206,48 @@ class MediaCorrelationService:
         *,
         parsed_title: str,
         parsed_year: int | None,
+        parsed_imdb_id: str | None,
+        parsed_tmdb_id: int | None,
         save_path: str | None,
         candidate: _MovieMatch,
     ) -> bool:
-        title_match = MediaCorrelationService._titles_compatible(parsed_title, candidate.movie.title)
-        year_match = parsed_year is None or candidate.movie.year is None or candidate.movie.year == parsed_year
+        title_match = MediaCorrelationService._titles_compatible(
+            parsed_title, candidate.movie.title
+        )
+        year_match = (
+            parsed_year is None
+            or candidate.movie.year is None
+            or candidate.movie.year == parsed_year
+        )
         path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.version.path)
-        return (title_match and year_match) or path_overlap >= 2
+        return (
+            (parsed_imdb_id is not None and (candidate.movie.imdb_id or "").lower() == parsed_imdb_id)
+            or (parsed_tmdb_id is not None and candidate.movie.tmdb_id == parsed_tmdb_id)
+            or path_overlap >= 2
+            or (path_overlap >= 1 and title_match and year_match)
+        )
 
     @staticmethod
     def _episode_identity_confident(
         *,
         parsed_title: str,
+        parsed_imdb_id: str | None,
+        parsed_tmdb_id: int | None,
+        parsed_tvdb_id: str | None,
         save_path: str | None,
         candidate: _EpisodeMatch,
     ) -> bool:
-        title_match = MediaCorrelationService._titles_compatible(parsed_title, candidate.series.title)
+        title_match = MediaCorrelationService._titles_compatible(
+            parsed_title, candidate.series.title
+        )
         path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.episode.path)
-        return title_match or path_overlap >= 2
+        return (
+            (parsed_imdb_id is not None and (candidate.series.imdb_id or "").lower() == parsed_imdb_id)
+            or (parsed_tmdb_id is not None and candidate.series.tmdb_id == parsed_tmdb_id)
+            or (parsed_tvdb_id is not None and (candidate.series.tvdb_id or "") == parsed_tvdb_id)
+            or path_overlap >= 2
+            or (path_overlap >= 1 and title_match)
+        )
 
     @staticmethod
     def _path_overlap_depth(left: str | None, right: str | None) -> int:
@@ -508,6 +545,9 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
+        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
+            torrent.name
+        )
         category = (torrent.category or "").lower() or None
 
         best_movie = await self._find_best_movie_match(
@@ -724,6 +764,9 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
+        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
+            torrent.name
+        )
         category = (torrent.category or "").lower() or None
 
         best_movie = await self._find_best_movie_match(
@@ -752,6 +795,8 @@ class MediaCorrelationService:
         if selected_mode == "movie" and best_movie and self._movie_identity_confident(
             parsed_title=parsed_title,
             parsed_year=parsed_year,
+            parsed_imdb_id=parsed_imdb_id,
+            parsed_tmdb_id=parsed_tmdb_id,
             save_path=save_path,
             candidate=best_movie,
         ):
@@ -769,6 +814,9 @@ class MediaCorrelationService:
 
         if selected_mode == "episode" and best_episode and self._episode_identity_confident(
             parsed_title=parsed_title,
+            parsed_imdb_id=parsed_imdb_id,
+            parsed_tmdb_id=parsed_tmdb_id,
+            parsed_tvdb_id=parsed_tvdb_id,
             save_path=save_path,
             candidate=best_episode,
         ):
