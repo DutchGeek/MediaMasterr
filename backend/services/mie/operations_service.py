@@ -24,6 +24,7 @@ from backend.database.models import (
 )
 from backend.enums import MediaType
 from backend.models.mie import (
+    ArtworkIssuesSummary,
     CleanupPlanListResponse,
     CleanupPlanSummaryResponse,
     FilesystemAccessMode,
@@ -44,6 +45,10 @@ from backend.models.mie import (
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
+from backend.services.mie.artwork_integrity_service import (
+    ArtworkIntegrityScanSummary,
+    ArtworkIntegrityService,
+)
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -125,6 +130,36 @@ CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
         "Bytes recoverable from current cleanup recommendations",
         "info",
     ),
+    (
+        "artwork_missing",
+        "Missing Posters",
+        "Media assets without resolved poster artwork",
+        "medium",
+    ),
+    (
+        "artwork_placeholder",
+        "Placeholder Artwork",
+        "Assets currently using placeholder artwork",
+        "medium",
+    ),
+    (
+        "artwork_invalid",
+        "Invalid Artwork",
+        "Artwork entries that failed integrity validation",
+        "high",
+    ),
+    (
+        "artwork_stale",
+        "Stale Artwork",
+        "Artwork that should be refreshed for completeness",
+        "low",
+    ),
+    (
+        "artwork_collisions",
+        "Cache Collisions",
+        "Possible artwork reuse across unrelated media identities",
+        "high",
+    ),
 ]
 
 _NOISE_TOKENS = {
@@ -159,6 +194,8 @@ class OperationsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self._correlation_service = MediaCorrelationService()
+        self._artwork_integrity_service = ArtworkIntegrityService(db)
+        self._last_artwork_scan: ArtworkIntegrityScanSummary | None = None
 
     @staticmethod
     def _is_download_state(state: str) -> bool:
@@ -298,6 +335,7 @@ class OperationsService:
                         is_protected=is_protected,
                         poster_url=movie.poster_url,
                         backdrop_url=movie.backdrop_url,
+                        artwork_source="library",
                         recommendation=recommendation,
                         last_indexed_at=datetime.now(UTC),
                     )
@@ -310,6 +348,7 @@ class OperationsService:
             asset.is_protected = is_protected
             asset.poster_url = movie.poster_url
             asset.backdrop_url = movie.backdrop_url
+            asset.artwork_source = asset.artwork_source or "library"
             asset.recommendation = recommendation
             asset.last_indexed_at = datetime.now(UTC)
 
@@ -352,6 +391,7 @@ class OperationsService:
                         is_protected=is_protected,
                         poster_url=series.poster_url,
                         backdrop_url=series.backdrop_url,
+                        artwork_source="library",
                         recommendation=recommendation,
                         last_indexed_at=datetime.now(UTC),
                     )
@@ -364,6 +404,7 @@ class OperationsService:
             asset.is_protected = is_protected
             asset.poster_url = series.poster_url
             asset.backdrop_url = series.backdrop_url
+            asset.artwork_source = asset.artwork_source or "library"
             asset.recommendation = recommendation
             asset.last_indexed_at = datetime.now(UTC)
 
@@ -424,6 +465,9 @@ class OperationsService:
 
         torrents_raw, correlated = await self._load_torrent_state()
         await self._refresh_media_assets_snapshot(correlated)
+        self._last_artwork_scan = await self._artwork_integrity_service.scan_and_repair(
+            migration_mode=False
+        )
 
         protected_movies, protected_series = await self._active_protection_sets()
 
@@ -491,6 +535,30 @@ class OperationsService:
             "empty_folders": 0,
             "leftover_files": 0,
             "space_recovery": estimated_recovery_bytes,
+            "artwork_missing": int(
+                self._last_artwork_scan.status_counts.get("MISSING", 0)
+            )
+            if self._last_artwork_scan is not None
+            else 0,
+            "artwork_placeholder": int(
+                self._last_artwork_scan.status_counts.get("PLACEHOLDER", 0)
+            )
+            if self._last_artwork_scan is not None
+            else 0,
+            "artwork_invalid": int(
+                self._last_artwork_scan.status_counts.get("INVALID", 0)
+            )
+            if self._last_artwork_scan is not None
+            else 0,
+            "artwork_stale": int(
+                self._last_artwork_scan.status_counts.get("STALE", 0)
+                + self._last_artwork_scan.status_counts.get("NEEDS_REFRESH", 0)
+            )
+            if self._last_artwork_scan is not None
+            else 0,
+            "artwork_collisions": int(self._last_artwork_scan.collision_count)
+            if self._last_artwork_scan is not None
+            else 0,
         }
         return counts
 
@@ -559,6 +627,7 @@ class OperationsService:
                     target_id=item.target_id,
                     estimated_recovery_bytes=item.estimated_recovery_bytes,
                     poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
                 )
             )
         return items
@@ -612,6 +681,7 @@ class OperationsService:
                     target_id=str(candidate.id),
                     estimated_recovery_bytes=candidate.estimated_space_bytes or 0,
                     poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
                 )
             )
 
@@ -653,6 +723,7 @@ class OperationsService:
                     target_id=str(movie_id),
                     estimated_recovery_bytes=0,
                     poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
                 )
             )
 
@@ -696,6 +767,7 @@ class OperationsService:
                         target_id=torrent_id,
                         estimated_recovery_bytes=int(raw.get("size") or 0),
                         poster_url=orphan_artwork.poster_url,
+                        artwork=orphan_artwork.artwork,
                     )
                 )
                 continue
@@ -728,8 +800,70 @@ class OperationsService:
                         target_id=torrent_id,
                         estimated_recovery_bytes=0,
                         poster_url=resolved_artwork.poster_url,
+                        artwork=resolved_artwork.artwork,
                     )
                 )
+
+        artwork_issue_rows = (
+            await self.db.execute(
+                select(MediaAsset)
+                .where(MediaAsset.artwork_status.in_(["MISSING", "PLACEHOLDER", "INVALID", "NEEDS_REFRESH", "STALE"]))
+                .order_by(MediaAsset.artwork_status.asc(), MediaAsset.updated_at.desc())
+                .limit(60)
+            )
+        ).scalars().all()
+        for asset in artwork_issue_rows:
+            media_id = asset.movie_id or asset.series_id
+            if media_id is None:
+                continue
+            media_type = MediaType.MOVIE if asset.movie_id is not None else MediaType.SERIES
+            if media_type is MediaType.MOVIE:
+                title = (
+                    await self.db.execute(select(Movie.title).where(Movie.id == media_id))
+                ).scalar_one_or_none() or f"Movie #{media_id}"
+            else:
+                title = (
+                    await self.db.execute(select(Series.title).where(Series.id == media_id))
+                ).scalar_one_or_none() or f"Series #{media_id}"
+
+            card_key = (
+                "artwork_missing"
+                if asset.artwork_status == "MISSING"
+                else "artwork_placeholder"
+                if asset.artwork_status == "PLACEHOLDER"
+                else "artwork_invalid"
+                if asset.artwork_status == "INVALID"
+                else "artwork_stale"
+            )
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
+                context="operations.recommendations.artwork_issue",
+                media_type=media_type,
+                media_id=media_id,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
+                fallback_reason="artwork_issue",
+            )
+            items.append(
+                OperationsRecommendation(
+                    id=f"artwork_issue:{asset.id}",
+                    card_key=card_key,
+                    title=title,
+                    summary=f"Artwork status {asset.artwork_status}",
+                    explanation="Artwork integrity scan flagged this media asset.",
+                    reasons=[
+                        f"Status={asset.artwork_status}",
+                        str((asset.artwork_diagnostics or {}).get("reason") or "Integrity repair required"),
+                    ],
+                    action="refresh_artwork",
+                    safety_level="low_risk",
+                    target_type=("movie" if media_type is MediaType.MOVIE else "series"),
+                    target_id=str(media_id),
+                    estimated_recovery_bytes=0,
+                    poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
+                )
+            )
 
         if not items:
             healthy_artwork = await media_asset_artwork_resolver.resolve(
@@ -755,6 +889,7 @@ class OperationsService:
                     target_id=None,
                     estimated_recovery_bytes=0,
                     poster_url=healthy_artwork.poster_url,
+                    artwork=healthy_artwork.artwork,
                 )
             )
 
@@ -943,6 +1078,7 @@ class OperationsService:
                     "merge_duplicates",
                     "cleanup_torrent",
                     "detach_torrent",
+                    "refresh_artwork",
                     "monitor",
                 },
                 detail=f"Action={recommendation.action}",
@@ -1079,11 +1215,44 @@ class OperationsService:
         recommendations = await self.recommendations()
         filesystem = await self.filesystem_config()
         cleanup_plans = await self.cleanup_plans()
+        artwork_issues = await self.artwork_issues_summary()
         return OperationsWorkspaceResponse(
             overview=overview,
             recommendations=recommendations,
             filesystem=filesystem,
             cleanup_plans=cleanup_plans,
+            artwork_issues=artwork_issues,
+        )
+
+    async def artwork_issues_summary(self) -> ArtworkIssuesSummary:
+        if self._last_artwork_scan is None:
+            self._last_artwork_scan = await self._artwork_integrity_service.scan_and_repair(
+                migration_mode=False
+            )
+
+        scan = self._last_artwork_scan
+        total = max(0, scan.total_assets)
+        valid = int(scan.status_counts.get("VALID", 0))
+        coverage = (valid / total * 100.0) if total > 0 else 0.0
+
+        latest_refresh = (
+            (
+                await self.db.execute(
+                    select(func.max(MediaAsset.artwork_last_refresh_at))
+                )
+            ).scalar_one_or_none()
+        )
+
+        return ArtworkIssuesSummary(
+            coverage_percent=round(coverage, 2),
+            healthy_count=valid,
+            missing_count=int(scan.status_counts.get("MISSING", 0)),
+            placeholder_count=int(scan.status_counts.get("PLACEHOLDER", 0)),
+            invalid_count=int(scan.status_counts.get("INVALID", 0)),
+            stale_count=int(scan.status_counts.get("STALE", 0)),
+            needs_refresh_count=int(scan.status_counts.get("NEEDS_REFRESH", 0)),
+            collision_count=int(scan.collision_count),
+            last_refresh_at=latest_refresh,
         )
 
     async def filesystem_config(self) -> FilesystemConfigResponse:

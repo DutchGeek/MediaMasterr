@@ -155,6 +155,7 @@ async def get_qbittorrent_overview(
                 correlation_reason=correlated_artwork.reason or "unmapped",
                 poster_url=resolved_artwork.poster_url,
                 backdrop_url=resolved_artwork.backdrop_url,
+                artwork=resolved_artwork.artwork,
             )
         )
 

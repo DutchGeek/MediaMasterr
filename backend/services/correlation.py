@@ -131,34 +131,27 @@ class MediaCorrelationService:
 
     @staticmethod
     def _name_token(name: str) -> str:
-        token = name.lower().strip()
-        if token.startswith("[") and "]" in token:
-            token = token.split("]", 1)[1].strip()
-        token = token.replace(".", " ").replace("_", " ").replace("-", " ")
-        noise = {
-            "1080p",
-            "720p",
-            "2160p",
-            "x264",
-            "x265",
-            "h264",
-            "h265",
-            "hevc",
-            "bluray",
-            "brrip",
-            "webrip",
-            "webdl",
-            "proper",
-            "repack",
-            "remux",
-            "dts",
-            "aac",
-            "ac3",
-            "hdr",
-            "dv",
-        }
-        parts = [p for p in token.split() if p and p not in noise and not p.isdigit()]
-        return " ".join(parts[:8])[:96]
+        parsed_title, _ = MediaCorrelationService._parse_torrent_identity(name)
+        residual_noise = {"dl", "uhd", "nf", "amzn", "bluray", "webrip", "webdl"}
+        parts = [
+            part
+            for part in parsed_title.split()
+            if part and part not in residual_noise
+        ]
+        return " ".join(parts[:4])[:96]
+
+    @staticmethod
+    def _parse_torrent_episode_markers(name: str) -> tuple[int | None, int | None]:
+        lowered = (name or "").lower()
+        sxe = re.search(r"\bs(\d{1,2})e(\d{1,3})\b", lowered)
+        if sxe:
+            return int(sxe.group(1)), int(sxe.group(2))
+
+        season_match = re.search(r"\bseason\s*(\d{1,2})\b", lowered)
+        episode_match = re.search(r"\bepisode\s*(\d{1,3})\b", lowered)
+        parsed_season = int(season_match.group(1)) if season_match else None
+        parsed_episode = int(episode_match.group(1)) if episode_match else None
+        return parsed_season, parsed_episode
 
     @staticmethod
     def _normalize_identity_text(value: str) -> str:
@@ -231,6 +224,8 @@ class MediaCorrelationService:
     def _episode_identity_confident(
         *,
         parsed_title: str,
+        parsed_season_number: int | None,
+        parsed_episode_number: int | None,
         parsed_imdb_id: str | None,
         parsed_tmdb_id: int | None,
         parsed_tvdb_id: str | None,
@@ -247,6 +242,15 @@ class MediaCorrelationService:
             or (parsed_tvdb_id is not None and (candidate.series.tvdb_id or "") == parsed_tvdb_id)
             or path_overlap >= 2
             or (path_overlap >= 1 and title_match)
+            or (
+                title_match
+                and parsed_season_number is not None
+                and candidate.season.season_number == parsed_season_number
+                and (
+                    parsed_episode_number is None
+                    or candidate.episode.episode_number == parsed_episode_number
+                )
+            )
         )
 
     @staticmethod
@@ -414,8 +418,9 @@ class MediaCorrelationService:
                 token=token,
                 category=category,
             )
-            # Require strong evidence to avoid cross-title artwork collisions.
-            if score < 80:
+            # Episode paths frequently differ from torrent save paths, so a slightly
+            # lower threshold keeps provider-backed title matches usable.
+            if score < 70:
                 continue
             candidate = _EpisodeMatch(
                 score=score, episode=episode, season=season, series=series
@@ -545,6 +550,9 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
+        parsed_season_number, parsed_episode_number = self._parse_torrent_episode_markers(
+            torrent.name
+        )
         parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
             torrent.name
         )
@@ -764,6 +772,9 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
+        parsed_season_number, parsed_episode_number = self._parse_torrent_episode_markers(
+            torrent.name
+        )
         parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
             torrent.name
         )
@@ -814,6 +825,8 @@ class MediaCorrelationService:
 
         if selected_mode == "episode" and best_episode and self._episode_identity_confident(
             parsed_title=parsed_title,
+            parsed_season_number=parsed_season_number,
+            parsed_episode_number=parsed_episode_number,
             parsed_imdb_id=parsed_imdb_id,
             parsed_tmdb_id=parsed_tmdb_id,
             parsed_tvdb_id=parsed_tvdb_id,

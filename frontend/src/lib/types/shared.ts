@@ -106,6 +106,27 @@ export interface OperationsOverviewResponse {
   generated_at: string;
 }
 
+export type ArtworkStatus =
+  | "VALID"
+  | "MISSING"
+  | "PLACEHOLDER"
+  | "INVALID"
+  | "STALE"
+  | "NEEDS_REFRESH";
+
+export interface ArtworkSelection {
+  poster: string | null;
+  background: string | null;
+  banner: string | null;
+  logo: string | null;
+  source: string;
+  confidence: number;
+  status: ArtworkStatus;
+  validated: boolean;
+  reason: string | null;
+  last_refreshed_at: string | null;
+}
+
 export interface OperationsRecommendation {
   id: string;
   card_key: string;
@@ -119,6 +140,19 @@ export interface OperationsRecommendation {
   target_id: string | null;
   estimated_recovery_bytes: number;
   poster_url: string | null;
+  artwork: ArtworkSelection | null;
+}
+
+export interface ArtworkIssuesSummary {
+  coverage_percent: number;
+  healthy_count: number;
+  missing_count: number;
+  placeholder_count: number;
+  invalid_count: number;
+  stale_count: number;
+  needs_refresh_count: number;
+  collision_count: number;
+  last_refresh_at: string | null;
 }
 
 export interface OperationWorkflowValidationCheck {
@@ -205,6 +239,7 @@ export interface MieOperationsResponse {
   recommendations: OperationsRecommendationsResponse;
   filesystem: FilesystemConfigResponse;
   cleanup_plans: CleanupPlanListResponse;
+  artwork_issues: ArtworkIssuesSummary | null;
 }
 
 export enum MediaType {
@@ -1321,6 +1356,17 @@ export interface DashboardDecisionSummary {
   recently_reclaimable: DashboardOpportunity[];
 }
 
+export interface DashboardArtworkHealth {
+  coverage_percent: number;
+  status: string;
+  missing_posters: number;
+  invalid_posters: number;
+  placeholder_posters: number;
+  stale_artwork: number;
+  collision_count: number;
+  last_refresh_at: string | null;
+}
+
 export interface DashboardResponse {
   kpis: DashboardKpis;
   requests: DashboardRequestsSummary;
@@ -1331,6 +1377,7 @@ export interface DashboardResponse {
   viewer: DashboardViewer;
   media_server_configured: boolean;
   decision_summary: DashboardDecisionSummary;
+  artwork_health: DashboardArtworkHealth;
 }
 
 export interface MediaFilterOptionResponse {

@@ -552,7 +552,7 @@
             </article>
           </section>
 
-          <section class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <section class="grid grid-cols-1 xl:grid-cols-4 gap-4">
             <article class="bg-card rounded-lg border border-border p-5 min-h-28">
               <p class="text-sm text-muted-foreground">System Health</p>
               <p class="text-3xl font-bold text-foreground mt-2">
@@ -563,6 +563,19 @@
               </p>
               <p class="text-xs text-muted-foreground mt-1">
                 Attention required {dashboard.decision_summary.blocked.attention_required}
+              </p>
+            </article>
+
+            <article class="bg-card rounded-lg border border-border p-5 min-h-28">
+              <p class="text-sm text-muted-foreground">Artwork Coverage</p>
+              <p class="text-3xl font-bold text-foreground mt-2">
+                {formatPercent(dashboard.artwork_health.coverage_percent)}
+              </p>
+              <p class="text-xs text-muted-foreground mt-2">
+                {dashboard.artwork_health.status}
+              </p>
+              <p class="text-xs text-muted-foreground mt-1">
+                Missing {dashboard.artwork_health.missing_posters} • Invalid {dashboard.artwork_health.invalid_posters}
               </p>
             </article>
 

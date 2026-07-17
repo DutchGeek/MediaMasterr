@@ -93,6 +93,17 @@ class DashboardDecisionSummary(BaseModel):
     recently_reclaimable: list[DashboardOpportunity]
 
 
+class DashboardArtworkHealth(BaseModel):
+    coverage_percent: float
+    status: str
+    missing_posters: int
+    invalid_posters: int
+    placeholder_posters: int
+    stale_artwork: int
+    collision_count: int
+    last_refresh_at: str | None = None
+
+
 class DashboardResponse(BaseModel):
     kpis: DashboardKpis
     requests: DashboardRequestsSummary
@@ -103,3 +114,4 @@ class DashboardResponse(BaseModel):
     viewer: DashboardViewer
     media_server_configured: bool
     decision_summary: DashboardDecisionSummary
+    artwork_health: DashboardArtworkHealth

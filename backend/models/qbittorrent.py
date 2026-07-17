@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from backend.models.artwork import ArtworkSelection
+
 
 class QBittorrentMetrics(BaseModel):
     active_downloads: int
@@ -31,6 +33,7 @@ class QBittorrentTorrentItem(BaseModel):
     correlation_reason: str | None = None
     poster_url: str | None = None
     backdrop_url: str | None = None
+    artwork: ArtworkSelection | None = None
 
 
 class QBittorrentOverviewResponse(BaseModel):

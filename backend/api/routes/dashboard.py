@@ -34,6 +34,7 @@ from backend.enums import (
 )
 from backend.models.dashboard import (
     DashboardActivityItem,
+    DashboardArtworkHealth,
     DashboardBlockedSummary,
     DashboardDecisionSummary,
     DashboardKpis,
@@ -617,6 +618,32 @@ async def build_dashboard_response(
         can_view_admin_panels=is_admin,
     )
 
+    artwork_issues = operations_workspace.artwork_issues
+    artwork_health = DashboardArtworkHealth(
+        coverage_percent=(artwork_issues.coverage_percent if artwork_issues else 0.0),
+        status=(
+            "Healthy"
+            if artwork_issues and artwork_issues.coverage_percent >= 95
+            else "Degraded"
+            if artwork_issues and artwork_issues.coverage_percent >= 80
+            else "Needs Attention"
+        ),
+        missing_posters=(artwork_issues.missing_count if artwork_issues else 0),
+        invalid_posters=(artwork_issues.invalid_count if artwork_issues else 0),
+        placeholder_posters=(artwork_issues.placeholder_count if artwork_issues else 0),
+        stale_artwork=(
+            (artwork_issues.stale_count + artwork_issues.needs_refresh_count)
+            if artwork_issues
+            else 0
+        ),
+        collision_count=(artwork_issues.collision_count if artwork_issues else 0),
+        last_refresh_at=(
+            to_utc_isoformat(artwork_issues.last_refresh_at)
+            if artwork_issues and artwork_issues.last_refresh_at is not None
+            else None
+        ),
+    )
+
     return DashboardResponse(
         kpis=kpis,
         requests=request_summary,
@@ -627,6 +654,7 @@ async def build_dashboard_response(
         viewer=viewer,
         media_server_configured=media_server_configured,
         decision_summary=decision_summary,
+        artwork_health=artwork_health,
     )
 
 

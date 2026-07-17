@@ -12,4 +12,7 @@ def test_operations_workspace_compat_route_exists() -> None:
 def test_dashboard_and_qbittorrent_routes_exist() -> None:
     paths = set(fastapi_app.openapi().get("paths", {}).keys())
     assert "/api/mie/dashboard" in paths
+    assert "/api/mie/intelligence" in paths
+    assert "/api/mie/timeline" in paths
+    assert "/api/mie/relationships/{media_type}/{media_id}" in paths
     assert "/api/qbittorrent/overview" in paths

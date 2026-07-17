@@ -13,7 +13,7 @@ from backend.api.routes.settings.services import set_service_settings
 from backend.core.service_manager import service_manager
 from backend.database import Base
 from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
-from backend.database.models import MediaAsset, Movie, MovieVersion, User
+from backend.database.models import Episode, MediaAsset, Movie, MovieVersion, Season, Series, User
 from backend.enums import MediaType, Service, UserRole
 from backend.models.settings import ServiceConfigUpdate
 from backend.services.qbittorrent import QBittorrentClient
@@ -83,6 +83,34 @@ class _FakeQBClient:
                 "tracker": "",
                 "save_path": "/downloads/archive",
             },
+        ]
+
+
+class _FakeSeriesQBClient:
+    async def get_app_version(self) -> str:
+        return "4.6.7"
+
+    async def get_webapi_version(self) -> str:
+        return "2.9.3"
+
+    async def get_transfer_info(self) -> dict[str, int]:
+        return {"dl_info_speed": 0, "up_info_speed": 0}
+
+    async def get_torrents(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "Teach.You.A.Lesson.S01E02.1080p.WEB-DL",
+                "category": "tv",
+                "state": "downloading",
+                "progress": 0.2,
+                "size": 2000,
+                "ratio": 0.0,
+                "eta": 3600,
+                "dlspeed": 100,
+                "upspeed": 0,
+                "tracker": "tracker.example",
+                "save_path": "/downloads/tv",
+            }
         ]
 
 
@@ -235,6 +263,61 @@ async def test_qbittorrent_overview_uses_correlated_media_poster() -> None:
 
     ubuntu_row = next(row for row in payload.torrents if row.name == "Ubuntu ISO")
     assert ubuntu_row.poster_url == "https://image.tmdb.org/t/p/w342/u.jpg"
+
+
+@pytest.mark.anyio
+async def test_qbittorrent_overview_uses_correlated_series_poster() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    previous = service_manager._qbittorrent
+    service_manager._qbittorrent = _FakeSeriesQBClient()  # type: ignore[assignment]
+    try:
+        async with session_maker() as db:
+            series = Series(
+                title="Teach You A Lesson",
+                tmdb_id=777001,
+                poster_url="/teach.jpg",
+            )
+            db.add(series)
+            await db.flush()
+
+            season = Season(series_id=series.id, season_number=1)
+            db.add(season)
+            await db.flush()
+
+            db.add(
+                Episode(
+                    season_id=season.id,
+                    episode_number=2,
+                    name="Episode 2",
+                    path="/library/series/Teach You A Lesson/Season 01/Teach You A Lesson - S01E02.mkv",
+                )
+            )
+            db.add(
+                MediaAsset(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    poster_url=series.poster_url,
+                )
+            )
+            await db.commit()
+
+            payload = await get_qbittorrent_overview(_admin_user(), db=db)
+    finally:
+        service_manager._qbittorrent = previous
+        await engine.dispose()
+
+    teach_row = next(
+        row for row in payload.torrents if row.name == "Teach.You.A.Lesson.S01E02.1080p.WEB-DL"
+    )
+    assert teach_row.poster_url == "https://image.tmdb.org/t/p/w342/teach.jpg"
 
 
 @pytest.mark.anyio

@@ -118,6 +118,15 @@
     return "imported" as const;
   };
 
+  const artworkDiagnosticSummary = (item: OperationsRecommendation): string => {
+    const artwork = item.artwork;
+    if (!artwork) return "Artwork diagnostics unavailable.";
+    const confidence = `${Math.round((artwork.confidence ?? 0) * 100)}%`;
+    const status = artwork.status ?? "MISSING";
+    const source = artwork.source ?? "unresolved";
+    return `Artwork ${status} from ${source} (${confidence}).`;
+  };
+
   const recommendationsForCollection = $derived.by(() => {
     const rows = workspace?.recommendations.items ?? [];
     if (!selectedCollectionKey) return rows;
@@ -221,6 +230,14 @@
             kind: item.safety_level === "high_risk" ? "warning" : "protected",
             label: item.safety_level === "high_risk" ? "Risk" : "Protected",
             explanation: `Risk ${item.safety_level.replaceAll("_", " ")}.`,
+          },
+          {
+            kind:
+              item.artwork?.status === "VALID"
+                ? "filesystem_verified"
+                : "warning",
+            label: `Artwork ${item.artwork?.status ?? "MISSING"}`,
+            explanation: artworkDiagnosticSummary(item),
           },
         ],
         quickActions: [
@@ -511,6 +528,25 @@
         {error}
       </div>
     {:else}
+      {#if workspace?.artwork_issues}
+        <section class="rounded-2xl border border-border/70 bg-card/70 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-foreground">Artwork Integrity</h2>
+            <span class="text-sm text-muted-foreground">
+              Coverage {workspace.artwork_issues.coverage_percent.toFixed(1)}%
+            </span>
+          </div>
+          <div class="mt-3 grid gap-2 text-sm md:grid-cols-3 xl:grid-cols-6">
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Healthy: {workspace.artwork_issues.healthy_count}</div>
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Missing: {workspace.artwork_issues.missing_count}</div>
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Placeholder: {workspace.artwork_issues.placeholder_count}</div>
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Invalid: {workspace.artwork_issues.invalid_count}</div>
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Stale/Refresh: {workspace.artwork_issues.stale_count + workspace.artwork_issues.needs_refresh_count}</div>
+            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Collisions: {workspace.artwork_issues.collision_count}</div>
+          </div>
+        </section>
+      {/if}
+
       <section class="space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-lg font-semibold text-foreground">

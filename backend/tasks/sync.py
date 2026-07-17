@@ -50,6 +50,7 @@ from backend.services.playback_history import (
     refresh_playback_history,
 )
 from backend.services.plex import PlexService
+from backend.services.mie.operations_service import OperationsService
 from backend.user_types import MEDIA_SERVERS, MediaServerType
 
 __all__ = [
@@ -2915,6 +2916,11 @@ async def sync_media() -> dict[str, Any] | None:
 
         # gather supplemental sync data
         await _run_supplemental_syncs()
+
+        # keep artwork integrity as part of the MIE synchronization lifecycle.
+        async with async_db() as mie_session:
+            await OperationsService(mie_session).overview()
+            await mie_session.commit()
 
         return {"library_sync": library_sync_result}
 
