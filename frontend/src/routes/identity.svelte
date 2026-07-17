@@ -41,7 +41,7 @@
   let sortOrder = $state<"asc" | "desc">("asc");
   let minConfidence = $state<number | null>(null);
   let maxConfidence = $state<number | null>(null);
-  let canonicalProviderFilter = $state("all");
+  let canonicalProviderFilter = $state("");
   let syncStatusFilter = $state("all");
   let artworkStatusFilter = $state("all");
   let metadataStatusFilter = $state("all");
@@ -52,8 +52,10 @@
   let page = $state(1);
   let perPage = $state(24);
   let posterSize = $state(160);
-  let displayMode = $state<"grid" | "list">("grid");
+  let displayMode = $state<"grid" | "list" | "table">("grid");
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+  let selectedArtworkByField = $state<Record<string, string>>({});
+  let artworkDimensions = $state<Record<string, string>>({});
 
   let workspace = $state<IdentityWorkspaceResponse | null>(null);
   let selectedKeys = $state<Set<string>>(new Set());
@@ -71,6 +73,23 @@
   let overrideField = $state("");
   let overrideValue = $state("");
   let overrideReason = $state("");
+  let syncBehavior = $state("merge");
+  let lockState = $state("unlocked");
+  let notes = $state("");
+
+  let externalInput = $state("");
+  let externalField = $state("imdb_id");
+  let externalValidation = $state<{
+    status: "idle" | "valid" | "invalid";
+    field: string;
+    value: string;
+    detail: string;
+  }>({
+    status: "idle",
+    field: "imdb_id",
+    value: "",
+    detail: "",
+  });
 
   const tabOrder: Array<{ key: StudioTab; label: string }> = [
     { key: "overview", label: "Overview" },
@@ -88,6 +107,27 @@
     { value: "title", label: "Title" },
     { value: "confidence", label: "Confidence" },
     { value: "updated", label: "Updated" },
+  ];
+
+  const bulkActions = [
+    { key: "refresh_artwork", label: "Refresh Artwork" },
+    { key: "validate_identity", label: "Validate Identity" },
+    { key: "refresh_metadata", label: "Refresh Metadata" },
+    { key: "repair_missing_artwork", label: "Repair Missing Artwork" },
+    { key: "synchronize_providers", label: "Synchronize Providers" },
+    { key: "apply_canonical_provider", label: "Apply Canonical Provider" },
+    { key: "refresh_ids", label: "Refresh IDs" },
+    { key: "queue_background_job", label: "Queue Background Job" },
+  ];
+
+  const externalIdFields = [
+    "tmdb_id",
+    "tvdb_id",
+    "imdb_id",
+    "trakt_id",
+    "anidb_id",
+    "myanimelist_id",
+    "tvmaze_id",
   ];
 
   const identityStatusOptions = [
@@ -129,6 +169,11 @@
   const itemKey = (item: IdentityWorkspaceItem): string =>
     `${item.media_type}:${item.media_id}`;
 
+  const selectedItems = $derived.by(() => {
+    const rows = workspace?.items ?? [];
+    return rows.filter((row) => selectedKeys.has(itemKey(row)));
+  });
+
   const mediaLabel = (type: MediaType): string =>
     type === MediaType.Movie ? "Movie" : "Series";
 
@@ -141,6 +186,74 @@
 
   const totalPages = $derived(workspace?.total_pages ?? 1);
   const items = $derived(workspace?.items ?? []);
+
+  const identityHealthLabel = (item: IdentityWorkspaceItem): string => {
+    if (item.needs_review) return "Needs Attention";
+    if (item.provider_confidence >= 90) return "Healthy";
+    if (item.provider_confidence >= 75) return "Review";
+    return "Uncertain";
+  };
+
+  const isUrlLike = (value: string | null | undefined): boolean => {
+    if (!value) return false;
+    return /^https?:\/\//i.test(value);
+  };
+
+  const metadataValue = (
+    row: IdentityStudioResponse["metadata"][number],
+    provider: string,
+  ) => row.values.find((value) => value.provider === provider)?.value;
+
+  const canonicalValue = (row: {
+    values: { is_canonical: boolean; value: string | null }[];
+  }) =>
+    row.values.find((value) => value.is_canonical)?.value ??
+    row.values[0]?.value;
+
+  const providerValues = (row: {
+    values: {
+      is_canonical: boolean;
+      provider: string;
+      value: string | null;
+      confidence: number;
+    }[];
+  }) => row.values.filter((value) => !value.is_canonical);
+
+  const onArtworkImageLoad = (key: string, provider: string, event: Event) => {
+    const image = event.currentTarget as HTMLImageElement;
+    const dim = `${image.naturalWidth}x${image.naturalHeight}`;
+    artworkDimensions = {
+      ...artworkDimensions,
+      [`${key}:${provider}`]: dim,
+    };
+  };
+
+  const inferExternalField = (
+    raw: string,
+  ): { field: string; value: string } | null => {
+    const value = raw.trim();
+    if (!value) return null;
+
+    const imdbMatch = value.match(/(tt\d{5,10})/i);
+    if (imdbMatch)
+      return { field: "imdb_id", value: imdbMatch[1].toLowerCase() };
+
+    if (/themoviedb\.org/i.test(value) || /tmdb/i.test(value)) {
+      const numeric = value.match(/(\d{2,})/);
+      if (numeric) return { field: "tmdb_id", value: numeric[1] };
+    }
+    if (/thetvdb\.com|tvdb/i.test(value)) {
+      const numeric = value.match(/(\d{2,})/);
+      if (numeric) return { field: "tvdb_id", value: numeric[1] };
+    }
+    if (/tvmaze\.com/i.test(value)) {
+      const numeric = value.match(/(\d{2,})/);
+      if (numeric) return { field: "tvmaze_id", value: numeric[1] };
+    }
+
+    if (/^\d+$/.test(value)) return { field: externalField, value };
+    return { field: externalField, value };
+  };
 
   async function loadFilterCatalog() {
     try {
@@ -195,8 +308,8 @@
         params.set("min_confidence", String(minConfidence));
       if (maxConfidence !== null)
         params.set("max_confidence", String(maxConfidence));
-      if (canonicalProviderFilter !== "all")
-        params.set("canonical_provider", canonicalProviderFilter);
+      if (canonicalProviderFilter.trim())
+        params.set("canonical_provider", canonicalProviderFilter.trim());
       if (syncStatusFilter !== "all")
         params.set("sync_status", syncStatusFilter);
       if (artworkStatusFilter !== "all")
@@ -334,6 +447,63 @@
     }
   }
 
+  async function upsertOverride(field: string, value: string, reason: string) {
+    if (!selectedItem) return;
+    busy = true;
+    syncMessage = "";
+    try {
+      const response = await post_api<IdentityActionResponse>(
+        `/api/mie/identity/${selectedItem.media_type}/${selectedItem.media_id}/overrides`,
+        {
+          field,
+          value,
+          reason,
+          scope: "media",
+        },
+      );
+      syncMessage = response.message;
+      await loadStudio(selectedItem);
+    } catch (e: any) {
+      syncMessage = e?.message ?? "Failed to apply override";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function useProviderPreset(
+    provider: string,
+    mode: "identity" | "artwork" | "metadata" | "everything",
+  ) {
+    if (!selectedItem) return;
+    if (mode === "identity") {
+      await setCanonical(provider);
+      return;
+    }
+    if (mode === "artwork") {
+      await upsertOverride(
+        "artwork_profile",
+        provider,
+        `Artwork profile from ${provider}`,
+      );
+      return;
+    }
+    if (mode === "metadata") {
+      await upsertOverride(
+        "metadata_profile",
+        provider,
+        `Metadata profile from ${provider}`,
+      );
+      return;
+    }
+
+    await setCanonical(provider);
+    await upsertOverride(
+      "sync_provider",
+      provider,
+      `Unified profile from ${provider}`,
+    );
+  }
+
   function toggleSelection(item: IdentityWorkspaceItem) {
     const key = itemKey(item);
     const next = new Set(selectedKeys);
@@ -353,7 +523,7 @@
     sortOrder = "asc";
     minConfidence = null;
     maxConfidence = null;
-    canonicalProviderFilter = "all";
+    canonicalProviderFilter = "";
     syncStatusFilter = "all";
     artworkStatusFilter = "all";
     metadataStatusFilter = "all";
@@ -421,7 +591,88 @@
   }
 
   function handleBulkAction(_key: string) {
-    // Bulk actions are currently identity row selection only.
+    const count = selectedItems.length;
+    if (_key !== "queue_background_job" && count <= 0) {
+      syncMessage = "Select one or more rows before running a bulk action.";
+      return;
+    }
+
+    if (_key === "apply_canonical_provider") {
+      const provider =
+        canonicalProviderFilter.trim() || selectedItems[0]?.canonical_provider;
+      if (!provider) {
+        syncMessage =
+          "Select a canonical provider filter or row with provider context first.";
+        return;
+      }
+
+      busy = true;
+      syncMessage = "";
+      Promise.all(
+        selectedItems.map((row) =>
+          post_api<IdentityActionResponse>(
+            `/api/mie/identity/${row.media_type}/${row.media_id}/canonical`,
+            {
+              provider,
+              reason: `Bulk apply canonical provider (${provider})`,
+            },
+          ),
+        ),
+      )
+        .then(() => {
+          syncMessage = `Applied canonical provider ${provider} to ${count} item(s).`;
+          return loadWorkspace();
+        })
+        .catch((e: any) => {
+          syncMessage =
+            e?.message ?? "Failed to apply canonical provider in bulk.";
+        })
+        .finally(() => {
+          busy = false;
+        });
+      return;
+    }
+
+    void runSync();
+    syncMessage = `Queued ${_key.replaceAll("_", " ")} for ${Math.max(count, 1)} item(s).`;
+  }
+
+  function validateExternalInput() {
+    const parsed = inferExternalField(externalInput);
+    if (!parsed || !parsed.value) {
+      externalValidation = {
+        status: "invalid",
+        field: externalField,
+        value: "",
+        detail: "Enter a provider URL or an ID value.",
+      };
+      return;
+    }
+
+    const valid =
+      parsed.field === "imdb_id"
+        ? /^tt\d{5,10}$/i.test(parsed.value)
+        : /^\d+$/i.test(parsed.value);
+    externalValidation = {
+      status: valid ? "valid" : "invalid",
+      field: parsed.field,
+      value: parsed.value,
+      detail: valid
+        ? `Validated as ${parsed.field}.`
+        : `Could not validate ${parsed.field} format.`,
+    };
+  }
+
+  async function applyExternalOverride() {
+    if (externalValidation.status !== "valid") {
+      validateExternalInput();
+      return;
+    }
+    await upsertOverride(
+      externalValidation.field,
+      externalValidation.value,
+      `External ID override via Identity Studio (${externalValidation.field})`,
+    );
   }
 
   onMount(() => {
@@ -500,9 +751,9 @@
         {perPage}
         {posterSize}
         viewMode={displayMode}
-        viewModes={["grid", "list"]}
+        viewModes={["grid", "list", "table"]}
         selectedCount={selectedKeys.size}
-        bulkActions={[]}
+        {bulkActions}
         onSearchInput={handleSearch}
         onSortByChange={(value) => {
           sortBy = value as "title" | "confidence" | "updated";
@@ -530,7 +781,8 @@
           void loadWorkspace();
         }}
         onPosterSizeChange={(value) => (posterSize = value)}
-        onViewModeChange={(value) => (displayMode = value as "grid" | "list")}
+        onViewModeChange={(value) =>
+          (displayMode = value as "grid" | "list" | "table")}
         onBulkAction={handleBulkAction}
       />
 
@@ -633,8 +885,7 @@
           placeholder="Canonical provider (optional)"
           bind:value={canonicalProviderFilter}
           onblur={() => {
-            if (!canonicalProviderFilter.trim())
-              canonicalProviderFilter = "all";
+            canonicalProviderFilter = canonicalProviderFilter.trim();
             page = 1;
             void loadWorkspace();
           }}
@@ -680,75 +931,136 @@
           No identity rows found for current filters.
         </div>
       {:else}
-        <div
-          class={displayMode === "grid"
-            ? "grid gap-3 md:grid-cols-2"
-            : "flex flex-col gap-2"}
-        >
-          {#each items as item}
-            <article
-              class="rounded-xl border border-border/70 bg-background p-3 transition hover:border-primary/50"
-            >
-              <div class="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={selectedKeys.has(itemKey(item))}
-                  onchange={() => toggleSelection(item)}
-                />
-                {#if item.poster_url}
-                  <img
-                    src={item.poster_url}
-                    alt={item.title}
-                    class="rounded object-cover"
-                    style={`height:${Math.round((posterSize * 2) / 25)}px;width:${Math.round((posterSize * 1.35) / 25)}px;`}
-                  />
-                {/if}
-                <button
-                  class="min-w-0 flex-1 text-left"
-                  onclick={() => void loadStudio(item)}
-                >
-                  <div class="truncate font-medium">{item.title}</div>
-                  <div class="text-xs text-muted-foreground">
-                    {mediaLabel(item.media_type)}
-                    {item.year ?? ""}
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      Canonical: {item.canonical_provider}
-                    </span>
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      Providers: {item.provider_count}
-                    </span>
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      Confidence: {item.provider_confidence}%
-                    </span>
-                    <span
-                      class={`rounded px-2 py-0.5 ${conflictClass(item.conflict_level)}`}
-                    >
-                      Conflict: {item.conflict_level}
-                    </span>
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      Artwork: {item.artwork_status}
-                    </span>
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      Metadata: {item.metadata_status}
-                    </span>
-                    <span class="rounded bg-muted px-2 py-0.5">
-                      IDs: {item.identifier_status}
-                    </span>
-                    {#if item.needs_review}
-                      <span
-                        class="rounded bg-destructive/15 px-2 py-0.5 text-destructive"
+        {#if displayMode === "table"}
+          <div class="overflow-hidden rounded-xl border border-border/70">
+            <table class="w-full text-left text-sm">
+              <thead
+                class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                <tr>
+                  <th class="px-3 py-2">Select</th>
+                  <th class="px-3 py-2">Title</th>
+                  <th class="px-3 py-2">Providers</th>
+                  <th class="px-3 py-2">Confidence</th>
+                  <th class="px-3 py-2">Health</th>
+                  <th class="px-3 py-2">Conflict</th>
+                  <th class="px-3 py-2">Needs Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each items as item}
+                  <tr
+                    class="cursor-pointer border-t border-border/50 hover:bg-secondary/20"
+                    onclick={() => void loadStudio(item)}
+                  >
+                    <td class="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeys.has(itemKey(item))}
+                        onchange={() => toggleSelection(item)}
+                        onclick={(event) => event.stopPropagation()}
+                      />
+                    </td>
+                    <td class="px-3 py-2">
+                      <div class="font-medium text-foreground">
+                        {item.title}
+                      </div>
+                      <div class="text-xs text-muted-foreground">
+                        {mediaLabel(item.media_type)}
+                        {item.year ?? ""}
+                      </div>
+                    </td>
+                    <td class="px-3 py-2">{item.provider_count}</td>
+                    <td class="px-3 py-2">{item.provider_confidence}%</td>
+                    <td class="px-3 py-2">{identityHealthLabel(item)}</td>
+                    <td class="px-3 py-2">
+                      <span class={conflictClass(item.conflict_level)}
+                        >{item.conflict_level}</span
                       >
-                        Needs review
+                    </td>
+                    <td class="px-3 py-2">{item.needs_review ? "Yes" : "No"}</td
+                    >
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else}
+          <div
+            class={displayMode === "grid"
+              ? "grid gap-3 md:grid-cols-2"
+              : "flex flex-col gap-2"}
+          >
+            {#each items as item}
+              <article
+                class="rounded-xl border border-border/70 bg-background p-3 transition hover:border-primary/50"
+              >
+                <div class="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedKeys.has(itemKey(item))}
+                    onchange={() => toggleSelection(item)}
+                  />
+                  {#if item.poster_url}
+                    <img
+                      src={item.poster_url}
+                      alt={item.title}
+                      class="rounded object-cover"
+                      style={`height:${Math.round((posterSize * 2) / 25)}px;width:${Math.round((posterSize * 1.35) / 25)}px;`}
+                    />
+                  {/if}
+                  <button
+                    class="min-w-0 flex-1 text-left"
+                    onclick={() => void loadStudio(item)}
+                  >
+                    <div class="truncate text-base font-semibold">
+                      {item.title}
+                    </div>
+                    <div class="text-xs text-muted-foreground">
+                      {mediaLabel(item.media_type)} • {item.year ??
+                        "Unknown Year"}
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Canonical: {item.canonical_provider}
                       </span>
-                    {/if}
-                  </div>
-                </button>
-              </div>
-            </article>
-          {/each}
-        </div>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Provider Count: {item.provider_count}
+                      </span>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Confidence: {item.provider_confidence}%
+                      </span>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Health: {identityHealthLabel(item)}
+                      </span>
+                      <span
+                        class={`rounded px-2 py-0.5 ${conflictClass(item.conflict_level)}`}
+                      >
+                        Conflict: {item.conflict_level}
+                      </span>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Artwork: {item.artwork_status}
+                      </span>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Metadata: {item.metadata_status}
+                      </span>
+                      <span class="rounded bg-muted px-2 py-0.5">
+                        Identifier: {item.identifier_status}
+                      </span>
+                      {#if item.needs_review}
+                        <span
+                          class="rounded bg-destructive/15 px-2 py-0.5 text-destructive"
+                        >
+                          Needs Review
+                        </span>
+                      {/if}
+                    </div>
+                  </button>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
 
         <div class="flex items-center justify-between pt-2 text-sm">
           <button
@@ -817,15 +1129,385 @@
         </div>
 
         {#if activeTab === "overview"}
-          <div class="space-y-2 text-sm">
-            <div class="rounded-md border border-border/70 bg-muted/20 p-2">
-              Canonical Provider: <strong>{studio.canonical_provider}</strong>
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Canonical Provider
+              </div>
+              <div class="mt-1 text-base font-semibold text-foreground">
+                {studio.canonical_provider}
+              </div>
+              <div class="mt-2 text-xs text-muted-foreground">
+                Managing this title should feel like curating a collection, not
+                editing records.
+              </div>
             </div>
+            <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Current Selection
+              </div>
+              <div class="mt-1 text-base font-semibold text-foreground">
+                {studio.title} ({studio.year ?? "Unknown Year"})
+              </div>
+              <div class="mt-2 text-xs text-muted-foreground">
+                Use tabs to compare providers, choose artwork, and apply
+                canonical identity rules.
+              </div>
+            </div>
+
             {#each studio.overview as row}
-              <div class="rounded-md border border-border/70 p-2">
+              <div class="rounded-xl border border-border/70 p-3 text-sm">
+                <div class="text-xs text-muted-foreground">{row.label}</div>
+                <div class="mt-2 grid gap-2">
+                  {#each row.values as value}
+                    <div
+                      class="rounded-md border border-border/50 bg-background/70 px-2 py-1"
+                    >
+                      <span
+                        class="text-xs uppercase tracking-wide text-muted-foreground"
+                      >
+                        {value.provider}
+                      </span>
+                      <div class="text-sm text-foreground">
+                        {value.value ?? "-"}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeTab === "providers"}
+          <div class="grid gap-3 lg:grid-cols-2 text-sm">
+            {#each studio.providers as provider}
+              <article
+                class="rounded-xl border border-border/70 bg-background/70 p-3"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <strong class="text-base">{provider.provider}</strong>
+                    {#if provider.is_canonical}
+                      <span
+                        class="ml-2 rounded bg-primary/20 px-2 py-0.5 text-xs"
+                        >canonical</span
+                      >
+                    {/if}
+                    <div class="mt-1 text-xs text-muted-foreground">
+                      Last Updated: {provider.updated_at
+                        ? new Date(provider.updated_at).toLocaleString()
+                        : "Unknown"}
+                    </div>
+                    <div class="mt-1 text-xs text-muted-foreground">
+                      Confidence {provider.confidence}% • IDs {provider.external_ids_count}
+                      • Collections {provider.collection_count}
+                    </div>
+                  </div>
+
+                  {#if provider.artwork_preview_url}
+                    <img
+                      src={provider.artwork_preview_url}
+                      alt={`${provider.provider} preview`}
+                      class="h-24 w-16 rounded object-cover"
+                    />
+                  {/if}
+                </div>
+
+                <div class="mt-2 text-xs text-muted-foreground">
+                  Item: {provider.provider_item_id}
+                </div>
+                {#if provider.path_tail}
+                  <div class="mt-1 text-xs text-muted-foreground break-all">
+                    Path: {provider.path_tail}
+                  </div>
+                {/if}
+
+                <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
+                    onclick={() =>
+                      void useProviderPreset(provider.provider, "identity")}
+                    disabled={busy}
+                  >
+                    Use Identity
+                  </button>
+                  <button
+                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
+                    onclick={() =>
+                      void useProviderPreset(provider.provider, "artwork")}
+                    disabled={busy}
+                  >
+                    Use Artwork
+                  </button>
+                  <button
+                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
+                    onclick={() =>
+                      void useProviderPreset(provider.provider, "metadata")}
+                    disabled={busy}
+                  >
+                    Use Metadata
+                  </button>
+                  <button
+                    class="rounded-md bg-primary px-2 py-1 text-primary-foreground hover:opacity-90"
+                    onclick={() =>
+                      void useProviderPreset(provider.provider, "everything")}
+                    disabled={busy}
+                  >
+                    Use Everything
+                  </button>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeTab === "artwork"}
+          <div class="space-y-4 text-sm">
+            {#each studio.artwork as row}
+              <div class="rounded-xl border border-border/70 bg-muted/10 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-sm font-semibold text-foreground">
+                    {row.label}
+                  </h3>
+                  <span class="text-xs text-muted-foreground">
+                    Selected: {selectedArtworkByField[row.key] ?? "canonical"}
+                  </span>
+                </div>
+
+                <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {#each row.values as value}
+                    <label
+                      class="rounded-xl border border-border/70 bg-background/80 p-2"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <div
+                          class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                        >
+                          {value.provider}
+                        </div>
+                        <input
+                          type="radio"
+                          name={`artwork-${row.key}`}
+                          checked={(selectedArtworkByField[row.key] ??
+                            "canonical") === value.provider}
+                          onchange={() =>
+                            (selectedArtworkByField = {
+                              ...selectedArtworkByField,
+                              [row.key]: value.provider,
+                            })}
+                        />
+                      </div>
+
+                      {#if isUrlLike(value.value)}
+                        <img
+                          src={value.value ?? undefined}
+                          alt={`${row.label} from ${value.provider}`}
+                          class="mt-2 aspect-[2/3] w-full rounded object-cover"
+                          onload={(event) =>
+                            onArtworkImageLoad(row.key, value.provider, event)}
+                        />
+                      {:else}
+                        <div
+                          class="mt-2 rounded bg-secondary/30 p-6 text-center text-xs text-muted-foreground"
+                        >
+                          No preview image
+                        </div>
+                      {/if}
+
+                      <div
+                        class="mt-2 grid gap-1 text-xs text-muted-foreground"
+                      >
+                        <div>
+                          Resolution: {artworkDimensions[
+                            `${row.key}:${value.provider}`
+                          ] ?? "Unknown"}
+                        </div>
+                        <div>Source: {value.provider}</div>
+                        <div>Confidence: {value.confidence}%</div>
+                      </div>
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+
+            <div class="rounded-xl border border-border/70 bg-card p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Canonical Artwork Profile
+              </div>
+              <div
+                class="mt-2 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-3"
+              >
+                {#each studio.artwork as row}
+                  <div
+                    class="rounded-md border border-border/60 bg-background/70 px-2 py-1"
+                  >
+                    <span class="font-medium text-foreground">{row.label}</span>
+                    <div class="text-muted-foreground">
+                      {selectedArtworkByField[row.key] ?? "canonical"}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        {#if activeTab === "metadata"}
+          <div class="space-y-2 text-sm">
+            {#each studio.metadata as row}
+              <div class="rounded-xl border border-border/70 p-3">
+                <div class="text-sm font-semibold text-foreground">
+                  {row.label}
+                </div>
+                <div class="mt-2 overflow-x-auto">
+                  <table class="w-full text-left text-xs">
+                    <thead class="text-muted-foreground">
+                      <tr>
+                        <th class="py-1 pr-2">Current</th>
+                        <th class="py-1 pr-2">Provider</th>
+                        <th class="py-1">Canonical</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each providerValues(row) as candidate}
+                        <tr class="border-t border-border/50">
+                          <td class="py-1 pr-2">{canonicalValue(row) ?? "-"}</td
+                          >
+                          <td class="py-1 pr-2"
+                            >{candidate.provider}: {candidate.value ?? "-"}</td
+                          >
+                          <td class="py-1">{canonicalValue(row) ?? "-"}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeTab === "external_ids"}
+          <div class="space-y-3 text-sm">
+            <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                ID Tools
+              </div>
+              <div class="mt-2 grid gap-2 md:grid-cols-[auto_1fr_auto_auto]">
+                <select
+                  class="rounded-md border border-border bg-background px-3 py-2"
+                  bind:value={externalField}
+                >
+                  {#each externalIdFields as field}
+                    <option value={field}>{field}</option>
+                  {/each}
+                </select>
+                <input
+                  class="rounded-md border border-border bg-background px-3 py-2"
+                  placeholder="Paste ID or provider URL"
+                  bind:value={externalInput}
+                />
+                <button
+                  class="rounded-md border border-border px-3 py-2 hover:bg-accent"
+                  onclick={validateExternalInput}
+                >
+                  Validate
+                </button>
+                <button
+                  class="rounded-md bg-primary px-3 py-2 text-primary-foreground hover:opacity-90"
+                  onclick={() => void applyExternalOverride()}
+                >
+                  Override
+                </button>
+              </div>
+              {#if externalValidation.status !== "idle"}
+                <p
+                  class={`mt-2 text-xs ${externalValidation.status === "valid" ? "text-emerald-500" : "text-destructive"}`}
+                >
+                  {externalValidation.detail} ({externalValidation.field}: {externalValidation.value ||
+                    "-"})
+                </p>
+              {/if}
+            </div>
+
+            {#each studio.external_ids as row}
+              <div class="rounded-xl border border-border/70 p-3">
+                <div class="text-sm font-semibold text-foreground">
+                  {row.label}
+                </div>
+                <div class="mt-2 grid gap-2 md:grid-cols-2">
+                  {#each row.values as value}
+                    <div
+                      class="rounded-md border border-border/60 bg-background/70 p-2 text-xs"
+                    >
+                      <div
+                        class="uppercase tracking-wide text-muted-foreground"
+                      >
+                        {value.provider}
+                      </div>
+                      <div class="mt-1 text-foreground">
+                        {value.value ?? "-"}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeTab === "synchronization"}
+          <div class="space-y-3 text-sm">
+            <div class="grid gap-2 md:grid-cols-3">
+              <label class="text-xs text-muted-foreground">
+                Sync Behaviour
+                <select
+                  class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1"
+                  bind:value={syncBehavior}
+                >
+                  <option value="merge">Merge</option>
+                  <option value="replace">Replace</option>
+                  <option value="artwork_only">Artwork Only</option>
+                  <option value="metadata_only">Metadata Only</option>
+                </select>
+              </label>
+              <label class="text-xs text-muted-foreground">
+                Lock State
+                <select
+                  class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1"
+                  bind:value={lockState}
+                >
+                  <option value="unlocked">Unlocked</option>
+                  <option value="metadata_locked">Metadata Locked</option>
+                  <option value="artwork_locked">Artwork Locked</option>
+                  <option value="fully_locked">Fully Locked</option>
+                </select>
+              </label>
+              <label class="text-xs text-muted-foreground">
+                Notes
+                <input
+                  class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1"
+                  placeholder="Synchronization notes"
+                  bind:value={notes}
+                />
+              </label>
+            </div>
+
+            {#each studio.synchronization as row}
+              <div class="rounded-xl border border-border/70 p-3">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
                 {#each row.values as value}
-                  <div>
+                  <div class="mt-1 text-sm text-foreground">
                     {value.provider}: {value.value ?? "-"}
                   </div>
                 {/each}
@@ -834,48 +1516,13 @@
           </div>
         {/if}
 
-        {#if activeTab === "providers"}
+        {#if activeTab === "diagnostics"}
           <div class="space-y-2 text-sm">
-            {#each studio.providers as provider}
-              <div class="rounded-md border border-border/70 p-2">
-                <div class="flex items-center justify-between gap-2">
-                  <div>
-                    <strong>{provider.provider}</strong>
-                    {#if provider.is_canonical}
-                      <span
-                        class="ml-2 rounded bg-primary/20 px-2 py-0.5 text-xs"
-                        >canonical</span
-                      >
-                    {/if}
-                  </div>
-                  <button
-                    class="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
-                    onclick={() => void setCanonical(provider.provider)}
-                    disabled={busy}
-                  >
-                    Set Canonical
-                  </button>
-                </div>
-                <div class="text-xs text-muted-foreground">
-                  Item: {provider.provider_item_id} | Confidence: {provider.confidence}%
-                </div>
-                {#if provider.path_tail}
-                  <div class="text-xs text-muted-foreground">
-                    Path: {provider.path_tail}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-
-        {#if activeTab === "artwork" || activeTab === "metadata" || activeTab === "external_ids" || activeTab === "synchronization" || activeTab === "diagnostics"}
-          <div class="space-y-2 text-sm">
-            {#each activeTab === "artwork" ? studio.artwork : activeTab === "metadata" ? studio.metadata : activeTab === "external_ids" ? studio.external_ids : activeTab === "synchronization" ? studio.synchronization : studio.diagnostics as row}
-              <div class="rounded-md border border-border/70 p-2">
+            {#each studio.diagnostics as row}
+              <div class="rounded-xl border border-border/70 p-3">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
                 {#each row.values as value}
-                  <div>
+                  <div class="mt-1 text-sm text-foreground">
                     {value.provider}: {value.value ?? "-"}
                   </div>
                 {/each}
@@ -886,10 +1533,12 @@
 
         {#if activeTab === "overrides"}
           <div class="space-y-3 text-sm">
-            <div class="grid gap-2">
+            <div
+              class="grid gap-2 rounded-xl border border-border/70 bg-muted/20 p-3 md:grid-cols-2"
+            >
               <input
                 class="rounded-md border border-border bg-background px-3 py-2"
-                placeholder="Field (example: title)"
+                placeholder="Field (artwork_profile, metadata_profile, tmdb_id, sync_behavior, lock_state...)"
                 bind:value={overrideField}
               />
               <input
@@ -902,8 +1551,13 @@
                 placeholder="Reason (optional)"
                 bind:value={overrideReason}
               />
+              <input
+                class="rounded-md border border-border bg-background px-3 py-2"
+                placeholder="Notes"
+                bind:value={notes}
+              />
               <button
-                class="rounded-md bg-primary px-3 py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                class="rounded-md bg-primary px-3 py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50 md:col-span-2"
                 onclick={saveOverride}
                 disabled={busy ||
                   !overrideField.trim() ||
@@ -911,6 +1565,65 @@
               >
                 Save Override
               </button>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-border/70">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    <th class="px-3 py-2">Field</th>
+                    <th class="px-3 py-2">Current Value</th>
+                    <th class="px-3 py-2">Provider Value</th>
+                    <th class="px-3 py-2">Override Value</th>
+                    <th class="px-3 py-2">Source</th>
+                    <th class="px-3 py-2">Validation</th>
+                    <th class="px-3 py-2">Modified</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each [...studio.metadata, ...studio.external_ids].slice(0, 12) as row}
+                    <tr class="border-t border-border/50">
+                      <td class="px-3 py-2 font-medium text-foreground"
+                        >{row.key}</td
+                      >
+                      <td class="px-3 py-2">{canonicalValue(row) ?? "-"}</td>
+                      <td class="px-3 py-2"
+                        >{providerValues(row)[0]?.value ?? "-"}</td
+                      >
+                      <td class="px-3 py-2">
+                        {studio.overrides.find(
+                          (override) => override.field === row.key,
+                        )?.value ?? "-"}
+                      </td>
+                      <td class="px-3 py-2">
+                        {studio.overrides.find(
+                          (override) => override.field === row.key,
+                        )
+                          ? "manual"
+                          : "provider"}
+                      </td>
+                      <td class="px-3 py-2">
+                        {studio.overrides.find(
+                          (override) => override.field === row.key,
+                        )
+                          ? "applied"
+                          : "none"}
+                      </td>
+                      <td class="px-3 py-2">
+                        {studio.overrides.find(
+                          (override) => override.field === row.key,
+                        )?.created_at
+                          ? new Date(
+                              studio.overrides.find(
+                                (override) => override.field === row.key,
+                              )!.created_at,
+                            ).toLocaleString()
+                          : "-"}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
 
             {#each studio.overrides as row}

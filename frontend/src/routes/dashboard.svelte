@@ -16,6 +16,7 @@
   import type {
     DashboardActivityItem,
     DashboardResponse,
+    MieOperationsResponse,
   } from "$lib/types/shared";
   import { capitalizeFirstLetter } from "$lib/utils/strings";
   import JellyfinSVG from "$lib/components/svgs/jellyfin-svg.svelte";
@@ -30,6 +31,7 @@
   let dashboard = $state<DashboardResponse | null>(null);
   let loading = $state(true);
   let error = $state("");
+  let operationsWorkspace = $state<MieOperationsResponse | null>(null);
   let lastUpdatedAt = $state<string | null>(null);
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -64,6 +66,18 @@
   );
   const showSyncNotice = $derived(
     (dashboard?.media_server_configured ?? false) && libraryTotal === 0,
+  );
+  const operationsCards = $derived(operationsWorkspace?.overview.cards ?? []);
+  const highSeverityCards = $derived(
+    operationsCards.filter((card) => card.severity === "high"),
+  );
+  const attentionRequiredFromSnapshot = $derived(
+    highSeverityCards.reduce((sum, card) => sum + card.count, 0),
+  );
+  const attentionBreakdownCards = $derived(
+    highSeverityCards
+      .filter((card) => card.count > 0)
+      .sort((a, b) => b.count - a.count),
   );
   const connectedServicesCount = $derived(
     dashboard?.services.filter((service) => service.enabled).length ?? 0,
@@ -229,17 +243,16 @@
     window.location.hash = `#${item.target_path}`;
   };
 
-  const openQuery = (
-    route: "/movies" | "/series",
-    params: Record<string, string>,
-  ) => {
-    const q = new URLSearchParams(params).toString();
-    window.location.hash = `#${route}${q ? `?${q}` : ""}`;
-  };
-
   const openHashPath = (targetPath: string | null | undefined) => {
     if (!targetPath) return;
     window.location.hash = `#${targetPath}`;
+  };
+
+  const operationsCollectionPath = (collectionKey: string) =>
+    `#/operations?collection=${encodeURIComponent(collectionKey)}`;
+
+  const openOperationsCollection = (collectionKey: string) => {
+    window.location.hash = operationsCollectionPath(collectionKey);
   };
 
   // determine if we should show last sync info for a service
@@ -257,7 +270,12 @@
       if (showLoading) {
         loading = true;
       }
-      dashboard = await get_api<DashboardResponse>("/api/mie/dashboard");
+      const [dashboardResponse, operationsResponse] = await Promise.all([
+        get_api<DashboardResponse>("/api/mie/dashboard"),
+        get_api<MieOperationsResponse>("/api/mie/operations"),
+      ]);
+      dashboard = dashboardResponse;
+      operationsWorkspace = operationsResponse;
       lastUpdatedAt = new Date().toISOString();
       error = "";
     } catch (err: any) {
@@ -576,10 +594,12 @@
               </p>
             </article>
 
-            <article
-              class="bg-card rounded-lg border border-border p-5 min-h-28"
+            <button
+              type="button"
+              class="bg-card rounded-lg border border-border p-5 min-h-28 cursor-pointer text-left"
+              onclick={() => openHashPath("/identity?needs_review=true")}
             >
-              <p class="text-sm text-muted-foreground">Artwork Coverage</p>
+              <p class="text-sm text-muted-foreground">Identity Coverage</p>
               <p class="text-3xl font-bold text-foreground mt-2">
                 {formatPercent(dashboard.artwork_health.coverage_percent)}
               </p>
@@ -590,13 +610,12 @@
                 Missing {dashboard.artwork_health.missing_posters} • Invalid {dashboard
                   .artwork_health.invalid_posters}
               </p>
-            </article>
+            </button>
 
             <button
               type="button"
               class="bg-card rounded-lg border border-border p-5 min-h-28 cursor-pointer text-left"
-              onclick={() =>
-                openQuery("/series", { decision_state: "safe_to_delete" })}
+              onclick={() => openOperationsCollection("ready_to_detach")}
             >
               <p class="text-sm text-muted-foreground">Ready Today</p>
               <div class="mt-3 space-y-2 text-sm">
@@ -624,8 +643,7 @@
             <button
               type="button"
               class="bg-card rounded-lg border border-border p-5 min-h-28 cursor-pointer text-left"
-              onclick={() =>
-                openQuery("/series", { decision_state: "waiting" })}
+              onclick={() => openOperationsCollection("import_pending")}
             >
               <p class="text-sm text-muted-foreground">Blocked</p>
               <div class="mt-3 space-y-2 text-sm">
@@ -644,12 +662,54 @@
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Attention</span>
                   <span class="font-semibold text-foreground"
-                    >{dashboard.decision_summary.blocked
-                      .attention_required}</span
+                    >{attentionRequiredFromSnapshot}</span
                   >
                 </div>
               </div>
             </button>
+          </section>
+
+          <section class="bg-card rounded-lg border border-border p-5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h2 class="text-lg font-semibold text-foreground">
+                Attention Required Reconciliation
+              </h2>
+              <span
+                class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground"
+              >
+                Total: {attentionRequiredFromSnapshot}
+              </span>
+            </div>
+            <p class="mt-2 text-sm text-muted-foreground">
+              Attention Required is computed from high-severity operational
+              collections in the same snapshot.
+            </p>
+            <div class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {#each attentionBreakdownCards as card}
+                <button
+                  type="button"
+                  class="rounded-lg border border-border bg-background/70 px-3 py-2 text-left hover:bg-secondary/30"
+                  onclick={() => openOperationsCollection(card.key)}
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-medium text-foreground"
+                      >{card.title}</span
+                    >
+                    <span class="text-sm font-semibold text-destructive"
+                      >{card.count}</span
+                    >
+                  </div>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    {card.description}
+                  </p>
+                </button>
+              {/each}
+              {#if attentionBreakdownCards.length === 0}
+                <p class="text-sm text-muted-foreground">
+                  No high-severity collections detected in the current snapshot.
+                </p>
+              {/if}
+            </div>
           </section>
 
           <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
