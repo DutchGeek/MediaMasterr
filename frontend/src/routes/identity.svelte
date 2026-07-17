@@ -55,6 +55,7 @@
   let displayMode = $state<"grid" | "list" | "table">("grid");
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
   let selectedArtworkByField = $state<Record<string, string>>({});
+  let selectedExtendedArtworkByField = $state<Record<string, string>>({});
   let artworkDimensions = $state<Record<string, string>>({});
 
   let workspace = $state<IdentityWorkspaceResponse | null>(null);
@@ -69,6 +70,8 @@
   let syncPreview = $state<IdentitySyncPreviewResponse | null>(null);
   let syncHistory = $state<IdentitySyncHistoryResponse | null>(null);
   let syncMessage = $state("");
+  let syncDecision = $state<"pending" | "approved" | "rejected">("pending");
+  let providerTrustOrder = $state<string[]>([]);
 
   let overrideField = $state("");
   let overrideValue = $state("");
@@ -101,6 +104,33 @@
     { key: "history", label: "History" },
     { key: "synchronization", label: "Synchronization" },
     { key: "diagnostics", label: "Diagnostics" },
+  ];
+
+  const providerTrustStorageKey = "identity_provider_trust_order_v1";
+  const defaultProviderTrustOrder = [
+    "manual",
+    "plex",
+    "sonarr",
+    "radarr",
+    "overseerr",
+    "tmdb",
+    "tvdb",
+    "fanart",
+    "jellyfin",
+    "emby",
+    "trakt",
+    "anidb",
+    "myanimelist",
+    "tvmaze",
+  ];
+
+  const extendedArtworkTypes = [
+    { key: "collection_poster", label: "Collection Poster" },
+    { key: "collection_backdrop", label: "Collection Backdrop" },
+    { key: "season_posters", label: "Season Posters" },
+    { key: "season_banners", label: "Season Banners" },
+    { key: "episode_artwork", label: "Episode Artwork" },
+    { key: "anime_artwork", label: "Anime Artwork" },
   ];
 
   const sortByOptions = [
@@ -218,6 +248,69 @@
       confidence: number;
     }[];
   }) => row.values.filter((value) => !value.is_canonical);
+
+  const providerRank = (provider: string): number => {
+    const key = (provider || "").toLowerCase();
+    const index = providerTrustOrder.indexOf(key);
+    return index >= 0 ? index : providerTrustOrder.length + 100;
+  };
+
+  const trustedProviders = $derived.by(() => {
+    const rows = [...(studio?.providers ?? [])];
+    return rows.sort((a, b) => {
+      const diff = providerRank(a.provider) - providerRank(b.provider);
+      if (diff !== 0) return diff;
+      return b.confidence - a.confidence;
+    });
+  });
+
+  const providerUpdatedAtLabel = (provider: string): string => {
+    const match = trustedProviders.find(
+      (candidate) => candidate.provider === provider,
+    );
+    return match?.updated_at
+      ? new Date(match.updated_at).toLocaleString()
+      : "Unknown";
+  };
+
+  const confidenceStatus = (confidence: number): string => {
+    if (confidence >= 90) return "Healthy";
+    if (confidence >= 75) return "Review";
+    return "Attention";
+  };
+
+  const providerSignalPreview = (
+    provider: IdentityStudioResponse["providers"][number],
+    field: "poster" | "backdrop" | "logo",
+  ): string | null => {
+    const direct = provider.signals?.[`${field}_url`];
+    if (typeof direct === "string" && direct.trim()) return direct;
+    const alt = provider.signals?.[`artwork_${field}`];
+    if (typeof alt === "string" && alt.trim()) return alt;
+    return field === "poster" ? provider.artwork_preview_url : null;
+  };
+
+  const providerExternalIdEntries = (
+    provider: IdentityStudioResponse["providers"][number],
+  ): Array<{ key: string; value: string }> => {
+    const entries = Object.entries(provider.signals ?? {})
+      .filter(
+        ([key, value]) =>
+          /(_id|imdb|tmdb|tvdb|trakt|anidb|tvmaze)/i.test(key) && value,
+      )
+      .slice(0, 8)
+      .map(([key, value]) => ({ key, value: String(value) }));
+    return entries;
+  };
+
+  const metadataDiffers = (
+    row: IdentityStudioResponse["metadata"][number],
+    provider: string,
+  ): boolean => {
+    const providerValue =
+      row.values.find((value) => value.provider === provider)?.value ?? null;
+    return (providerValue ?? "") !== (canonicalValue(row) ?? "");
+  };
 
   const onArtworkImageLoad = (key: string, provider: string, event: Event) => {
     const image = event.currentTarget as HTMLImageElement;
@@ -535,6 +628,26 @@
     void loadWorkspace();
   }
 
+  function moveProviderTrust(provider: string, direction: "up" | "down") {
+    const key = provider.toLowerCase();
+    const next = [...providerTrustOrder];
+    const index = next.indexOf(key);
+    if (index < 0) return;
+    const swapWith = direction === "up" ? index - 1 : index + 1;
+    if (swapWith < 0 || swapWith >= next.length) return;
+    [next[index], next[swapWith]] = [next[swapWith], next[index]];
+    providerTrustOrder = next;
+    localStorage.setItem(providerTrustStorageKey, JSON.stringify(next));
+  }
+
+  function resetProviderTrustOrder() {
+    providerTrustOrder = [...defaultProviderTrustOrder];
+    localStorage.setItem(
+      providerTrustStorageKey,
+      JSON.stringify(defaultProviderTrustOrder),
+    );
+  }
+
   function handleSearch(value: string) {
     search = value;
     page = 1;
@@ -663,6 +776,32 @@
     };
   }
 
+  function searchExternal() {
+    validateExternalInput();
+    if (externalValidation.status !== "valid") return;
+    syncMessage = `Search prepared for ${externalValidation.field} ${externalValidation.value}.`;
+  }
+
+  async function repairExternalOverride() {
+    validateExternalInput();
+    if (externalValidation.status !== "valid") return;
+    await upsertOverride(
+      externalValidation.field,
+      externalValidation.value,
+      `Repair requested for ${externalValidation.field}`,
+    );
+  }
+
+  async function approveSync() {
+    syncDecision = "approved";
+    syncMessage = "Synchronization preview approved. Ready to queue.";
+  }
+
+  async function rejectSync() {
+    syncDecision = "rejected";
+    syncMessage = "Synchronization preview rejected. No changes queued.";
+  }
+
   async function applyExternalOverride() {
     if (externalValidation.status !== "valid") {
       validateExternalInput();
@@ -676,6 +815,25 @@
   }
 
   onMount(() => {
+    const savedTrust = localStorage.getItem(providerTrustStorageKey);
+    if (savedTrust) {
+      try {
+        const parsed = JSON.parse(savedTrust);
+        if (
+          Array.isArray(parsed) &&
+          parsed.every((v) => typeof v === "string")
+        ) {
+          providerTrustOrder = parsed.map((v) => v.toLowerCase());
+        } else {
+          providerTrustOrder = [...defaultProviderTrustOrder];
+        }
+      } catch {
+        providerTrustOrder = [...defaultProviderTrustOrder];
+      }
+    } else {
+      providerTrustOrder = [...defaultProviderTrustOrder];
+    }
+
     parseHashFilters();
     void loadFilterCatalog();
     void loadWorkspace();
@@ -1185,7 +1343,7 @@
 
         {#if activeTab === "providers"}
           <div class="grid gap-3 lg:grid-cols-2 text-sm">
-            {#each studio.providers as provider}
+            {#each trustedProviders as provider}
               <article
                 class="rounded-xl border border-border/70 bg-background/70 p-3"
               >
@@ -1209,13 +1367,132 @@
                     </div>
                   </div>
 
-                  {#if provider.artwork_preview_url}
+                  {#if providerSignalPreview(provider, "poster")}
                     <img
-                      src={provider.artwork_preview_url}
-                      alt={`${provider.provider} preview`}
+                      src={providerSignalPreview(provider, "poster") ??
+                        undefined}
+                      alt={`${provider.provider} poster`}
                       class="h-24 w-16 rounded object-cover"
                     />
                   {/if}
+                </div>
+
+                <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div
+                    class="rounded-md border border-border/60 bg-muted/10 p-2"
+                  >
+                    <div
+                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
+                    >
+                      Poster
+                    </div>
+                    {#if providerSignalPreview(provider, "poster")}
+                      <img
+                        src={providerSignalPreview(provider, "poster") ??
+                          undefined}
+                        alt={`${provider.provider} poster preview`}
+                        class="mt-1 h-20 w-full rounded object-cover"
+                      />
+                    {:else}
+                      <div
+                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
+                      >
+                        No poster
+                      </div>
+                    {/if}
+                  </div>
+                  <div
+                    class="rounded-md border border-border/60 bg-muted/10 p-2"
+                  >
+                    <div
+                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
+                    >
+                      Backdrop
+                    </div>
+                    {#if providerSignalPreview(provider, "backdrop")}
+                      <img
+                        src={providerSignalPreview(provider, "backdrop") ??
+                          undefined}
+                        alt={`${provider.provider} backdrop preview`}
+                        class="mt-1 h-20 w-full rounded object-cover"
+                      />
+                    {:else}
+                      <div
+                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
+                      >
+                        No backdrop
+                      </div>
+                    {/if}
+                  </div>
+                  <div
+                    class="rounded-md border border-border/60 bg-muted/10 p-2"
+                  >
+                    <div
+                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
+                    >
+                      Logo
+                    </div>
+                    {#if providerSignalPreview(provider, "logo")}
+                      <img
+                        src={providerSignalPreview(provider, "logo") ??
+                          undefined}
+                        alt={`${provider.provider} logo preview`}
+                        class="mt-1 h-20 w-full rounded object-contain bg-black/10"
+                      />
+                    {:else}
+                      <div
+                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
+                      >
+                        No logo
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <div class="mt-3 grid gap-2 md:grid-cols-2">
+                  <div
+                    class="rounded-md border border-border/60 bg-background/70 p-2 text-xs"
+                  >
+                    <div class="font-semibold text-foreground">
+                      Metadata Summary
+                    </div>
+                    {#each studio.metadata.slice(0, 5) as row}
+                      <div class="mt-1 flex items-start justify-between gap-2">
+                        <span class="text-muted-foreground">{row.label}</span>
+                        <span
+                          class={metadataDiffers(row, provider.provider)
+                            ? "text-amber-500"
+                            : "text-foreground"}
+                        >
+                          {metadataValue(row, provider.provider) ??
+                            "Not supplied"}
+                        </span>
+                      </div>
+                    {/each}
+                  </div>
+                  <div
+                    class="rounded-md border border-border/60 bg-background/70 p-2 text-xs"
+                  >
+                    <div class="font-semibold text-foreground">
+                      External IDs
+                    </div>
+                    {#if providerExternalIdEntries(provider).length > 0}
+                      {#each providerExternalIdEntries(provider) as entry}
+                        <div
+                          class="mt-1 flex items-start justify-between gap-2"
+                        >
+                          <span class="text-muted-foreground">{entry.key}</span>
+                          <span class="text-foreground break-all"
+                            >{entry.value}</span
+                          >
+                        </div>
+                      {/each}
+                    {:else}
+                      <div class="mt-1 text-muted-foreground">
+                        No provider IDs exposed.
+                      </div>
+                    {/if}
+                  </div>
                 </div>
 
                 <div class="mt-2 text-xs text-muted-foreground">
@@ -1231,10 +1508,14 @@
                   <button
                     class="rounded-md border border-border px-2 py-1 hover:bg-accent"
                     onclick={() =>
-                      void useProviderPreset(provider.provider, "identity")}
+                      void upsertOverride(
+                        "id_profile",
+                        provider.provider,
+                        `External ID profile from ${provider.provider}`,
+                      )}
                     disabled={busy}
                   >
-                    Use Identity
+                    Use IDs
                   </button>
                   <button
                     class="rounded-md border border-border px-2 py-1 hover:bg-accent"
@@ -1291,7 +1572,7 @@
                           {value.provider}
                         </div>
                         <input
-                          type="radio"
+                          type="checkbox"
                           name={`artwork-${row.key}`}
                           checked={(selectedArtworkByField[row.key] ??
                             "canonical") === value.provider}
@@ -1328,7 +1609,11 @@
                           ] ?? "Unknown"}
                         </div>
                         <div>Source: {value.provider}</div>
+                        <div>
+                          Last Updated: {providerUpdatedAtLabel(value.provider)}
+                        </div>
                         <div>Confidence: {value.confidence}%</div>
+                        <div>Status: {confidenceStatus(value.confidence)}</div>
                       </div>
                     </label>
                   {/each}
@@ -1357,6 +1642,53 @@
                 {/each}
               </div>
             </div>
+
+            <div class="rounded-xl border border-border/70 bg-card p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Extended Artwork Targets
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                {#each extendedArtworkTypes as artworkType}
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/70 p-3"
+                  >
+                    <div class="font-medium text-foreground">
+                      {artworkType.label}
+                    </div>
+                    <div class="mt-2 space-y-2">
+                      {#each trustedProviders as provider}
+                        <label
+                          class="flex items-center justify-between gap-2 rounded-md border border-border/50 px-2 py-1 text-xs"
+                        >
+                          <span class="text-foreground"
+                            >{provider.provider}</span
+                          >
+                          <span class="text-muted-foreground"
+                            >{confidenceStatus(provider.confidence)}</span
+                          >
+                          <span class="text-muted-foreground"
+                            >{providerUpdatedAtLabel(provider.provider)}</span
+                          >
+                          <input
+                            type="checkbox"
+                            checked={(selectedExtendedArtworkByField[
+                              artworkType.key
+                            ] ?? "") === provider.provider}
+                            onchange={() =>
+                              (selectedExtendedArtworkByField = {
+                                ...selectedExtendedArtworkByField,
+                                [artworkType.key]: provider.provider,
+                              })}
+                          />
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
           </div>
         {/if}
 
@@ -1377,12 +1709,22 @@
                       </tr>
                     </thead>
                     <tbody>
-                      {#each providerValues(row) as candidate}
+                      {#each trustedProviders as provider}
+                        {@const providerValue = metadataValue(
+                          row,
+                          provider.provider,
+                        )}
                         <tr class="border-t border-border/50">
                           <td class="py-1 pr-2">{canonicalValue(row) ?? "-"}</td
                           >
-                          <td class="py-1 pr-2"
-                            >{candidate.provider}: {candidate.value ?? "-"}</td
+                          <td
+                            class={`py-1 pr-2 ${
+                              providerValue !== (canonicalValue(row) ?? null)
+                                ? "text-amber-500"
+                                : "text-foreground"
+                            }`}
+                            >{provider.provider}: {providerValue ??
+                              "Not supplied"}</td
                           >
                           <td class="py-1">{canonicalValue(row) ?? "-"}</td>
                         </tr>
@@ -1419,9 +1761,21 @@
                 />
                 <button
                   class="rounded-md border border-border px-3 py-2 hover:bg-accent"
+                  onclick={searchExternal}
+                >
+                  Search
+                </button>
+                <button
+                  class="rounded-md border border-border px-3 py-2 hover:bg-accent"
                   onclick={validateExternalInput}
                 >
                   Validate
+                </button>
+                <button
+                  class="rounded-md border border-border px-3 py-2 hover:bg-accent"
+                  onclick={() => void repairExternalOverride()}
+                >
+                  Repair
                 </button>
                 <button
                   class="rounded-md bg-primary px-3 py-2 text-primary-foreground hover:opacity-90"
@@ -1468,6 +1822,53 @@
 
         {#if activeTab === "synchronization"}
           <div class="space-y-3 text-sm">
+            <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div
+                class="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Preview Changes
+              </div>
+              <div class="mt-2 grid gap-2 md:grid-cols-2">
+                {#each ["plex", "sonarr", "radarr", "overseerr", "local_database"] as system}
+                  <div
+                    class="rounded-md border border-border/60 bg-background/80 px-2 py-2 text-xs"
+                  >
+                    <div class="font-medium text-foreground">
+                      Will update {system.replaceAll("_", " ")}
+                    </div>
+                    <div class="mt-1 text-muted-foreground">
+                      {trustedProviders.some(
+                        (provider) =>
+                          provider.provider.toLowerCase() === system,
+                      ) || system === "local_database"
+                        ? "Pending changes in preview"
+                        : "No mapped provider for this title"}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button
+                  class="rounded-md border border-border px-3 py-1 hover:bg-accent"
+                  onclick={() => void approveSync()}
+                  disabled={busy}>Approve</button
+                >
+                <button
+                  class="rounded-md border border-border px-3 py-1 hover:bg-accent"
+                  onclick={() => void rejectSync()}
+                  disabled={busy}>Reject</button
+                >
+                <button
+                  class="rounded-md bg-primary px-3 py-1 text-primary-foreground hover:opacity-90"
+                  onclick={() => void runSync()}
+                  disabled={busy || syncDecision === "rejected"}>Queue</button
+                >
+              </div>
+              <div class="mt-2 text-xs text-muted-foreground">
+                Decision: {syncDecision}
+              </div>
+            </div>
+
             <div class="grid gap-2 md:grid-cols-3">
               <label class="text-xs text-muted-foreground">
                 Sync Behaviour
@@ -1518,6 +1919,47 @@
 
         {#if activeTab === "diagnostics"}
           <div class="space-y-2 text-sm">
+            <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <div
+                    class="text-xs uppercase tracking-wide text-muted-foreground"
+                  >
+                    Provider Trust
+                  </div>
+                  <div class="text-sm text-foreground">
+                    Future decisions honor this order.
+                  </div>
+                </div>
+                <button
+                  class="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
+                  onclick={resetProviderTrustOrder}>Reset</button
+                >
+              </div>
+              <div class="mt-2 space-y-1">
+                {#each providerTrustOrder as provider, index}
+                  <div
+                    class="flex items-center justify-between rounded-md border border-border/60 bg-background/70 px-2 py-1 text-xs"
+                  >
+                    <span>{index + 1}. {provider}</span>
+                    <span class="flex items-center gap-1">
+                      <button
+                        class="rounded border border-border px-1 hover:bg-accent"
+                        onclick={() => moveProviderTrust(provider, "up")}
+                        disabled={index === 0}>Up</button
+                      >
+                      <button
+                        class="rounded border border-border px-1 hover:bg-accent"
+                        onclick={() => moveProviderTrust(provider, "down")}
+                        disabled={index === providerTrustOrder.length - 1}
+                        >Down</button
+                      >
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+
             {#each studio.diagnostics as row}
               <div class="rounded-xl border border-border/70 p-3">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
@@ -1577,6 +2019,7 @@
                     <th class="px-3 py-2">Override Value</th>
                     <th class="px-3 py-2">Source</th>
                     <th class="px-3 py-2">Validation</th>
+                    <th class="px-3 py-2">Modified By</th>
                     <th class="px-3 py-2">Modified</th>
                   </tr>
                 </thead>
@@ -1608,6 +2051,11 @@
                         )
                           ? "applied"
                           : "none"}
+                      </td>
+                      <td class="px-3 py-2">
+                        {studio.overrides.find(
+                          (override) => override.field === row.key,
+                        )?.created_by_user_id ?? "-"}
                       </td>
                       <td class="px-3 py-2">
                         {studio.overrides.find(
@@ -1645,12 +2093,18 @@
         {#if activeTab === "history"}
           <div class="space-y-2 text-sm">
             {#each studio.history as row}
-              <div class="rounded-md border border-border/70 p-2">
-                <div class="font-medium">{row.summary}</div>
-                <div class="text-xs text-muted-foreground">
-                  {row.action} | {row.result} | {new Date(
-                    row.created_at,
-                  ).toLocaleString()}
+              <div class="flex gap-3">
+                <div class="flex flex-col items-center">
+                  <div class="mt-1 h-2 w-2 rounded-full bg-primary"></div>
+                  <div class="h-full w-px bg-border"></div>
+                </div>
+                <div class="flex-1 rounded-md border border-border/70 p-2">
+                  <div class="font-medium">{row.summary}</div>
+                  <div class="text-xs text-muted-foreground">
+                    {row.action} | {row.result} | {new Date(
+                      row.created_at,
+                    ).toLocaleString()}
+                  </div>
                 </div>
               </div>
             {/each}

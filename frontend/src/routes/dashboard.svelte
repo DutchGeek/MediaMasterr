@@ -79,6 +79,38 @@
       .filter((card) => card.count > 0)
       .sort((a, b) => b.count - a.count),
   );
+  const attentionByCategory = $derived.by(() => {
+    const totalFor = (keys: string[]) =>
+      operationsCards
+        .filter(
+          (card) =>
+            card.severity === "high" &&
+            keys.some((key) => card.key.includes(key)),
+        )
+        .reduce((sum, card) => sum + card.count, 0);
+
+    const importPending = totalFor(["import_pending", "broken_import"]);
+    const identityIssues = totalFor(["identity"]);
+    const providerIssues = totalFor([
+      "provider",
+      "orphaned",
+      "duplicate_torrent",
+    ]);
+    const automationIssues = totalFor([
+      "automation",
+      "queue",
+      "failure",
+      "unknown_files",
+    ]);
+
+    return {
+      importPending,
+      identityIssues,
+      providerIssues,
+      automationIssues,
+      total: importPending + identityIssues + providerIssues + automationIssues,
+    };
+  });
   const connectedServicesCount = $derived(
     dashboard?.services.filter((service) => service.enabled).length ?? 0,
   );
@@ -681,9 +713,53 @@
               </span>
             </div>
             <p class="mt-2 text-sm text-muted-foreground">
-              Attention Required is computed from high-severity operational
-              collections in the same snapshot.
+              Attention Required = Import Pending + Identity Issues + Provider
+              Issues + Automation Issues.
             </p>
+            <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-background/70 px-3 py-2 text-left hover:bg-secondary/30"
+                onclick={() => openOperationsCollection("import_pending")}
+              >
+                <div class="text-xs text-muted-foreground">Import Pending</div>
+                <div class="text-lg font-semibold text-foreground">
+                  {attentionByCategory.importPending}
+                </div>
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-background/70 px-3 py-2 text-left hover:bg-secondary/30"
+                onclick={() => openHashPath("/identity?needs_review=true")}
+              >
+                <div class="text-xs text-muted-foreground">Identity Issues</div>
+                <div class="text-lg font-semibold text-foreground">
+                  {attentionByCategory.identityIssues}
+                </div>
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-background/70 px-3 py-2 text-left hover:bg-secondary/30"
+                onclick={() => openOperationsCollection("orphaned_torrents")}
+              >
+                <div class="text-xs text-muted-foreground">Provider Issues</div>
+                <div class="text-lg font-semibold text-foreground">
+                  {attentionByCategory.providerIssues}
+                </div>
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-border bg-background/70 px-3 py-2 text-left hover:bg-secondary/30"
+                onclick={() => openOperationsCollection("unknown_files")}
+              >
+                <div class="text-xs text-muted-foreground">
+                  Automation Issues
+                </div>
+                <div class="text-lg font-semibold text-foreground">
+                  {attentionByCategory.automationIssues}
+                </div>
+              </button>
+            </div>
             <div class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {#each attentionBreakdownCards as card}
                 <button
