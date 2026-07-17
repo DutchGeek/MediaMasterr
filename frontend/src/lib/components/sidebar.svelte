@@ -20,6 +20,7 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Check from "@lucide/svelte/icons/check";
   import Wrench from "@lucide/svelte/icons/wrench";
+  import Fingerprint from "@lucide/svelte/icons/fingerprint";
   import { toTitleCase } from "$lib/utils/strings";
   import * as Avatar from "$lib/components/ui/avatar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -77,6 +78,14 @@
       adminOnly: false,
       page: PageAccess.Operations,
       tooltip: "Media Intelligence Engine recommendations and cleanup planning",
+    },
+    {
+      path: "/identity",
+      label: "Identity",
+      icon: Fingerprint,
+      adminOnly: false,
+      page: PageAccess.Identity,
+      tooltip: "Identity browser and comparison studio for canonical metadata control",
     },
     {
       path: "/qbittorrent",

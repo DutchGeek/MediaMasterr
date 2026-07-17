@@ -34,6 +34,7 @@ export enum PageAccess {
   Dashboard = "dashboard",
   Movies = "movies",
   Series = "series",
+  Identity = "identity",
   Operations = "operations",
   Requests = "requests",
   Protected = "protected",
@@ -240,6 +241,112 @@ export interface MieOperationsResponse {
   filesystem: FilesystemConfigResponse;
   cleanup_plans: CleanupPlanListResponse;
   artwork_issues: ArtworkIssuesSummary | null;
+}
+
+export type IdentityConflictLevel = "none" | "low" | "medium" | "high";
+
+export interface IdentityWorkspaceItem {
+  media_type: MediaType;
+  media_id: number;
+  title: string;
+  year: number | null;
+  poster_url: string | null;
+  backdrop_url: string | null;
+  canonical_provider: string;
+  provider_count: number;
+  provider_confidence: number;
+  conflict_level: IdentityConflictLevel;
+  last_synced_at: string | null;
+  status: string;
+}
+
+export interface IdentityWorkspaceResponse {
+  items: IdentityWorkspaceItem[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+  generated_at: string;
+}
+
+export interface IdentityProviderMatch {
+  provider: string;
+  provider_item_id: string;
+  confidence: number;
+  path_tail: string | null;
+  signals: Record<string, unknown>;
+  updated_at: string | null;
+  is_canonical: boolean;
+}
+
+export interface IdentityFieldValue {
+  provider: string;
+  value: string | null;
+  confidence: number;
+  is_canonical: boolean;
+}
+
+export interface IdentityComparisonField {
+  key: string;
+  label: string;
+  values: IdentityFieldValue[];
+}
+
+export interface IdentityOverrideEntry {
+  field: string;
+  value: string;
+  scope: "media" | "global";
+  reason: string | null;
+  created_at: string;
+  created_by_user_id: number | null;
+}
+
+export interface IdentityHistoryEntry {
+  id: number;
+  action: string;
+  result: string;
+  summary: string;
+  created_at: string;
+}
+
+export interface IdentityStudioResponse {
+  media_type: MediaType;
+  media_id: number;
+  title: string;
+  year: number | null;
+  canonical_provider: string;
+  overview: IdentityComparisonField[];
+  providers: IdentityProviderMatch[];
+  artwork: IdentityComparisonField[];
+  metadata: IdentityComparisonField[];
+  external_ids: IdentityComparisonField[];
+  overrides: IdentityOverrideEntry[];
+  history: IdentityHistoryEntry[];
+  generated_at: string;
+}
+
+export interface IdentityActionResponse {
+  accepted: boolean;
+  action: string;
+  message: string;
+}
+
+export interface IdentitySyncPreviewResponse {
+  target_count: number;
+  changed_count: number;
+  warnings: string[];
+  details: string[];
+}
+
+export interface IdentitySyncJobResponse {
+  accepted: boolean;
+  status: string;
+  message: string;
+  operation_history_id: number | null;
+}
+
+export interface IdentitySyncHistoryResponse {
+  items: IdentityHistoryEntry[];
 }
 
 export enum MediaType {

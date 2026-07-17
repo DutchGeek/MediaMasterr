@@ -1,0 +1,598 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import UTC, datetime
+from typing import Any, Literal, Sequence, cast
+
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.database.models import (
+    MediaAsset,
+    Movie,
+    OperationHistory,
+    Series,
+    SupplementalMediaMatch,
+)
+from backend.enums import MediaType
+from backend.models.mie import (
+    IdentityActionResponse,
+    IdentityCanonicalSelectionRequest,
+    IdentityComparisonField,
+    IdentityFieldValue,
+    IdentityHistoryEntry,
+    IdentityOverrideEntry,
+    IdentityOverrideUpsertRequest,
+    IdentityProviderMatch,
+    IdentityStudioResponse,
+    IdentitySyncHistoryResponse,
+    IdentitySyncJobResponse,
+    IdentitySyncPreviewResponse,
+    IdentityWorkspaceItem,
+    IdentityWorkspaceResponse,
+)
+
+
+class IdentityCenterService:
+    """Read/write service for the Identity Center workspace."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    @staticmethod
+    def _preferred_provider(media_type: MediaType) -> str:
+        return "radarr" if media_type == MediaType.MOVIE else "sonarr"
+
+    @staticmethod
+    def _conflict_level(
+        provider_count: int,
+        max_confidence: int,
+    ) -> Literal["none", "low", "medium", "high"]:
+        if provider_count <= 1:
+            return "none"
+        if provider_count >= 3 and max_confidence < 70:
+            return "high"
+        if provider_count >= 2 and max_confidence < 85:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _history_summary(action: str, metadata: dict[str, Any]) -> str:
+        if action == "identity_set_canonical":
+            provider = metadata.get("provider") or "unknown"
+            return f"Canonical provider set to {provider}."
+        if action == "identity_override_upsert":
+            field = metadata.get("field") or "field"
+            return f"Override updated for {field}."
+        if action == "identity_sync_run":
+            return "Identity sync run requested."
+        return "Identity action executed."
+
+    async def _load_match_index(
+        self,
+        media_type: MediaType | None = None,
+    ) -> dict[tuple[MediaType, int], list[SupplementalMediaMatch]]:
+        stmt = select(SupplementalMediaMatch)
+        if media_type is not None:
+            stmt = stmt.where(SupplementalMediaMatch.media_type == media_type)
+        rows = (await self.db.execute(stmt)).scalars().all()
+
+        match_index: dict[tuple[MediaType, int], list[SupplementalMediaMatch]] = (
+            defaultdict(list)
+        )
+        for row in rows:
+            target_id = row.movie_id if row.media_type == MediaType.MOVIE else row.series_id
+            if target_id is None:
+                continue
+            match_index[(row.media_type, int(target_id))].append(row)
+        return match_index
+
+    def _choose_canonical_provider(
+        self,
+        media_type: MediaType,
+        matches: Sequence[SupplementalMediaMatch],
+    ) -> str:
+        preferred = self._preferred_provider(media_type)
+        providers = [str(row.source_service) for row in matches]
+        if preferred in providers:
+            return preferred
+        if not matches:
+            return preferred
+        best = max(matches, key=lambda row: int(row.confidence or 0))
+        return str(best.source_service)
+
+    async def workspace(
+        self,
+        *,
+        page: int = 1,
+        per_page: int = 24,
+        search: str | None = None,
+        media_type: MediaType | None = None,
+        sort_by: str = "title",
+        sort_order: str = "asc",
+    ) -> IdentityWorkspaceResponse:
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)
+        search_value = (search or "").strip().lower()
+        match_index = await self._load_match_index(media_type)
+
+        items: list[IdentityWorkspaceItem] = []
+
+        if media_type in {None, MediaType.MOVIE}:
+            movie_rows = (
+                (
+                    await self.db.execute(
+                        select(Movie, MediaAsset)
+                        .outerjoin(MediaAsset, MediaAsset.movie_id == Movie.id)
+                        .where(Movie.removed_at.is_(None))
+                    )
+                )
+                .all()
+            )
+            for movie, asset in movie_rows:
+                if search_value and search_value not in movie.title.lower():
+                    continue
+                matches = match_index.get((MediaType.MOVIE, movie.id), [])
+                providers = {str(row.source_service) for row in matches}
+                canonical = self._choose_canonical_provider(MediaType.MOVIE, matches)
+                max_confidence = max((int(row.confidence or 0) for row in matches), default=0)
+                provider_count = max(1, len(providers))
+                items.append(
+                    IdentityWorkspaceItem(
+                        media_type=MediaType.MOVIE,
+                        media_id=movie.id,
+                        title=movie.title,
+                        year=movie.year,
+                        poster_url=(asset.poster_url if asset else movie.poster_url),
+                        backdrop_url=(asset.backdrop_url if asset else movie.backdrop_url),
+                        canonical_provider=canonical,
+                        provider_count=provider_count,
+                        provider_confidence=max_confidence,
+                        conflict_level=self._conflict_level(provider_count, max_confidence),
+                        last_synced_at=(asset.updated_at if asset else None),
+                        status=(asset.lifecycle_state if asset else "imported"),
+                    )
+                )
+
+        if media_type in {None, MediaType.SERIES}:
+            series_rows = (
+                (
+                    await self.db.execute(
+                        select(Series, MediaAsset)
+                        .outerjoin(MediaAsset, MediaAsset.series_id == Series.id)
+                        .where(Series.removed_at.is_(None))
+                    )
+                )
+                .all()
+            )
+            for series, asset in series_rows:
+                if search_value and search_value not in series.title.lower():
+                    continue
+                matches = match_index.get((MediaType.SERIES, series.id), [])
+                providers = {str(row.source_service) for row in matches}
+                canonical = self._choose_canonical_provider(MediaType.SERIES, matches)
+                max_confidence = max((int(row.confidence or 0) for row in matches), default=0)
+                provider_count = max(1, len(providers))
+                items.append(
+                    IdentityWorkspaceItem(
+                        media_type=MediaType.SERIES,
+                        media_id=series.id,
+                        title=series.title,
+                        year=series.year,
+                        poster_url=(asset.poster_url if asset else series.poster_url),
+                        backdrop_url=(asset.backdrop_url if asset else series.backdrop_url),
+                        canonical_provider=canonical,
+                        provider_count=provider_count,
+                        provider_confidence=max_confidence,
+                        conflict_level=self._conflict_level(provider_count, max_confidence),
+                        last_synced_at=(asset.updated_at if asset else None),
+                        status=(asset.lifecycle_state if asset else "imported"),
+                    )
+                )
+
+        reverse = sort_order.lower() == "desc"
+        if sort_by == "updated":
+            items.sort(
+                key=lambda row: row.last_synced_at or datetime.fromtimestamp(0, tz=UTC),
+                reverse=reverse,
+            )
+        elif sort_by == "confidence":
+            items.sort(key=lambda row: row.provider_confidence, reverse=reverse)
+        else:
+            items.sort(key=lambda row: (row.title or "").lower(), reverse=reverse)
+
+        total = len(items)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        start = (page - 1) * per_page
+        end = start + per_page
+
+        return IdentityWorkspaceResponse(
+            items=items[start:end],
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
+            generated_at=datetime.now(UTC),
+        )
+
+    async def _fetch_target(
+        self,
+        media_type: MediaType,
+        media_id: int,
+    ) -> tuple[Movie | Series, MediaAsset | None]:
+        if media_type == MediaType.MOVIE:
+            movie_row = (
+                await self.db.execute(
+                    select(Movie, MediaAsset)
+                    .outerjoin(MediaAsset, MediaAsset.movie_id == Movie.id)
+                    .where(Movie.id == media_id, Movie.removed_at.is_(None))
+                )
+            ).one_or_none()
+            if movie_row is None:
+                raise ValueError("Media item not found")
+            movie, asset = movie_row
+            return movie, asset
+        else:
+            series_row = (
+                await self.db.execute(
+                    select(Series, MediaAsset)
+                    .outerjoin(MediaAsset, MediaAsset.series_id == Series.id)
+                    .where(Series.id == media_id, Series.removed_at.is_(None))
+                )
+            ).one_or_none()
+            if series_row is None:
+                raise ValueError("Media item not found")
+            series, asset = series_row
+            return series, asset
+
+    async def studio(self, *, media_type: MediaType, media_id: int) -> IdentityStudioResponse:
+        target, asset = await self._fetch_target(media_type, media_id)
+
+        match_rows = (
+            (
+                await self.db.execute(
+                    select(SupplementalMediaMatch).where(
+                        SupplementalMediaMatch.media_type == media_type,
+                        or_(
+                            SupplementalMediaMatch.movie_id == media_id,
+                            SupplementalMediaMatch.series_id == media_id,
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        canonical_provider = self._choose_canonical_provider(media_type, match_rows)
+        provider_matches: list[IdentityProviderMatch] = []
+        for match_row in sorted(
+            match_rows,
+            key=lambda item: int(item.confidence or 0),
+            reverse=True,
+        ):
+            provider_matches.append(
+                IdentityProviderMatch(
+                    provider=str(match_row.source_service),
+                    provider_item_id=match_row.source_item_id,
+                    confidence=int(match_row.confidence or 0),
+                    path_tail=match_row.path_tail,
+                    signals=match_row.signals or {},
+                    updated_at=match_row.updated_at,
+                    is_canonical=str(match_row.source_service) == canonical_provider,
+                )
+            )
+
+        metadata_values = {
+            "title": target.title,
+            "original_title": getattr(target, "original_title", None),
+            "year": str(getattr(target, "year", "") or "") or None,
+            "language": getattr(target, "original_language", None),
+            "status": getattr(target, "status", None),
+            "tagline": getattr(target, "tagline", None),
+            "overview": getattr(target, "overview", None),
+        }
+
+        external_values = {
+            "tmdb_id": str(getattr(target, "tmdb_id", "") or "") or None,
+            "imdb_id": getattr(target, "imdb_id", None),
+            "tvdb_id": getattr(target, "tvdb_id", None),
+            "anilist_id": str(getattr(target, "anilist_id", "") or "") or None,
+        }
+
+        overview: list[IdentityComparisonField] = [
+            IdentityComparisonField(
+                key="canonical_provider",
+                label="Canonical Provider",
+                values=[
+                    IdentityFieldValue(
+                        provider="canonical",
+                        value=canonical_provider,
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="provider_count",
+                label="Provider Matches",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=str(len(provider_matches)),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+        ]
+
+        metadata: list[IdentityComparisonField] = []
+        for key, value in metadata_values.items():
+            metadata.append(
+                IdentityComparisonField(
+                    key=key,
+                    label=key.replace("_", " ").title(),
+                    values=[
+                        IdentityFieldValue(
+                            provider="canonical",
+                            value=value,
+                            confidence=100,
+                            is_canonical=True,
+                        )
+                    ],
+                )
+            )
+
+        external_ids: list[IdentityComparisonField] = []
+        for key, value in external_values.items():
+            if value is None:
+                continue
+            external_ids.append(
+                IdentityComparisonField(
+                    key=key,
+                    label=key.replace("_", " ").upper(),
+                    values=[
+                        IdentityFieldValue(
+                            provider="canonical",
+                            value=value,
+                            confidence=100,
+                            is_canonical=True,
+                        )
+                    ],
+                )
+            )
+
+        artwork: list[IdentityComparisonField] = [
+            IdentityComparisonField(
+                key="poster",
+                label="Poster",
+                values=[
+                    IdentityFieldValue(
+                        provider="canonical",
+                        value=(asset.poster_url if asset else getattr(target, "poster_url", None)),
+                        confidence=int(asset.artwork_confidence * 100) if asset else 100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="backdrop",
+                label="Backdrop",
+                values=[
+                    IdentityFieldValue(
+                        provider="canonical",
+                        value=(asset.backdrop_url if asset else getattr(target, "backdrop_url", None)),
+                        confidence=int(asset.artwork_confidence * 100) if asset else 100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+        ]
+
+        history_rows = (
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .where(
+                        OperationHistory.action.like("identity_%"),
+                        OperationHistory.target_type == media_type.value,
+                        OperationHistory.target_id == str(media_id),
+                    )
+                    .order_by(OperationHistory.created_at.desc())
+                    .limit(50)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        overrides: list[IdentityOverrideEntry] = []
+        history: list[IdentityHistoryEntry] = []
+        for history_row in history_rows:
+            metadata_json = history_row.metadata_json or {}
+            if history_row.action == "identity_override_upsert":
+                value = metadata_json.get("value")
+                field = metadata_json.get("field")
+                if isinstance(value, str) and isinstance(field, str):
+                    scope_value = (
+                        cast(Literal["media", "global"], metadata_json["scope"])
+                        if metadata_json.get("scope") in {"media", "global"}
+                        else "media"
+                    )
+                    overrides.append(
+                        IdentityOverrideEntry(
+                            field=field,
+                            value=value,
+                            scope=scope_value,
+                            reason=(metadata_json.get("reason") if isinstance(metadata_json.get("reason"), str) else None),
+                            created_at=history_row.created_at,
+                            created_by_user_id=history_row.created_by_user_id,
+                        )
+                    )
+
+            history.append(
+                IdentityHistoryEntry(
+                    id=history_row.id,
+                    action=history_row.action,
+                    result=history_row.result,
+                    summary=self._history_summary(history_row.action, metadata_json),
+                    created_at=history_row.created_at,
+                )
+            )
+
+        title = target.title
+        year = getattr(target, "year", None)
+
+        return IdentityStudioResponse(
+            media_type=media_type,
+            media_id=media_id,
+            title=title,
+            year=year,
+            canonical_provider=canonical_provider,
+            overview=overview,
+            providers=provider_matches,
+            artwork=artwork,
+            metadata=metadata,
+            external_ids=external_ids,
+            overrides=overrides,
+            history=history,
+            generated_at=datetime.now(UTC),
+        )
+
+    async def set_canonical_provider(
+        self,
+        *,
+        media_type: MediaType,
+        media_id: int,
+        payload: IdentityCanonicalSelectionRequest,
+        user_id: int | None,
+    ) -> IdentityActionResponse:
+        await self._fetch_target(media_type, media_id)
+
+        self.db.add(
+            OperationHistory(
+                action="identity_set_canonical",
+                target_type=media_type.value,
+                target_id=str(media_id),
+                result="completed",
+                safety_level="safe",
+                metadata_json={"provider": payload.provider, "reason": payload.reason},
+                created_by_user_id=user_id,
+            )
+        )
+        await self.db.commit()
+
+        return IdentityActionResponse(
+            accepted=True,
+            action="set_canonical",
+            message=f"Canonical provider set to {payload.provider}.",
+        )
+
+    async def upsert_override(
+        self,
+        *,
+        media_type: MediaType,
+        media_id: int,
+        payload: IdentityOverrideUpsertRequest,
+        user_id: int | None,
+    ) -> IdentityActionResponse:
+        await self._fetch_target(media_type, media_id)
+
+        self.db.add(
+            OperationHistory(
+                action="identity_override_upsert",
+                target_type=media_type.value,
+                target_id=str(media_id),
+                result="completed",
+                safety_level="safe",
+                metadata_json={
+                    "field": payload.field,
+                    "value": payload.value,
+                    "scope": payload.scope,
+                    "reason": payload.reason,
+                },
+                created_by_user_id=user_id,
+            )
+        )
+        await self.db.commit()
+
+        return IdentityActionResponse(
+            accepted=True,
+            action="upsert_override",
+            message=f"Override for {payload.field} saved.",
+        )
+
+    async def sync_preview(self) -> IdentitySyncPreviewResponse:
+        assets = (await self.db.execute(select(MediaAsset))).scalars().all()
+        total = len(assets)
+        low_confidence = sum(1 for asset in assets if float(asset.artwork_confidence or 0.0) < 0.7)
+        missing_artwork = sum(1 for asset in assets if (asset.artwork_status or "").upper() in {"MISSING", "INVALID"})
+
+        warnings: list[str] = []
+        if low_confidence > 0:
+            warnings.append(f"{low_confidence} assets have low artwork confidence.")
+        if missing_artwork > 0:
+            warnings.append(f"{missing_artwork} assets are missing valid artwork.")
+
+        details = [
+            "Preview computes canonical identity candidates and metadata deltas.",
+            "No destructive changes are applied during preview.",
+        ]
+
+        return IdentitySyncPreviewResponse(
+            target_count=total,
+            changed_count=low_confidence + missing_artwork,
+            warnings=warnings,
+            details=details,
+        )
+
+    async def start_sync(self, *, user_id: int | None) -> IdentitySyncJobResponse:
+        history_row = OperationHistory(
+            action="identity_sync_run",
+            target_type="identity",
+            target_id="all",
+            result="queued",
+            safety_level="safe",
+            metadata_json={"requested_at": datetime.now(UTC).isoformat()},
+            created_by_user_id=user_id,
+        )
+        self.db.add(history_row)
+        await self.db.flush()
+        operation_id = history_row.id
+        await self.db.commit()
+
+        return IdentitySyncJobResponse(
+            accepted=True,
+            status="queued",
+            message="Identity sync job queued.",
+            operation_history_id=operation_id,
+        )
+
+    async def sync_history(self, *, limit: int = 50) -> IdentitySyncHistoryResponse:
+        bounded_limit = max(1, min(limit, 200))
+        history_rows = (
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .where(OperationHistory.action.like("identity_%"))
+                    .order_by(OperationHistory.created_at.desc())
+                    .limit(bounded_limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        return IdentitySyncHistoryResponse(
+            items=[
+                IdentityHistoryEntry(
+                    id=row.id,
+                    action=row.action,
+                    result=row.result,
+                    summary=self._history_summary(row.action, row.metadata_json or {}),
+                    created_at=row.created_at,
+                )
+                for row in history_rows
+            ]
+        )

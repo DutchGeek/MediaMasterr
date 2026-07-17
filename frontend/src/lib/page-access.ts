@@ -27,6 +27,12 @@ export const PAGE_ACCESS_OPTIONS: PageAccessOption[] = [
     description: "Browse synced series media.",
   },
   {
+    value: PageAccess.Identity,
+    label: "Identity",
+    path: "/identity",
+    description: "Manage identity matching, canonical source selection, and sync.",
+  },
+  {
     value: PageAccess.Operations,
     label: "Operations",
     path: "/operations",
@@ -77,6 +83,7 @@ const redirectPreference = [
   PageAccess.Dashboard,
   PageAccess.Movies,
   PageAccess.Series,
+  PageAccess.Identity,
   PageAccess.Operations,
   PageAccess.Requests,
   PageAccess.Protected,

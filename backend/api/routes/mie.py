@@ -12,12 +12,21 @@ from backend.database.models import User
 from backend.enums import MediaType, PageAccess
 from backend.models.dashboard import DashboardResponse
 from backend.models.mie import (
+    IdentityActionResponse,
+    IdentityCanonicalSelectionRequest,
+    IdentityOverrideUpsertRequest,
+    IdentityStudioResponse,
+    IdentitySyncHistoryResponse,
+    IdentitySyncJobResponse,
+    IdentitySyncPreviewResponse,
+    IdentityWorkspaceResponse,
     MieOverviewResponse,
     MieRelationshipGraphResponse,
     MieTimelineResponse,
     OperationsRecommendationsResponse,
     OperationsWorkspaceResponse,
 )
+from backend.services.mie.identity_service import IdentityCenterService
 from backend.services.mie.intelligence_service import MediaIntelligenceService
 from backend.services.mie.operations_service import OperationsService
 
@@ -79,3 +88,103 @@ async def get_mie_relationship_graph(
         media_type=media_type,
         media_id=media_id,
     )
+
+
+@router.get("/identity", response_model=IdentityWorkspaceResponse)
+async def get_identity_workspace(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+    page: int = 1,
+    per_page: int = 24,
+    search: str | None = None,
+    media_type: MediaType | None = None,
+    sort_by: str = "title",
+    sort_order: str = "asc",
+) -> IdentityWorkspaceResponse:
+    return await IdentityCenterService(db).workspace(
+        page=page,
+        per_page=per_page,
+        search=search,
+        media_type=media_type,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+
+@router.get(
+    "/identity/{media_type}/{media_id}/studio",
+    response_model=IdentityStudioResponse,
+)
+async def get_identity_studio(
+    media_type: MediaType,
+    media_id: int,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentityStudioResponse:
+    return await IdentityCenterService(db).studio(
+        media_type=media_type,
+        media_id=media_id,
+    )
+
+
+@router.post(
+    "/identity/{media_type}/{media_id}/canonical",
+    response_model=IdentityActionResponse,
+)
+async def set_identity_canonical_provider(
+    media_type: MediaType,
+    media_id: int,
+    payload: IdentityCanonicalSelectionRequest,
+    current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentityActionResponse:
+    return await IdentityCenterService(db).set_canonical_provider(
+        media_type=media_type,
+        media_id=media_id,
+        payload=payload,
+        user_id=current_user.id,
+    )
+
+
+@router.post(
+    "/identity/{media_type}/{media_id}/overrides",
+    response_model=IdentityActionResponse,
+)
+async def upsert_identity_override(
+    media_type: MediaType,
+    media_id: int,
+    payload: IdentityOverrideUpsertRequest,
+    current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentityActionResponse:
+    return await IdentityCenterService(db).upsert_override(
+        media_type=media_type,
+        media_id=media_id,
+        payload=payload,
+        user_id=current_user.id,
+    )
+
+
+@router.get("/identity/sync-preview", response_model=IdentitySyncPreviewResponse)
+async def get_identity_sync_preview(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentitySyncPreviewResponse:
+    return await IdentityCenterService(db).sync_preview()
+
+
+@router.post("/identity/sync", response_model=IdentitySyncJobResponse)
+async def start_identity_sync(
+    current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentitySyncJobResponse:
+    return await IdentityCenterService(db).start_sync(user_id=current_user.id)
+
+
+@router.get("/identity/sync-history", response_model=IdentitySyncHistoryResponse)
+async def get_identity_sync_history(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+) -> IdentitySyncHistoryResponse:
+    return await IdentityCenterService(db).sync_history(limit=limit)

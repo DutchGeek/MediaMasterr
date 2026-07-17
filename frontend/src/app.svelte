@@ -16,6 +16,7 @@
   import Requests from "./routes/requests/requests-entry.svelte";
   import Movies from "./routes/movies.svelte";
   import Series from "./routes/series.svelte";
+  import Identity from "./routes/identity.svelte";
   import Operations from "./routes/operations.svelte";
   import Protected from "./routes/protected.svelte";
   import Candidates from "./routes/candidates.svelte";
@@ -50,6 +51,7 @@
     "/": route(Dashboard),
     "/movies": route(Movies),
     "/series": route(Series),
+    "/identity": route(Identity),
     "/operations": route(Operations),
     "/protected": route(Protected),
     "/requests": route(Requests),
