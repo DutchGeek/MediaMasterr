@@ -81,18 +81,15 @@ class IdentityCenterService:
 
     async def _override_keys(self) -> set[tuple[MediaType, int]]:
         rows = (
-            (
-                await self.db.execute(
-                    select(OperationHistory.target_type, OperationHistory.target_id)
-                    .where(
-                        OperationHistory.action == "identity_override_upsert",
-                        OperationHistory.result == "completed",
-                    )
-                    .distinct()
+            await self.db.execute(
+                select(OperationHistory.target_type, OperationHistory.target_id)
+                .where(
+                    OperationHistory.action == "identity_override_upsert",
+                    OperationHistory.result == "completed",
                 )
+                .distinct()
             )
-            .all()
-        )
+        ).all()
         keys: set[tuple[MediaType, int]] = set()
         for target_type, target_id in rows:
             if not isinstance(target_id, str) or not target_id.isdigit():
@@ -263,7 +260,8 @@ class IdentityCenterService:
                     movie_conflict in {"high", "medium"}
                     or max_confidence < 75
                     or movie_identifier_status != "healthy"
-                    or movie_artwork_status in {"missing", "invalid", "stale", "needs_refresh"}
+                    or movie_artwork_status
+                    in {"missing", "invalid", "stale", "needs_refresh"}
                 )
                 items.append(
                     IdentityWorkspaceItem(
@@ -336,7 +334,8 @@ class IdentityCenterService:
                     series_conflict in {"high", "medium"}
                     or max_confidence < 75
                     or series_identifier_status != "healthy"
-                    or series_artwork_status in {"missing", "invalid", "stale", "needs_refresh"}
+                    or series_artwork_status
+                    in {"missing", "invalid", "stale", "needs_refresh"}
                 )
                 items.append(
                     IdentityWorkspaceItem(
@@ -368,11 +367,15 @@ class IdentityCenterService:
 
         if min_confidence is not None:
             items = [
-                item for item in items if item.provider_confidence >= int(min_confidence)
+                item
+                for item in items
+                if item.provider_confidence >= int(min_confidence)
             ]
         if max_confidence is not None:
             items = [
-                item for item in items if item.provider_confidence <= int(max_confidence)
+                item
+                for item in items
+                if item.provider_confidence <= int(max_confidence)
             ]
         if canonical_provider:
             provider_key = canonical_provider.strip().lower()
@@ -384,7 +387,9 @@ class IdentityCenterService:
         if sync_status:
             normalized_status = sync_status.strip().lower()
             items = [
-                item for item in items if item.status.strip().lower() == normalized_status
+                item
+                for item in items
+                if item.status.strip().lower() == normalized_status
             ]
         if artwork_status:
             normalized_artwork = artwork_status.strip().lower()
@@ -523,9 +528,13 @@ class IdentityCenterService:
                     metadata_quality=self._status_from_confidence(
                         int(match_row.confidence or 0)
                     ),
-                    external_ids_count=int(match_signals.get("external_ids_count") or 0),
+                    external_ids_count=int(
+                        match_signals.get("external_ids_count") or 0
+                    ),
                     collection_count=int(match_signals.get("collection_count") or 0),
-                    connection_status=str(match_signals.get("connection_status") or "connected"),
+                    connection_status=str(
+                        match_signals.get("connection_status") or "connected"
+                    ),
                     signals=match_signals,
                     updated_at=match_row.updated_at,
                     is_canonical=str(match_row.source_service) == canonical_provider,
@@ -755,7 +764,13 @@ class IdentityCenterService:
                             provider="calculated",
                             value=self._conflict_level(
                                 max(1, len(provider_matches)),
-                                max((provider.confidence for provider in provider_matches), default=0),
+                                max(
+                                    (
+                                        provider.confidence
+                                        for provider in provider_matches
+                                    ),
+                                    default=0,
+                                ),
                             ),
                             confidence=100,
                             is_canonical=True,
