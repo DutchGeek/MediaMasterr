@@ -256,6 +256,11 @@ export interface IdentityWorkspaceItem {
   provider_count: number;
   provider_confidence: number;
   conflict_level: IdentityConflictLevel;
+  needs_review: boolean;
+  artwork_status: string;
+  metadata_status: string;
+  identifier_status: string;
+  override_status: string;
   last_synced_at: string | null;
   status: string;
 }
@@ -274,6 +279,11 @@ export interface IdentityProviderMatch {
   provider_item_id: string;
   confidence: number;
   path_tail: string | null;
+  artwork_preview_url: string | null;
+  metadata_quality: string;
+  external_ids_count: number;
+  collection_count: number;
+  connection_status: string;
   signals: Record<string, unknown>;
   updated_at: string | null;
   is_canonical: boolean;
@@ -322,6 +332,8 @@ export interface IdentityStudioResponse {
   external_ids: IdentityComparisonField[];
   overrides: IdentityOverrideEntry[];
   history: IdentityHistoryEntry[];
+  synchronization: IdentityComparisonField[];
+  diagnostics: IdentityComparisonField[];
   generated_at: string;
 }
 

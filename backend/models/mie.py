@@ -231,6 +231,8 @@ IdentityStudioTab = Literal[
     "external_ids",
     "overrides",
     "history",
+    "synchronization",
+    "diagnostics",
 ]
 
 
@@ -245,6 +247,11 @@ class IdentityWorkspaceItem(BaseModel):
     provider_count: int = 0
     provider_confidence: int = 0
     conflict_level: IdentityConflictLevel = "none"
+    needs_review: bool = False
+    artwork_status: str = "unknown"
+    metadata_status: str = "unknown"
+    identifier_status: str = "unknown"
+    override_status: str = "none"
     last_synced_at: datetime | None = None
     status: str = "ready"
 
@@ -263,6 +270,11 @@ class IdentityProviderMatch(BaseModel):
     provider_item_id: str
     confidence: int = 0
     path_tail: str | None = None
+    artwork_preview_url: str | None = None
+    metadata_quality: str = "unknown"
+    external_ids_count: int = 0
+    collection_count: int = 0
+    connection_status: str = "unknown"
     signals: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
     is_canonical: bool = False
@@ -311,6 +323,8 @@ class IdentityStudioResponse(BaseModel):
     external_ids: list[IdentityComparisonField] = Field(default_factory=list)
     overrides: list[IdentityOverrideEntry] = Field(default_factory=list)
     history: list[IdentityHistoryEntry] = Field(default_factory=list)
+    synchronization: list[IdentityComparisonField] = Field(default_factory=list)
+    diagnostics: list[IdentityComparisonField] = Field(default_factory=list)
     generated_at: datetime
 
 

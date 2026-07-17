@@ -541,13 +541,13 @@
         <section class="rounded-2xl border border-border/70 bg-card/70 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-lg font-semibold text-foreground">
-              Artwork Integrity
+              Identity Coverage
             </h2>
             <span class="text-sm text-muted-foreground">
               Coverage {workspace.artwork_issues.coverage_percent.toFixed(1)}%
             </span>
           </div>
-          <div class="mt-3 grid gap-2 text-sm md:grid-cols-3 xl:grid-cols-6">
+          <div class="mt-3 grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
             <div
               class="rounded-lg border border-border/60 bg-background/70 p-2"
             >
@@ -561,23 +561,16 @@
             <div
               class="rounded-lg border border-border/60 bg-background/70 p-2"
             >
-              Placeholder: {workspace.artwork_issues.placeholder_count}
+              Review: {workspace.artwork_issues.invalid_count}
             </div>
             <div
               class="rounded-lg border border-border/60 bg-background/70 p-2"
             >
-              Invalid: {workspace.artwork_issues.invalid_count}
-            </div>
-            <div
-              class="rounded-lg border border-border/60 bg-background/70 p-2"
-            >
-              Stale/Refresh: {workspace.artwork_issues.stale_count +
-                workspace.artwork_issues.needs_refresh_count}
-            </div>
-            <div
-              class="rounded-lg border border-border/60 bg-background/70 p-2"
-            >
-              Collisions: {workspace.artwork_issues.collision_count}
+              Last Refresh: {workspace.artwork_issues.last_refresh_at
+                ? new Date(
+                    workspace.artwork_issues.last_refresh_at,
+                  ).toLocaleString()
+                : "Not available"}
             </div>
           </div>
         </section>

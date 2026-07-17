@@ -388,6 +388,14 @@ async def build_dashboard_response(
     )
 
     top_card_opportunities: list[DashboardOpportunity] = []
+
+    def _card_target_path(card_key: str) -> str:
+        if card_key == "identity_issues":
+            return "/identity?needs_review=true"
+        if card_key in {"import_pending"}:
+            return "/movies?candidates_only=true"
+        return f"/operations?collection={card_key}"
+
     for card in sorted(
         [card for card in operations_cards if card.count > 0],
         key=lambda row: (
@@ -417,7 +425,7 @@ async def build_dashboard_response(
                 poster_url=top_poster,
                 operation_key=card.key,
                 metric_count=card.count,
-                target_path=f"/operations?collection={card.key}",
+                target_path=_card_target_path(card.key),
             )
         )
 

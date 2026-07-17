@@ -5,13 +5,14 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models import (
     MediaAsset,
     Movie,
     OperationHistory,
+    QueryFilter,
     Series,
     SupplementalMediaMatch,
 )
@@ -32,6 +33,7 @@ from backend.models.mie import (
     IdentityWorkspaceItem,
     IdentityWorkspaceResponse,
 )
+from backend.services.query_engine import QueryEngineSpec, apply_spec
 
 
 class IdentityCenterService:
@@ -68,6 +70,69 @@ class IdentityCenterService:
         if action == "identity_sync_run":
             return "Identity sync run requested."
         return "Identity action executed."
+
+    @staticmethod
+    def _status_from_confidence(value: int) -> str:
+        if value >= 90:
+            return "healthy"
+        if value >= 75:
+            return "review"
+        return "attention"
+
+    async def _override_keys(self) -> set[tuple[MediaType, int]]:
+        rows = (
+            (
+                await self.db.execute(
+                    select(OperationHistory.target_type, OperationHistory.target_id)
+                    .where(
+                        OperationHistory.action == "identity_override_upsert",
+                        OperationHistory.result == "completed",
+                    )
+                    .distinct()
+                )
+            )
+            .all()
+        )
+        keys: set[tuple[MediaType, int]] = set()
+        for target_type, target_id in rows:
+            if not isinstance(target_id, str) or not target_id.isdigit():
+                continue
+            if target_type == MediaType.MOVIE.value:
+                keys.add((MediaType.MOVIE, int(target_id)))
+            elif target_type == MediaType.SERIES.value:
+                keys.add((MediaType.SERIES, int(target_id)))
+        return keys
+
+    async def _filtered_media_ids(
+        self,
+        *,
+        media_type: MediaType,
+        search: str | None,
+        candidates_only: bool,
+        imported_filter_ids: list[int],
+        decision_filter_ids: list[int],
+        smart_filter_ids: list[int],
+    ) -> set[int]:
+        model = Movie if media_type is MediaType.MOVIE else Series
+        query = select(model.id).where(model.removed_at.is_(None))
+        count_query = (
+            select(func.count()).select_from(model).where(model.removed_at.is_(None))
+        )
+        query, _ = await apply_spec(
+            self.db,
+            spec=QueryEngineSpec(
+                media_type=media_type,
+                search=search,
+                candidates_only=candidates_only,
+                imported_filter_ids=imported_filter_ids,
+                decision_filter_ids=decision_filter_ids,
+                smart_filter_ids=smart_filter_ids,
+            ),
+            query=query,
+            count_query=count_query,
+        )
+        rows = (await self.db.execute(query)).all()
+        return {int(media_id) for (media_id,) in rows}
 
     async def _load_match_index(
         self,
@@ -113,11 +178,50 @@ class IdentityCenterService:
         media_type: MediaType | None = None,
         sort_by: str = "title",
         sort_order: str = "asc",
+        candidates_only: bool = False,
+        imported_filter_ids: list[int] | None = None,
+        decision_filter_ids: list[int] | None = None,
+        smart_filter_ids: list[int] | None = None,
+        min_confidence: int | None = None,
+        max_confidence: int | None = None,
+        canonical_provider: str | None = None,
+        sync_status: str | None = None,
+        artwork_status: str | None = None,
+        metadata_status: str | None = None,
+        identifier_status: str | None = None,
+        override_status: str | None = None,
+        conflict_level: str | None = None,
+        needs_review: bool | None = None,
     ) -> IdentityWorkspaceResponse:
         page = max(1, page)
         per_page = min(max(1, per_page), 100)
         search_value = (search or "").strip().lower()
+        imported_ids = [int(v) for v in (imported_filter_ids or [])]
+        decision_ids = [int(v) for v in (decision_filter_ids or [])]
+        smart_ids = [int(v) for v in (smart_filter_ids or [])]
+        allowed_movie_ids: set[int] | None = None
+        allowed_series_ids: set[int] | None = None
+        if imported_ids or decision_ids or smart_ids or candidates_only or search_value:
+            if media_type in {None, MediaType.MOVIE}:
+                allowed_movie_ids = await self._filtered_media_ids(
+                    media_type=MediaType.MOVIE,
+                    search=search,
+                    candidates_only=candidates_only,
+                    imported_filter_ids=imported_ids,
+                    decision_filter_ids=decision_ids,
+                    smart_filter_ids=smart_ids,
+                )
+            if media_type in {None, MediaType.SERIES}:
+                allowed_series_ids = await self._filtered_media_ids(
+                    media_type=MediaType.SERIES,
+                    search=search,
+                    candidates_only=candidates_only,
+                    imported_filter_ids=imported_ids,
+                    decision_filter_ids=decision_ids,
+                    smart_filter_ids=smart_ids,
+                )
         match_index = await self._load_match_index(media_type)
+        override_keys = await self._override_keys()
 
         items: list[IdentityWorkspaceItem] = []
 
@@ -130,6 +234,8 @@ class IdentityCenterService:
                 )
             ).all()
             for movie, asset in movie_rows:
+                if allowed_movie_ids is not None and movie.id not in allowed_movie_ids:
+                    continue
                 if search_value and search_value not in movie.title.lower():
                     continue
                 matches = match_index.get((MediaType.MOVIE, movie.id), [])
@@ -139,6 +245,26 @@ class IdentityCenterService:
                     (int(row.confidence or 0) for row in matches), default=0
                 )
                 provider_count = max(1, len(providers))
+                movie_identifier_status = (
+                    "healthy" if movie.imdb_id and movie.tmdb_id else "attention"
+                )
+                movie_metadata_status = (
+                    "healthy"
+                    if movie.overview and movie.original_language
+                    else "review"
+                )
+                movie_artwork_status = (
+                    asset.artwork_status.lower()
+                    if asset and asset.artwork_status
+                    else "unknown"
+                )
+                movie_conflict = self._conflict_level(provider_count, max_confidence)
+                movie_needs_review = (
+                    movie_conflict in {"high", "medium"}
+                    or max_confidence < 75
+                    or movie_identifier_status != "healthy"
+                    or movie_artwork_status in {"missing", "invalid", "stale", "needs_refresh"}
+                )
                 items.append(
                     IdentityWorkspaceItem(
                         media_type=MediaType.MOVIE,
@@ -152,8 +278,15 @@ class IdentityCenterService:
                         canonical_provider=canonical,
                         provider_count=provider_count,
                         provider_confidence=max_confidence,
-                        conflict_level=self._conflict_level(
-                            provider_count, max_confidence
+                        conflict_level=movie_conflict,
+                        needs_review=movie_needs_review,
+                        artwork_status=movie_artwork_status,
+                        metadata_status=movie_metadata_status,
+                        identifier_status=movie_identifier_status,
+                        override_status=(
+                            "manual"
+                            if (MediaType.MOVIE, movie.id) in override_keys
+                            else "none"
                         ),
                         last_synced_at=(asset.updated_at if asset else None),
                         status=(asset.lifecycle_state if asset else "imported"),
@@ -169,6 +302,11 @@ class IdentityCenterService:
                 )
             ).all()
             for series, asset in series_rows:
+                if (
+                    allowed_series_ids is not None
+                    and series.id not in allowed_series_ids
+                ):
+                    continue
                 if search_value and search_value not in series.title.lower():
                     continue
                 matches = match_index.get((MediaType.SERIES, series.id), [])
@@ -178,6 +316,28 @@ class IdentityCenterService:
                     (int(row.confidence or 0) for row in matches), default=0
                 )
                 provider_count = max(1, len(providers))
+                series_identifier_status = (
+                    "healthy"
+                    if series.imdb_id and series.tmdb_id and series.tvdb_id
+                    else "attention"
+                )
+                series_metadata_status = (
+                    "healthy"
+                    if series.overview and series.original_language
+                    else "review"
+                )
+                series_artwork_status = (
+                    asset.artwork_status.lower()
+                    if asset and asset.artwork_status
+                    else "unknown"
+                )
+                series_conflict = self._conflict_level(provider_count, max_confidence)
+                series_needs_review = (
+                    series_conflict in {"high", "medium"}
+                    or max_confidence < 75
+                    or series_identifier_status != "healthy"
+                    or series_artwork_status in {"missing", "invalid", "stale", "needs_refresh"}
+                )
                 items.append(
                     IdentityWorkspaceItem(
                         media_type=MediaType.SERIES,
@@ -191,13 +351,78 @@ class IdentityCenterService:
                         canonical_provider=canonical,
                         provider_count=provider_count,
                         provider_confidence=max_confidence,
-                        conflict_level=self._conflict_level(
-                            provider_count, max_confidence
+                        conflict_level=series_conflict,
+                        needs_review=series_needs_review,
+                        artwork_status=series_artwork_status,
+                        metadata_status=series_metadata_status,
+                        identifier_status=series_identifier_status,
+                        override_status=(
+                            "manual"
+                            if (MediaType.SERIES, series.id) in override_keys
+                            else "none"
                         ),
                         last_synced_at=(asset.updated_at if asset else None),
                         status=(asset.lifecycle_state if asset else "imported"),
                     )
                 )
+
+        if min_confidence is not None:
+            items = [
+                item for item in items if item.provider_confidence >= int(min_confidence)
+            ]
+        if max_confidence is not None:
+            items = [
+                item for item in items if item.provider_confidence <= int(max_confidence)
+            ]
+        if canonical_provider:
+            provider_key = canonical_provider.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.canonical_provider.strip().lower() == provider_key
+            ]
+        if sync_status:
+            normalized_status = sync_status.strip().lower()
+            items = [
+                item for item in items if item.status.strip().lower() == normalized_status
+            ]
+        if artwork_status:
+            normalized_artwork = artwork_status.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.artwork_status.strip().lower() == normalized_artwork
+            ]
+        if metadata_status:
+            normalized_metadata = metadata_status.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.metadata_status.strip().lower() == normalized_metadata
+            ]
+        if identifier_status:
+            normalized_identifier = identifier_status.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.identifier_status.strip().lower() == normalized_identifier
+            ]
+        if override_status:
+            normalized_override = override_status.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.override_status.strip().lower() == normalized_override
+            ]
+        if conflict_level:
+            normalized_conflict = conflict_level.strip().lower()
+            items = [
+                item
+                for item in items
+                if item.conflict_level.strip().lower() == normalized_conflict
+            ]
+        if needs_review is not None:
+            items = [item for item in items if bool(item.needs_review) is needs_review]
 
         reverse = sort_order.lower() == "desc"
         if sort_by == "updated":
@@ -282,13 +507,26 @@ class IdentityCenterService:
             key=lambda item: int(item.confidence or 0),
             reverse=True,
         ):
+            match_signals = match_row.signals or {}
+            preview = (
+                cast(str | None, match_signals.get("poster_url"))
+                or cast(str | None, match_signals.get("artwork_poster"))
+                or (asset.poster_url if asset else None)
+            )
             provider_matches.append(
                 IdentityProviderMatch(
                     provider=str(match_row.source_service),
                     provider_item_id=match_row.source_item_id,
                     confidence=int(match_row.confidence or 0),
                     path_tail=match_row.path_tail,
-                    signals=match_row.signals or {},
+                    artwork_preview_url=preview,
+                    metadata_quality=self._status_from_confidence(
+                        int(match_row.confidence or 0)
+                    ),
+                    external_ids_count=int(match_signals.get("external_ids_count") or 0),
+                    collection_count=int(match_signals.get("collection_count") or 0),
+                    connection_status=str(match_signals.get("connection_status") or "connected"),
+                    signals=match_signals,
                     updated_at=match_row.updated_at,
                     is_canonical=str(match_row.source_service) == canonical_provider,
                 )
@@ -374,44 +612,54 @@ class IdentityCenterService:
                 )
             )
 
-        artwork: list[IdentityComparisonField] = [
-            IdentityComparisonField(
-                key="poster",
-                label="Poster",
-                values=[
-                    IdentityFieldValue(
-                        provider="canonical",
-                        value=(
-                            asset.poster_url
-                            if asset
-                            else getattr(target, "poster_url", None)
-                        ),
-                        confidence=int(asset.artwork_confidence * 100)
-                        if asset
-                        else 100,
-                        is_canonical=True,
-                    )
-                ],
-            ),
-            IdentityComparisonField(
-                key="backdrop",
-                label="Backdrop",
-                values=[
-                    IdentityFieldValue(
-                        provider="canonical",
-                        value=(
-                            asset.backdrop_url
-                            if asset
-                            else getattr(target, "backdrop_url", None)
-                        ),
-                        confidence=int(asset.artwork_confidence * 100)
-                        if asset
-                        else 100,
-                        is_canonical=True,
-                    )
-                ],
-            ),
+        canonical_poster = (
+            asset.poster_url if asset else getattr(target, "poster_url", None)
+        )
+        canonical_backdrop = (
+            asset.backdrop_url if asset else getattr(target, "backdrop_url", None)
+        )
+        canonical_logo = asset.logo_url if asset else None
+        canonical_banner = asset.banner_url if asset else None
+
+        artwork_fields: list[tuple[str, str, str | None]] = [
+            ("poster", "Poster", canonical_poster),
+            ("backdrop", "Backdrop", canonical_backdrop),
+            ("logo", "Logo", canonical_logo),
+            ("banner", "Banner", canonical_banner),
         ]
+
+        artwork: list[IdentityComparisonField] = []
+        for field_key, field_label, canonical_value in artwork_fields:
+            values: list[IdentityFieldValue] = []
+            values.append(
+                IdentityFieldValue(
+                    provider="canonical",
+                    value=canonical_value,
+                    confidence=int(asset.artwork_confidence * 100) if asset else 100,
+                    is_canonical=True,
+                )
+            )
+            for provider in provider_matches:
+                candidate = provider.signals.get(f"{field_key}_url")
+                if candidate is None:
+                    candidate = provider.signals.get(f"artwork_{field_key}")
+                if not isinstance(candidate, str) or not candidate.strip():
+                    continue
+                values.append(
+                    IdentityFieldValue(
+                        provider=provider.provider,
+                        value=candidate,
+                        confidence=provider.confidence,
+                        is_canonical=provider.is_canonical,
+                    )
+                )
+            artwork.append(
+                IdentityComparisonField(
+                    key=field_key,
+                    label=field_label,
+                    values=values,
+                )
+            )
 
         history_rows = (
             (
@@ -484,8 +732,70 @@ class IdentityCenterService:
             external_ids=external_ids,
             overrides=overrides,
             history=history,
+            synchronization=[
+                IdentityComparisonField(
+                    key="sync_preview",
+                    label="Synchronization Preview",
+                    values=[
+                        IdentityFieldValue(
+                            provider="current",
+                            value="Current values will be compared against provider values before apply.",
+                            confidence=100,
+                            is_canonical=True,
+                        )
+                    ],
+                )
+            ],
+            diagnostics=[
+                IdentityComparisonField(
+                    key="identity_conflict",
+                    label="Conflict Level",
+                    values=[
+                        IdentityFieldValue(
+                            provider="calculated",
+                            value=self._conflict_level(
+                                max(1, len(provider_matches)),
+                                max((provider.confidence for provider in provider_matches), default=0),
+                            ),
+                            confidence=100,
+                            is_canonical=True,
+                        )
+                    ],
+                )
+            ],
             generated_at=datetime.now(UTC),
         )
+
+    async def identity_health_summary(self) -> dict[str, int | float]:
+        assets = (await self.db.execute(select(MediaAsset))).scalars().all()
+        total_assets = len(assets)
+        valid_statuses = {"valid"}
+        missing_statuses = {"missing", "invalid", "placeholder"}
+
+        healthy_count = 0
+        missing_count = 0
+        review_count = 0
+        for asset in assets:
+            status = (asset.artwork_status or "").strip().lower()
+            confidence = float(asset.artwork_confidence or 0.0)
+            if status in valid_statuses and confidence >= 0.85:
+                healthy_count += 1
+                continue
+            if status in missing_statuses:
+                missing_count += 1
+            else:
+                review_count += 1
+
+        coverage_percent = (
+            (healthy_count / total_assets) * 100 if total_assets > 0 else 0.0
+        )
+        return {
+            "total_assets": total_assets,
+            "healthy_count": healthy_count,
+            "missing_count": missing_count,
+            "review_count": review_count,
+            "coverage_percent": coverage_percent,
+        }
 
     async def set_canonical_provider(
         self,

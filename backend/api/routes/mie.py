@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.routes.dashboard import build_dashboard_response
@@ -100,6 +100,20 @@ async def get_identity_workspace(
     media_type: MediaType | None = None,
     sort_by: str = "title",
     sort_order: str = "asc",
+    candidates_only: bool = False,
+    arr_filter_ids: list[int] = Query(default_factory=list),
+    decision_filter_ids: list[int] = Query(default_factory=list),
+    smart_filter_ids: list[int] = Query(default_factory=list),
+    min_confidence: int | None = None,
+    max_confidence: int | None = None,
+    canonical_provider: str | None = None,
+    sync_status: str | None = None,
+    artwork_status: str | None = None,
+    metadata_status: str | None = None,
+    identifier_status: str | None = None,
+    override_status: str | None = None,
+    conflict_level: str | None = None,
+    needs_review: bool | None = None,
 ) -> IdentityWorkspaceResponse:
     return await IdentityCenterService(db).workspace(
         page=page,
@@ -108,6 +122,20 @@ async def get_identity_workspace(
         media_type=media_type,
         sort_by=sort_by,
         sort_order=sort_order,
+        candidates_only=candidates_only,
+        imported_filter_ids=arr_filter_ids,
+        decision_filter_ids=decision_filter_ids,
+        smart_filter_ids=smart_filter_ids,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
+        canonical_provider=canonical_provider,
+        sync_status=sync_status,
+        artwork_status=artwork_status,
+        metadata_status=metadata_status,
+        identifier_status=identifier_status,
+        override_status=override_status,
+        conflict_level=conflict_level,
+        needs_review=needs_review,
     )
 
 

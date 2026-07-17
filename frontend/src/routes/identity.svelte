@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { get_api, post_api } from "$lib/api";
+  import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import {
+    type MediaFilterCatalogResponse,
+    type MediaFilterOptionResponse,
     MediaType,
     type IdentityActionResponse,
     type IdentityStudioResponse,
@@ -19,7 +22,9 @@
     | "metadata"
     | "external_ids"
     | "overrides"
-    | "history";
+    | "history"
+    | "synchronization"
+    | "diagnostics";
 
   let loading = $state(true);
   let error = $state("");
@@ -27,11 +32,28 @@
 
   let search = $state("");
   let mediaFilter = $state<"all" | MediaType>("all");
+  let candidatesOnly = $state(false);
+  let arrFilterIds = $state<number[]>([]);
+  let decisionFilterIds = $state<number[]>([]);
+  let smartFilterIds = $state<number[]>([]);
+  let filterCatalog = $state<MediaFilterCatalogResponse | null>(null);
   let sortBy = $state<"title" | "confidence" | "updated">("title");
   let sortOrder = $state<"asc" | "desc">("asc");
+  let minConfidence = $state<number | null>(null);
+  let maxConfidence = $state<number | null>(null);
+  let canonicalProviderFilter = $state("all");
+  let syncStatusFilter = $state("all");
+  let artworkStatusFilter = $state("all");
+  let metadataStatusFilter = $state("all");
+  let identifierStatusFilter = $state("all");
+  let overrideStatusFilter = $state("all");
+  let conflictLevelFilter = $state("all");
+  let needsReviewFilter = $state<"all" | "yes" | "no">("all");
   let page = $state(1);
   let perPage = $state(24);
+  let posterSize = $state(160);
   let displayMode = $state<"grid" | "list">("grid");
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
   let workspace = $state<IdentityWorkspaceResponse | null>(null);
   let selectedKeys = $state<Set<string>>(new Set());
@@ -58,7 +80,51 @@
     { key: "external_ids", label: "External IDs" },
     { key: "overrides", label: "Overrides" },
     { key: "history", label: "History" },
+    { key: "synchronization", label: "Synchronization" },
+    { key: "diagnostics", label: "Diagnostics" },
   ];
+
+  const sortByOptions = [
+    { value: "title", label: "Title" },
+    { value: "confidence", label: "Confidence" },
+    { value: "updated", label: "Updated" },
+  ];
+
+  const identityStatusOptions = [
+    { value: "all", label: "All" },
+    { value: "healthy", label: "Healthy" },
+    { value: "review", label: "Review" },
+    { value: "attention", label: "Attention" },
+    { value: "unknown", label: "Unknown" },
+  ];
+
+  const conflictOptions = [
+    { value: "all", label: "All Conflicts" },
+    { value: "none", label: "None" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
+
+  const selectedFilterOptions = $derived.by(() => {
+    const options: MediaFilterOptionResponse[] = [];
+    for (const option of filterCatalog?.imported ?? []) {
+      if (option.filter_id && arrFilterIds.includes(option.filter_id)) {
+        options.push(option);
+      }
+    }
+    for (const option of filterCatalog?.native ?? []) {
+      if (option.filter_id && decisionFilterIds.includes(option.filter_id)) {
+        options.push(option);
+      }
+    }
+    for (const option of filterCatalog?.smart ?? []) {
+      if (option.filter_id && smartFilterIds.includes(option.filter_id)) {
+        options.push(option);
+      }
+    }
+    return options;
+  });
 
   const itemKey = (item: IdentityWorkspaceItem): string =>
     `${item.media_type}:${item.media_id}`;
@@ -76,6 +142,40 @@
   const totalPages = $derived(workspace?.total_pages ?? 1);
   const items = $derived(workspace?.items ?? []);
 
+  async function loadFilterCatalog() {
+    try {
+      filterCatalog =
+        await get_api<MediaFilterCatalogResponse>("/api/media/filters");
+    } catch {
+      filterCatalog = null;
+    }
+  }
+
+  function addArrayParams(
+    params: URLSearchParams,
+    key: string,
+    values: number[],
+  ) {
+    for (const value of values) {
+      params.append(key, String(value));
+    }
+  }
+
+  function parseHashFilters() {
+    const hash = window.location.hash || "";
+    const queryStart = hash.indexOf("?");
+    if (queryStart < 0) return;
+    const query = hash.slice(queryStart + 1);
+    const params = new URLSearchParams(query);
+    if (params.get("needs_review") === "true") {
+      needsReviewFilter = "yes";
+    }
+    if (params.get("media_type") === MediaType.Movie)
+      mediaFilter = MediaType.Movie;
+    if (params.get("media_type") === MediaType.Series)
+      mediaFilter = MediaType.Series;
+  }
+
   async function loadWorkspace() {
     loading = true;
     error = "";
@@ -85,8 +185,32 @@
       params.set("per_page", String(perPage));
       params.set("sort_by", sortBy);
       params.set("sort_order", sortOrder);
+      params.set("candidates_only", String(candidatesOnly));
       if (search.trim()) params.set("search", search.trim());
       if (mediaFilter !== "all") params.set("media_type", mediaFilter);
+      addArrayParams(params, "arr_filter_ids", arrFilterIds);
+      addArrayParams(params, "decision_filter_ids", decisionFilterIds);
+      addArrayParams(params, "smart_filter_ids", smartFilterIds);
+      if (minConfidence !== null)
+        params.set("min_confidence", String(minConfidence));
+      if (maxConfidence !== null)
+        params.set("max_confidence", String(maxConfidence));
+      if (canonicalProviderFilter !== "all")
+        params.set("canonical_provider", canonicalProviderFilter);
+      if (syncStatusFilter !== "all")
+        params.set("sync_status", syncStatusFilter);
+      if (artworkStatusFilter !== "all")
+        params.set("artwork_status", artworkStatusFilter);
+      if (metadataStatusFilter !== "all")
+        params.set("metadata_status", metadataStatusFilter);
+      if (identifierStatusFilter !== "all")
+        params.set("identifier_status", identifierStatusFilter);
+      if (overrideStatusFilter !== "all")
+        params.set("override_status", overrideStatusFilter);
+      if (conflictLevelFilter !== "all")
+        params.set("conflict_level", conflictLevelFilter);
+      if (needsReviewFilter === "yes") params.set("needs_review", "true");
+      if (needsReviewFilter === "no") params.set("needs_review", "false");
 
       workspace = await get_api<IdentityWorkspaceResponse>(
         `/api/mie/identity?${params.toString()}`,
@@ -221,13 +345,88 @@
   function resetFilters() {
     search = "";
     mediaFilter = "all";
+    candidatesOnly = false;
+    arrFilterIds = [];
+    decisionFilterIds = [];
+    smartFilterIds = [];
     sortBy = "title";
     sortOrder = "asc";
+    minConfidence = null;
+    maxConfidence = null;
+    canonicalProviderFilter = "all";
+    syncStatusFilter = "all";
+    artworkStatusFilter = "all";
+    metadataStatusFilter = "all";
+    identifierStatusFilter = "all";
+    overrideStatusFilter = "all";
+    conflictLevelFilter = "all";
+    needsReviewFilter = "all";
     page = 1;
     void loadWorkspace();
   }
 
+  function handleSearch(value: string) {
+    search = value;
+    page = 1;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      void loadWorkspace();
+    }, 300);
+  }
+
+  function toggleFilterSelection(
+    source: "imported" | "decision" | "smart",
+    filterId: number,
+  ) {
+    const target =
+      source === "imported"
+        ? arrFilterIds
+        : source === "decision"
+          ? decisionFilterIds
+          : smartFilterIds;
+    const exists = target.includes(filterId);
+    const next = exists
+      ? target.filter((id) => id !== filterId)
+      : [...target, filterId];
+    if (source === "imported") arrFilterIds = next;
+    if (source === "decision") decisionFilterIds = next;
+    if (source === "smart") smartFilterIds = next;
+    page = 1;
+    void loadWorkspace();
+  }
+
+  function clearAllFilters() {
+    arrFilterIds = [];
+    decisionFilterIds = [];
+    smartFilterIds = [];
+    page = 1;
+    void loadWorkspace();
+  }
+
+  function applySmartFilter(option: MediaFilterOptionResponse) {
+    if (!option.filter_id) return;
+    if (!smartFilterIds.includes(option.filter_id)) {
+      smartFilterIds = [...smartFilterIds, option.filter_id];
+      page = 1;
+      void loadWorkspace();
+    }
+  }
+
+  function openFilterManager(_mode: "arr" | "decision") {
+    window.location.hash = "#/movies";
+  }
+
+  function openSmartFilterDialog() {
+    window.location.hash = "#/movies";
+  }
+
+  function handleBulkAction(_key: string) {
+    // Bulk actions are currently identity row selection only.
+  }
+
   onMount(() => {
+    parseHashFilters();
+    void loadFilterCatalog();
     void loadWorkspace();
     void loadSyncHistory();
   });
@@ -286,18 +485,58 @@
 
   <div class="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
     <section class="space-y-3 rounded-2xl border border-border bg-card p-4">
-      <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        <input
-          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
-          placeholder="Search title"
-          bind:value={search}
-          onkeydown={(event) => {
-            if (event.key === "Enter") {
-              page = 1;
-              void loadWorkspace();
-            }
-          }}
-        />
+      <WorkspaceToolbar
+        searchQuery={search}
+        searchPlaceholder="Search titles, providers, identifiers"
+        {sortBy}
+        {sortByOptions}
+        {sortOrder}
+        {candidatesOnly}
+        {filterCatalog}
+        importedFilterIds={arrFilterIds}
+        {decisionFilterIds}
+        {smartFilterIds}
+        {selectedFilterOptions}
+        {perPage}
+        {posterSize}
+        viewMode={displayMode}
+        viewModes={["grid", "list"]}
+        selectedCount={selectedKeys.size}
+        bulkActions={[]}
+        onSearchInput={handleSearch}
+        onSortByChange={(value) => {
+          sortBy = value as "title" | "confidence" | "updated";
+          page = 1;
+          void loadWorkspace();
+        }}
+        onSortOrderChange={(value) => {
+          sortOrder = value;
+          page = 1;
+          void loadWorkspace();
+        }}
+        onCandidatesOnlyChange={(value) => {
+          candidatesOnly = value;
+          page = 1;
+          void loadWorkspace();
+        }}
+        onToggleFilterSelection={toggleFilterSelection}
+        onOpenFilterManager={openFilterManager}
+        onOpenSmartFilterDialog={openSmartFilterDialog}
+        onApplySmartFilter={applySmartFilter}
+        onClearAllFilters={clearAllFilters}
+        onPerPageChange={(value) => {
+          perPage = value;
+          page = 1;
+          void loadWorkspace();
+        }}
+        onPosterSizeChange={(value) => (posterSize = value)}
+        onViewModeChange={(value) => (displayMode = value as "grid" | "list")}
+        onBulkAction={handleBulkAction}
+      />
+
+      <div
+        class="grid gap-2 rounded-xl border border-border/70 bg-muted/20 p-3 md:grid-cols-2 xl:grid-cols-4"
+      >
         <select
           class="rounded-md border border-border bg-background px-3 py-2 text-sm"
           bind:value={mediaFilter}
@@ -310,25 +549,96 @@
           <option value={MediaType.Movie}>Movies</option>
           <option value={MediaType.Series}>Series</option>
         </select>
-        <div class="flex gap-2">
-          <select
-            class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            bind:value={sortBy}
-            onchange={() => void loadWorkspace()}
-          >
-            <option value="title">Sort: Title</option>
-            <option value="confidence">Sort: Confidence</option>
-            <option value="updated">Sort: Updated</option>
-          </select>
-          <select
-            class="rounded-md border border-border bg-background px-3 py-2 text-sm"
-            bind:value={sortOrder}
-            onchange={() => void loadWorkspace()}
-          >
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </div>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={conflictLevelFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          {#each conflictOptions as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={needsReviewFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          <option value="all">Review: All</option>
+          <option value="yes">Needs Review</option>
+          <option value="no">Review Complete</option>
+        </select>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={overrideStatusFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          <option value="all">Overrides: All</option>
+          <option value="manual">Manual Override</option>
+          <option value="none">No Override</option>
+        </select>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={artworkStatusFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          {#each identityStatusOptions as option}
+            <option value={option.value}>Artwork: {option.label}</option>
+          {/each}
+        </select>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={metadataStatusFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          {#each identityStatusOptions as option}
+            <option value={option.value}>Metadata: {option.label}</option>
+          {/each}
+        </select>
+
+        <select
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          bind:value={identifierStatusFilter}
+          onchange={() => {
+            page = 1;
+            void loadWorkspace();
+          }}
+        >
+          {#each identityStatusOptions as option}
+            <option value={option.value}>Identifiers: {option.label}</option>
+          {/each}
+        </select>
+
+        <input
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          placeholder="Canonical provider (optional)"
+          bind:value={canonicalProviderFilter}
+          onblur={() => {
+            if (!canonicalProviderFilter.trim())
+              canonicalProviderFilter = "all";
+            page = 1;
+            void loadWorkspace();
+          }}
+        />
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -336,13 +646,6 @@
           {workspace?.total ?? 0} items | Selected: {selectedKeys.size}
         </div>
         <div class="flex items-center gap-2">
-          <select
-            class="rounded-md border border-border bg-background px-2 py-1"
-            bind:value={displayMode}
-          >
-            <option value="grid">Grid</option>
-            <option value="list">List</option>
-          </select>
           <button
             class="rounded-md border border-border px-2 py-1 hover:bg-accent"
             onclick={resetFilters}
@@ -396,7 +699,8 @@
                   <img
                     src={item.poster_url}
                     alt={item.title}
-                    class="h-16 w-12 rounded object-cover"
+                    class="rounded object-cover"
+                    style={`height:${Math.round((posterSize * 2) / 25)}px;width:${Math.round((posterSize * 1.35) / 25)}px;`}
                   />
                 {/if}
                 <button
@@ -423,6 +727,22 @@
                     >
                       Conflict: {item.conflict_level}
                     </span>
+                    <span class="rounded bg-muted px-2 py-0.5">
+                      Artwork: {item.artwork_status}
+                    </span>
+                    <span class="rounded bg-muted px-2 py-0.5">
+                      Metadata: {item.metadata_status}
+                    </span>
+                    <span class="rounded bg-muted px-2 py-0.5">
+                      IDs: {item.identifier_status}
+                    </span>
+                    {#if item.needs_review}
+                      <span
+                        class="rounded bg-destructive/15 px-2 py-0.5 text-destructive"
+                      >
+                        Needs review
+                      </span>
+                    {/if}
                   </div>
                 </button>
               </div>
@@ -549,9 +869,9 @@
           </div>
         {/if}
 
-        {#if activeTab === "artwork" || activeTab === "metadata" || activeTab === "external_ids"}
+        {#if activeTab === "artwork" || activeTab === "metadata" || activeTab === "external_ids" || activeTab === "synchronization" || activeTab === "diagnostics"}
           <div class="space-y-2 text-sm">
-            {#each activeTab === "artwork" ? studio.artwork : activeTab === "metadata" ? studio.metadata : studio.external_ids as row}
+            {#each activeTab === "artwork" ? studio.artwork : activeTab === "metadata" ? studio.metadata : activeTab === "external_ids" ? studio.external_ids : activeTab === "synchronization" ? studio.synchronization : studio.diagnostics as row}
               <div class="rounded-md border border-border/70 p-2">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
                 {#each row.values as value}

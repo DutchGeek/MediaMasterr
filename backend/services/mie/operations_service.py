@@ -47,10 +47,7 @@ from backend.models.mie import (
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
-from backend.services.mie.artwork_integrity_service import (
-    ArtworkIntegrityScanSummary,
-    ArtworkIntegrityService,
-)
+from backend.services.mie.identity_service import IdentityCenterService
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -133,33 +130,9 @@ CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
         "info",
     ),
     (
-        "artwork_missing",
-        "Missing Posters",
-        "Media assets without resolved poster artwork",
-        "medium",
-    ),
-    (
-        "artwork_placeholder",
-        "Placeholder Artwork",
-        "Assets currently using placeholder artwork",
-        "medium",
-    ),
-    (
-        "artwork_invalid",
-        "Invalid Artwork",
-        "Artwork entries that failed integrity validation",
-        "high",
-    ),
-    (
-        "artwork_stale",
-        "Stale Artwork",
-        "Artwork that should be refreshed for completeness",
-        "low",
-    ),
-    (
-        "artwork_collisions",
-        "Cache Collisions",
-        "Possible artwork reuse across unrelated media identities",
+        "identity_issues",
+        "Identity Issues",
+        "Assets requiring identity review across providers and metadata",
         "high",
     ),
 ]
@@ -196,8 +169,6 @@ class OperationsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self._correlation_service = MediaCorrelationService()
-        self._artwork_integrity_service = ArtworkIntegrityService(db)
-        self._last_artwork_scan: ArtworkIntegrityScanSummary | None = None
 
     @staticmethod
     def _coerce_card_severity(value: str) -> Literal["info", "low", "medium", "high"]:
@@ -518,9 +489,7 @@ class OperationsService:
 
         torrents_raw, correlated = await self._load_torrent_state()
         await self._refresh_media_assets_snapshot(correlated)
-        self._last_artwork_scan = await self._artwork_integrity_service.scan_and_repair(
-            migration_mode=False
-        )
+        identity_health = await IdentityCenterService(self.db).identity_health_summary()
 
         protected_movies, protected_series = await self._active_protection_sets()
 
@@ -592,30 +561,10 @@ class OperationsService:
             "empty_folders": 0,
             "leftover_files": 0,
             "space_recovery": estimated_recovery_bytes,
-            "artwork_missing": int(
-                self._last_artwork_scan.status_counts.get("MISSING", 0)
-            )
-            if self._last_artwork_scan is not None
-            else 0,
-            "artwork_placeholder": int(
-                self._last_artwork_scan.status_counts.get("PLACEHOLDER", 0)
-            )
-            if self._last_artwork_scan is not None
-            else 0,
-            "artwork_invalid": int(
-                self._last_artwork_scan.status_counts.get("INVALID", 0)
-            )
-            if self._last_artwork_scan is not None
-            else 0,
-            "artwork_stale": int(
-                self._last_artwork_scan.status_counts.get("STALE", 0)
-                + self._last_artwork_scan.status_counts.get("NEEDS_REFRESH", 0)
-            )
-            if self._last_artwork_scan is not None
-            else 0,
-            "artwork_collisions": int(self._last_artwork_scan.collision_count)
-            if self._last_artwork_scan is not None
-            else 0,
+            "identity_issues": int(
+                identity_health.get("missing_count", 0)
+                + identity_health.get("review_count", 0)
+            ),
         }
         return counts
 
@@ -1386,17 +1335,11 @@ class OperationsService:
         )
 
     async def artwork_issues_summary(self) -> ArtworkIssuesSummary:
-        if self._last_artwork_scan is None:
-            self._last_artwork_scan = (
-                await self._artwork_integrity_service.scan_and_repair(
-                    migration_mode=False
-                )
-            )
-
-        scan = self._last_artwork_scan
-        total = max(0, scan.total_assets)
-        valid = int(scan.status_counts.get("VALID", 0))
-        coverage = (valid / total * 100.0) if total > 0 else 0.0
+        identity_health = await IdentityCenterService(self.db).identity_health_summary()
+        valid = int(identity_health.get("healthy_count", 0))
+        missing = int(identity_health.get("missing_count", 0))
+        review = int(identity_health.get("review_count", 0))
+        coverage = float(identity_health.get("coverage_percent", 0.0))
 
         latest_refresh = (
             await self.db.execute(select(func.max(MediaAsset.artwork_last_refresh_at)))
@@ -1405,12 +1348,12 @@ class OperationsService:
         return ArtworkIssuesSummary(
             coverage_percent=round(coverage, 2),
             healthy_count=valid,
-            missing_count=int(scan.status_counts.get("MISSING", 0)),
-            placeholder_count=int(scan.status_counts.get("PLACEHOLDER", 0)),
-            invalid_count=int(scan.status_counts.get("INVALID", 0)),
-            stale_count=int(scan.status_counts.get("STALE", 0)),
-            needs_refresh_count=int(scan.status_counts.get("NEEDS_REFRESH", 0)),
-            collision_count=int(scan.collision_count),
+            missing_count=missing,
+            placeholder_count=0,
+            invalid_count=review,
+            stale_count=0,
+            needs_refresh_count=0,
+            collision_count=0,
             last_refresh_at=latest_refresh,
         )
 

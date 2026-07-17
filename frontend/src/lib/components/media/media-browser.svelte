@@ -6,7 +6,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import MediaGrid from "$lib/components/media/media-grid.svelte";
   import MediaDetailDialog from "$lib/components/media/media-detail-dialog.svelte";
   import DeleteRequestDialog from "$lib/components/media/delete-request-dialog.svelte";
@@ -137,6 +137,7 @@
   let showFilterManager = $state(false);
   let filterManagerMode = $state<"arr" | "decision">("arr");
   let selectedMedia = $state<MediaItem | null>(null);
+  let viewMode = $state("grid");
 
   // debounce timer for search
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -265,9 +266,8 @@
   };
 
   // handle search input with debounce
-  const handleSearch = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    searchQuery = target.value;
+  const handleSearch = (value: string) => {
+    searchQuery = value;
 
     // debounce search
     if (searchTimer) clearTimeout(searchTimer);
@@ -301,6 +301,12 @@
     importedFilterIds = [];
     decisionFilterIds = [];
     smartFilterIds = [];
+  };
+
+  const handleBulkAction = (action: string) => {
+    toast.info(
+      `Bulk action '${action}' is not available on this workspace yet.`,
+    );
   };
 
   const selectedFilterOptions = $derived.by(() => {
@@ -638,275 +644,41 @@
     </div>
 
     <!-- filters and search -->
-    <div
-      class="space-y-3 rounded-2xl border border-border bg-card/70 p-3 md:p-4"
-    >
-      <div class="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div class="space-y-3">
-          <div class="flex flex-col gap-2 lg:flex-row">
-            <div class="relative flex-1">
-              <Search
-                class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                type="text"
-                placeholder={searchPlaceholder}
-                value={searchQuery}
-                oninput={handleSearch}
-                class="pl-10 bg-background text-card-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-
-            <div class="flex gap-2">
-              <Select.Root type="single" bind:value={sortBy}>
-                <Select.Trigger
-                  class="min-w-40 bg-background text-card-foreground"
-                >
-                  {sortByOptions.find((opt) => opt.value === sortBy)?.label}
-                </Select.Trigger>
-                <Select.Content class="bg-card">
-                  {#each sortByOptions as option}
-                    <Select.Item
-                      value={option.value}
-                      label={option.label}
-                      class="text-card-foreground"
-                    >
-                      {option.label}
-                    </Select.Item>
-                  {/each}
-                </Select.Content>
-              </Select.Root>
-
-              <Select.Root type="single" bind:value={sortOrder}>
-                <Select.Trigger
-                  class="min-w-32 bg-background text-card-foreground"
-                >
-                  {sortOrder === "asc" ? "Ascending" : "Descending"}
-                </Select.Trigger>
-                <Select.Content class="bg-card">
-                  <Select.Item
-                    value="asc"
-                    label="Ascending"
-                    class="text-card-foreground">Ascending</Select.Item
-                  >
-                  <Select.Item
-                    value="desc"
-                    label="Descending"
-                    class="text-card-foreground">Descending</Select.Item
-                  >
-                </Select.Content>
-              </Select.Root>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <label
-              class="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 cursor-pointer"
-            >
-              <Switch bind:checked={candidatesOnly} class="cursor-pointer" />
-              <span class="text-sm text-muted-foreground"
-                >Reclaim candidates only</span
-              >
-            </label>
-
-            <div class="flex flex-wrap gap-2">
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                  {#snippet child({ props })}
-                    <button
-                      {...props}
-                      type="button"
-                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
-                    >
-                      ARR Filters
-                    </button>
-                  {/snippet}
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Content align="start" class="w-72">
-                  <DropdownMenu.Label>Imported filters</DropdownMenu.Label>
-                  <DropdownMenu.Separator />
-                  <DropdownMenu.Item
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      openFilterManager("arr");
-                    }}
-                  >
-                    Manage filters...
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator />
-                  {#each filterCatalog?.imported ?? [] as option}
-                    {#if option.filter_id}
-                      <DropdownMenu.Item
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          toggleFilterSelection("imported", option.filter_id!);
-                        }}
-                      >
-                        {option.label}
-                        {#if importedFilterIds.includes(option.filter_id)}
-                          <span class="ml-auto text-xs text-primary">On</span>
-                        {/if}
-                      </DropdownMenu.Item>
-                    {/if}
-                  {/each}
-                </DropdownMenu.Content>
-              </DropdownMenu.Root>
-
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                  {#snippet child({ props })}
-                    <button
-                      {...props}
-                      type="button"
-                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
-                    >
-                      Decision Filters
-                    </button>
-                  {/snippet}
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Content align="start" class="w-72">
-                  <DropdownMenu.Label>Decision filters</DropdownMenu.Label>
-                  <DropdownMenu.Separator />
-                  <DropdownMenu.Item
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      openFilterManager("decision");
-                    }}
-                  >
-                    Manage decision filters...
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator />
-                  {#each filterCatalog?.native ?? [] as option}
-                    {#if option.filter_id}
-                      <DropdownMenu.Item
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          toggleFilterSelection("decision", option.filter_id!);
-                        }}
-                      >
-                        {option.label}
-                        {#if decisionFilterIds.includes(option.filter_id)}
-                          <span class="ml-auto text-xs text-primary">On</span>
-                        {/if}
-                      </DropdownMenu.Item>
-                    {/if}
-                  {/each}
-                </DropdownMenu.Content>
-              </DropdownMenu.Root>
-
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                  {#snippet child({ props })}
-                    <button
-                      {...props}
-                      type="button"
-                      class="rounded-full border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/50 cursor-pointer"
-                    >
-                      Smart Filters
-                    </button>
-                  {/snippet}
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Content align="start" class="w-80">
-                  <DropdownMenu.Label>Smart filters</DropdownMenu.Label>
-                  <DropdownMenu.Separator />
-                  <DropdownMenu.Item
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      openSmartFilterDialog();
-                    }}
-                  >
-                    Save current view...
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator />
-                  {#each filterCatalog?.smart ?? [] as option}
-                    {#if option.filter_id}
-                      <DropdownMenu.Item
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          applySmartFilter(option);
-                        }}
-                      >
-                        {option.label}
-                      </DropdownMenu.Item>
-                    {/if}
-                  {/each}
-                </DropdownMenu.Content>
-              </DropdownMenu.Root>
-            </div>
-          </div>
-
-          {#if selectedFilterOptions.length > 0}
-            <div class="flex flex-wrap gap-2">
-              {#each selectedFilterOptions as filter}
-                {#if filter.filter_id}
-                  <button
-                    type="button"
-                    class="rounded-full border border-border/70 px-3 py-1 text-xs text-foreground hover:bg-secondary/50 cursor-pointer"
-                    onclick={() => {
-                      if (filter.kind === "imported_arr")
-                        toggleFilterSelection("imported", filter.filter_id!);
-                      else if (filter.kind === "smart")
-                        toggleFilterSelection("smart", filter.filter_id!);
-                      else toggleFilterSelection("decision", filter.filter_id!);
-                    }}
-                  >
-                    {filter.label}
-                  </button>
-                {/if}
-              {/each}
-              <button
-                type="button"
-                class="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                onclick={clearAllFilters}
-              >
-                Clear all
-              </button>
-            </div>
-          {/if}
-        </div>
-
-        <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Select.Root
-            type="single"
-            value={perPage.toString()}
-            onValueChange={(v) => {
-              const n = parseInt(v);
-              perPage = n;
-              _perPageStore.save(n);
-            }}
-          >
-            <Select.Trigger class="bg-background text-card-foreground">
-              {perPage} / page
-            </Select.Trigger>
-            <Select.Content class="bg-card">
-              {#each PER_PAGE_OPTIONS as option}
-                <Select.Item
-                  value={option.toString()}
-                  label={option.toString()}
-                  class="text-card-foreground"
-                >
-                  {option}
-                </Select.Item>
-              {/each}
-            </Select.Content>
-          </Select.Root>
-
-          <label
-            class="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2"
-          >
-            <LayoutGrid class="size-4 shrink-0 text-muted-foreground" />
-            <input
-              type="range"
-              min="100"
-              max="300"
-              step="10"
-              bind:value={posterSize}
-              class="w-28 accent-primary cursor-pointer"
-            />
-          </label>
-        </div>
-      </div>
-    </div>
+    <WorkspaceToolbar
+      {searchQuery}
+      {searchPlaceholder}
+      {sortBy}
+      {sortByOptions}
+      sortOrder={sortOrder as "asc" | "desc"}
+      {candidatesOnly}
+      {filterCatalog}
+      {importedFilterIds}
+      {decisionFilterIds}
+      {smartFilterIds}
+      {selectedFilterOptions}
+      {perPage}
+      {posterSize}
+      {viewMode}
+      viewModes={["grid"]}
+      selectedCount={0}
+      bulkActions={[]}
+      onSearchInput={handleSearch}
+      onSortByChange={(value) => (sortBy = value)}
+      onSortOrderChange={(value) => (sortOrder = value)}
+      onCandidatesOnlyChange={(value) => (candidatesOnly = value)}
+      onToggleFilterSelection={toggleFilterSelection}
+      onOpenFilterManager={openFilterManager}
+      onOpenSmartFilterDialog={openSmartFilterDialog}
+      onApplySmartFilter={applySmartFilter}
+      onClearAllFilters={clearAllFilters}
+      onPerPageChange={(value) => {
+        perPage = value;
+        _perPageStore.save(value);
+      }}
+      onPosterSizeChange={(value) => (posterSize = value)}
+      onViewModeChange={(value) => (viewMode = value)}
+      onBulkAction={handleBulkAction}
+    />
 
     <!-- media grid -->
     <MediaGrid
