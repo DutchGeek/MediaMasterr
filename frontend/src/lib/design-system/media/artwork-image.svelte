@@ -36,16 +36,18 @@
 <div class={cn("relative overflow-hidden", className)}>
   <img
     src={resolvedSrc}
-    alt={alt}
+    {alt}
     class={imageClass}
-    loading={loading}
+    {loading}
     onerror={() => {
       failed = true;
     }}
   />
 
   {#if failed && showFailureIcon}
-    <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+    <div
+      class="pointer-events-none absolute inset-0 flex items-center justify-center"
+    >
       <Images class="size-10 text-muted-foreground/60" />
     </div>
   {/if}

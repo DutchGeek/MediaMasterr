@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.auth import require_admin
@@ -19,9 +20,9 @@ from backend.database.models import (
     ServiceConfig,
     TaskRun,
     TaskSchedule,
+    User,
 )
 from backend.enums import BackgroundJobStatus, Service, Task, TaskStatus
-from backend.database.models import User
 from backend.scheduler import scheduler
 from backend.services.protection.service import ProtectionService
 
@@ -48,7 +49,9 @@ async def _probe_provider(
     if not enabled:
         return {
             "key": service_type.value,
-            "name": "qBittorrent" if service_type is Service.QBITTORRENT else service_type.value.title(),
+            "name": "qBittorrent"
+            if service_type is Service.QBITTORRENT
+            else service_type.value.title(),
             "endpoint": endpoint,
             "connected": False,
             "version": "Disabled",
@@ -72,42 +75,42 @@ async def _probe_provider(
 
     try:
         if service_type is Service.RADARR:
-            client = service_manager.radarr
-            if client is None:
+            radarr_client = service_manager.radarr
+            if radarr_client is None:
                 raise RuntimeError("Radarr runtime client unavailable")
-            system_status = await client.get_system_status()
-            version = await client.get_app_version()
+            system_status = await radarr_client.get_system_status()
+            version = await radarr_client.get_app_version()
             api_version = str(system_status.get("apiVersion") or "") or None
         elif service_type is Service.SONARR:
-            client = service_manager.sonarr
-            if client is None:
+            sonarr_client = service_manager.sonarr
+            if sonarr_client is None:
                 raise RuntimeError("Sonarr runtime client unavailable")
-            system_status = await client.get_system_status()
-            version = await client.get_app_version()
+            system_status = await sonarr_client.get_system_status()
+            version = await sonarr_client.get_app_version()
             api_version = str(system_status.get("apiVersion") or "") or None
         elif service_type is Service.QBITTORRENT:
-            client = service_manager.qbittorrent
-            if client is None:
+            qbittorrent_client = service_manager.qbittorrent
+            if qbittorrent_client is None:
                 raise RuntimeError("qBittorrent runtime client unavailable")
-            version = await client.get_app_version()
-            api_version = await client.get_webapi_version()
+            version = await qbittorrent_client.get_app_version()
+            api_version = await qbittorrent_client.get_webapi_version()
         elif service_type is Service.PLEX:
-            client = service_manager.plex
-            if client is None:
+            plex_client = service_manager.plex
+            if plex_client is None:
                 raise RuntimeError("Plex runtime client unavailable")
-            version = await client.get_app_version()
-            api_version = await client.get_api_version()
+            version = await plex_client.get_app_version()
+            api_version = await plex_client.get_api_version()
         elif service_type is Service.TAUTULLI:
-            client = service_manager.tautulli
-            if client is None:
+            tautulli_client = service_manager.tautulli
+            if tautulli_client is None:
                 raise RuntimeError("Tautulli runtime client unavailable")
-            version = await client.get_app_version()
+            version = await tautulli_client.get_app_version()
             api_version = None
         elif service_type is Service.SEERR:
-            client = service_manager.seerr
-            if client is None:
+            seerr_client = service_manager.seerr
+            if seerr_client is None:
                 raise RuntimeError("Seerr runtime client unavailable")
-            connected = await client.health()
+            connected = await seerr_client.health()
             version = None
             api_version = None
             if not connected:
@@ -177,8 +180,11 @@ async def get_system_diagnostics(
 
     configs = (
         await db.execute(
-            select(ServiceConfig.service_type, ServiceConfig.enabled, ServiceConfig.base_url)
-            .where(
+            select(
+                ServiceConfig.service_type,
+                ServiceConfig.enabled,
+                ServiceConfig.base_url,
+            ).where(
                 ServiceConfig.service_type.in_(
                     [
                         Service.RADARR,
@@ -232,23 +238,27 @@ async def get_system_diagnostics(
             "responseTimeMs": None,
             "lastSuccessfulSync": protection_status.last_sync,
             "lastAttempt": _to_iso(now),
-            "status": (
-                "healthy" if protection_status.connected else "degraded"
-            ),
+            "status": ("healthy" if protection_status.connected else "degraded"),
             "reason": (
                 protection_status.message
                 or f"Protected files {protection_stats.protected_files}; unmatched {protection_stats.unmatched_items}"
             ),
-            "lastError": None if protection_status.connected else protection_status.message,
+            "lastError": None
+            if protection_status.connected
+            else protection_status.message,
             "httpStatus": 200 if protection_status.connected else None,
         }
     )
 
-    total_tasks = int((await db.execute(select(func.count()).select_from(TaskSchedule))).scalar() or 0)
+    total_tasks = int(
+        (await db.execute(select(func.count()).select_from(TaskSchedule))).scalar() or 0
+    )
     enabled_tasks = int(
         (
             await db.execute(
-                select(func.count()).select_from(TaskSchedule).where(TaskSchedule.enabled.is_(True))
+                select(func.count())
+                .select_from(TaskSchedule)
+                .where(TaskSchedule.enabled.is_(True))
             )
         ).scalar()
         or 0
@@ -256,9 +266,9 @@ async def get_system_diagnostics(
     running_jobs = int(
         (
             await db.execute(
-                select(func.count()).select_from(BackgroundJob).where(
-                    BackgroundJob.status == BackgroundJobStatus.RUNNING
-                )
+                select(func.count())
+                .select_from(BackgroundJob)
+                .where(BackgroundJob.status == BackgroundJobStatus.RUNNING)
             )
         ).scalar()
         or 0
@@ -266,11 +276,19 @@ async def get_system_diagnostics(
 
     database_size_bytes: int | None = None
     bind = db.get_bind()
-    db_path = str(bind.url.database) if bind is not None and bind.url.database else None
+    db_url = None
+    if isinstance(bind, Engine):
+        db_url = bind.url
+    elif isinstance(bind, Connection):
+        db_url = bind.engine.url
+    db_path = str(db_url.database) if db_url is not None and db_url.database else None
     if db_path and db_path not in {":memory:", ""} and os.path.exists(db_path):
         database_size_bytes = os.path.getsize(db_path)
 
-    reclaim_candidates = int((await db.execute(select(func.count()).select_from(ReclaimCandidate))).scalar() or 0)
+    reclaim_candidates = int(
+        (await db.execute(select(func.count()).select_from(ReclaimCandidate))).scalar()
+        or 0
+    )
     protected_items = int(protection_stats.protected_files)
 
     return {
@@ -297,9 +315,9 @@ async def get_system_diagnostics(
             "queue_size": int(
                 (
                     await db.execute(
-                        select(func.count()).select_from(BackgroundJob).where(
-                            BackgroundJob.status == BackgroundJobStatus.PENDING
-                        )
+                        select(func.count())
+                        .select_from(BackgroundJob)
+                        .where(BackgroundJob.status == BackgroundJobStatus.PENDING)
                     )
                 ).scalar()
                 or 0

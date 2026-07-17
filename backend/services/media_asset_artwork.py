@@ -51,22 +51,30 @@ class MediaAssetArtworkResolver:
         if media_type is not None and media_id is not None:
             if media_type is MediaType.MOVIE:
                 row = (
-                    await db.execute(
-                        select(MediaAsset).where(
-                            MediaAsset.media_type == MediaType.MOVIE,
-                            MediaAsset.movie_id == media_id,
+                    (
+                        await db.execute(
+                            select(MediaAsset).where(
+                                MediaAsset.media_type == MediaType.MOVIE,
+                                MediaAsset.movie_id == media_id,
+                            )
                         )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
             else:
                 row = (
-                    await db.execute(
-                        select(MediaAsset).where(
-                            MediaAsset.media_type == MediaType.SERIES,
-                            MediaAsset.series_id == media_id,
+                    (
+                        await db.execute(
+                            select(MediaAsset).where(
+                                MediaAsset.media_type == MediaType.SERIES,
+                                MediaAsset.series_id == media_id,
+                            )
                         )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
             if row is not None:
                 media_asset_row = row
                 media_asset_poster = row.poster_url
@@ -114,29 +122,40 @@ class MediaAssetArtworkResolver:
         )
         confidence = (
             float(media_asset_row.artwork_confidence)
-            if media_asset_row is not None and media_asset_row.artwork_confidence is not None
+            if media_asset_row is not None
+            and media_asset_row.artwork_confidence is not None
             else 0.88
             if source == "provider"
             else 0.0
         )
-        diagnostics = media_asset_row.artwork_diagnostics if media_asset_row is not None else {}
+        diagnostics = (
+            media_asset_row.artwork_diagnostics if media_asset_row is not None else {}
+        )
 
         artwork = ArtworkSelection(
             poster=poster,
             background=backdrop,
-            banner=(media_asset_row.banner_url if media_asset_row is not None else None),
+            banner=(
+                media_asset_row.banner_url if media_asset_row is not None else None
+            ),
             logo=(media_asset_row.logo_url if media_asset_row is not None else None),
             source=source,
             confidence=confidence,
             status=status,  # type: ignore[arg-type]
             validated=status == "VALID",
-            reason=(diagnostics.get("reason") if isinstance(diagnostics, dict) else None),
+            reason=(
+                diagnostics.get("reason") if isinstance(diagnostics, dict) else None
+            ),
             last_refreshed_at=(
-                media_asset_row.artwork_last_refresh_at if media_asset_row is not None else None
+                media_asset_row.artwork_last_refresh_at
+                if media_asset_row is not None
+                else None
             ),
         )
 
-        return ResolvedArtwork(poster_url=poster, backdrop_url=backdrop, artwork=artwork)
+        return ResolvedArtwork(
+            poster_url=poster, backdrop_url=backdrop, artwork=artwork
+        )
 
 
 media_asset_artwork_resolver = MediaAssetArtworkResolver()

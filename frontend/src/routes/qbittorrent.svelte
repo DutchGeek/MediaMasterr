@@ -126,27 +126,28 @@
         .find((torrent) => !!torrent.poster_url);
 
       return {
-      id: bucket.category,
-      kind: "movie_collection" as const,
-      title: bucket.category,
-      subtitle: `${bucket.count} torrent assets`,
-      lifecycleState: "imported" as const,
-      recommendationSeverity: "information" as const,
-      recommendation: {
-        message: "Category groups live torrents with correlation-backed artwork.",
-        confidence: 0.99,
-        risk: "low" as const,
-      },
-      healthSignals: [
-        {
-          kind: "torrent_active" as const,
-          label: "Torrent Active",
-          explanation: "Grouped from live qBittorrent category metadata.",
+        id: bucket.category,
+        kind: "movie_collection" as const,
+        title: bucket.category,
+        subtitle: `${bucket.count} torrent assets`,
+        lifecycleState: "imported" as const,
+        recommendationSeverity: "information" as const,
+        recommendation: {
+          message:
+            "Category groups live torrents with correlation-backed artwork.",
+          confidence: 0.99,
+          risk: "low" as const,
         },
-      ],
-      quickActions: [{ id: "open", label: "Open Category" }],
-      posterUrl: representative?.poster_url ?? null,
-    };
+        healthSignals: [
+          {
+            kind: "torrent_active" as const,
+            label: "Torrent Active",
+            explanation: "Grouped from live qBittorrent category metadata.",
+          },
+        ],
+        quickActions: [{ id: "open", label: "Open Category" }],
+        posterUrl: representative?.poster_url ?? null,
+      };
     });
   });
 

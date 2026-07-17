@@ -43,7 +43,9 @@
     error = "";
     try {
       workspace = await get_api<MieOperationsResponse>("/api/mie/operations");
-      auditTrail = await get_api<OperationAuditListResponse>("/api/operations/audit");
+      auditTrail = await get_api<OperationAuditListResponse>(
+        "/api/operations/audit",
+      );
     } catch (e: any) {
       error = e?.message ?? "Failed to load Operations data";
     } finally {
@@ -84,7 +86,9 @@
           ? await post_api<OperationWorkflowResponse>(url, {})
           : await get_api<OperationWorkflowResponse>(url);
       if (action === "execute") {
-        auditTrail = await get_api<OperationAuditListResponse>("/api/operations/audit");
+        auditTrail = await get_api<OperationAuditListResponse>(
+          "/api/operations/audit",
+        );
       }
     } catch (e: any) {
       workflowError = e?.message ?? `Failed to ${action} operation`;
@@ -169,8 +173,7 @@
           explanation: card.description,
         },
       ],
-      posterUrl:
-        null,
+      posterUrl: null,
       quickActions: [{ id: "open", label: "Open Collection" }],
     }));
   });
@@ -178,14 +181,17 @@
   const visibleCollectionCards = $derived.by(() => {
     if (showHealthyCollections) return collectionCards;
     return collectionCards.filter((card) => {
-      const source = workspace?.overview.cards.find((row) => row.key === card.id);
+      const source = workspace?.overview.cards.find(
+        (row) => row.key === card.id,
+      );
       return (source?.count ?? 0) > 0;
     });
   });
 
   const openComparison = (recommendationId: string) => {
     selectedRecommendationId = recommendationId;
-    const target = mediaMovies.find((item) => item.id === recommendationId) ?? null;
+    const target =
+      mediaMovies.find((item) => item.id === recommendationId) ?? null;
     if (target) {
       selectedAsset = target;
       drawerOpen = true;
@@ -468,7 +474,10 @@
         title: "Actions",
         rows: [
           { key: "Primary", value: "Preview, validate, then execute" },
-          { key: "Secondary", value: "Review audit trail for completed operations" },
+          {
+            key: "Secondary",
+            value: "Review audit trail for completed operations",
+          },
         ],
       },
     ];
@@ -531,18 +540,45 @@
       {#if workspace?.artwork_issues}
         <section class="rounded-2xl border border-border/70 bg-card/70 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-foreground">Artwork Integrity</h2>
+            <h2 class="text-lg font-semibold text-foreground">
+              Artwork Integrity
+            </h2>
             <span class="text-sm text-muted-foreground">
               Coverage {workspace.artwork_issues.coverage_percent.toFixed(1)}%
             </span>
           </div>
           <div class="mt-3 grid gap-2 text-sm md:grid-cols-3 xl:grid-cols-6">
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Healthy: {workspace.artwork_issues.healthy_count}</div>
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Missing: {workspace.artwork_issues.missing_count}</div>
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Placeholder: {workspace.artwork_issues.placeholder_count}</div>
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Invalid: {workspace.artwork_issues.invalid_count}</div>
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Stale/Refresh: {workspace.artwork_issues.stale_count + workspace.artwork_issues.needs_refresh_count}</div>
-            <div class="rounded-lg border border-border/60 bg-background/70 p-2">Collisions: {workspace.artwork_issues.collision_count}</div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Healthy: {workspace.artwork_issues.healthy_count}
+            </div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Missing: {workspace.artwork_issues.missing_count}
+            </div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Placeholder: {workspace.artwork_issues.placeholder_count}
+            </div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Invalid: {workspace.artwork_issues.invalid_count}
+            </div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Stale/Refresh: {workspace.artwork_issues.stale_count +
+                workspace.artwork_issues.needs_refresh_count}
+            </div>
+            <div
+              class="rounded-lg border border-border/60 bg-background/70 p-2"
+            >
+              Collisions: {workspace.artwork_issues.collision_count}
+            </div>
           </div>
         </section>
       {/if}
@@ -557,7 +593,9 @@
             class={`rounded-full border px-3 py-1.5 text-xs ${showHealthyCollections ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
             onclick={() => (showHealthyCollections = !showHealthyCollections)}
           >
-            {showHealthyCollections ? "Hide Healthy Collections" : "Show Healthy Collections"}
+            {showHealthyCollections
+              ? "Hide Healthy Collections"
+              : "Show Healthy Collections"}
           </button>
         </div>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -614,48 +652,69 @@
         {/if}
       </section>
 
-      <section class="space-y-3 sticky bottom-0 z-10 bg-background/95 py-2 backdrop-blur border-t border-border/50">
-        <h2 class="text-lg font-semibold text-foreground">Operation Workflow</h2>
+      <section
+        class="space-y-3 sticky bottom-0 z-10 bg-background/95 py-2 backdrop-blur border-t border-border/50"
+      >
+        <h2 class="text-lg font-semibold text-foreground">
+          Operation Workflow
+        </h2>
         <div class="rounded-2xl border border-border/70 bg-card/60 p-4 text-sm">
           <div class="mb-3 flex flex-wrap gap-2">
             <button
               type="button"
               class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
-              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "preview")}
-              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
-            >Preview</button>
+              onclick={() =>
+                selectedRecommendationId &&
+                runWorkflow(selectedRecommendationId, "preview")}
+              disabled={!selectedRecommendationId ||
+                workflowBusyId === selectedRecommendationId}>Preview</button
+            >
             <button
               type="button"
               class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
-              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "validate")}
-              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
-            >Validate</button>
+              onclick={() =>
+                selectedRecommendationId &&
+                runWorkflow(selectedRecommendationId, "validate")}
+              disabled={!selectedRecommendationId ||
+                workflowBusyId === selectedRecommendationId}>Validate</button
+            >
             <button
               type="button"
               class="rounded-full border border-primary bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20"
-              onclick={() => selectedRecommendationId && runWorkflow(selectedRecommendationId, "execute")}
-              disabled={!selectedRecommendationId || workflowBusyId === selectedRecommendationId}
-            >Execute</button>
+              onclick={() =>
+                selectedRecommendationId &&
+                runWorkflow(selectedRecommendationId, "execute")}
+              disabled={!selectedRecommendationId ||
+                workflowBusyId === selectedRecommendationId}>Execute</button
+            >
           </div>
           {#if workflowError}
             <p class="text-destructive">{workflowError}</p>
           {/if}
           {#if workflowPreview}
-            <p class="font-medium text-foreground">Recommendation {workflowPreview.recommendation_id}</p>
+            <p class="font-medium text-foreground">
+              Recommendation {workflowPreview.recommendation_id}
+            </p>
             <p class="text-muted-foreground">
               Preview: {workflowPreview.preview.target_count} target •
               {formatFileSize(workflowPreview.preview.estimated_recovery_bytes)}
             </p>
             <p class="mt-2 text-muted-foreground">
-              Validation: {workflowPreview.validation.valid ? "Passed" : "Failed"}
+              Validation: {workflowPreview.validation.valid
+                ? "Passed"
+                : "Failed"}
             </p>
             <ul class="mt-2 space-y-1 text-xs text-muted-foreground">
               {#each workflowPreview.validation.checks as check}
-                <li>{check.passed ? "✓" : "✗"} {check.label}: {check.detail}</li>
+                <li>
+                  {check.passed ? "✓" : "✗"}
+                  {check.label}: {check.detail}
+                </li>
               {/each}
             </ul>
             <p class="mt-2 text-muted-foreground">
-              Execution: {workflowPreview.execution.result} • {workflowPreview.execution.message}
+              Execution: {workflowPreview.execution.result} • {workflowPreview
+                .execution.message}
             </p>
           {:else}
             <p class="text-muted-foreground">
@@ -671,14 +730,23 @@
           {#if auditTrail && auditTrail.items.length > 0}
             <div class="space-y-2 text-xs">
               {#each auditTrail.items.slice(0, 10) as row}
-                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                  <span class="text-foreground">{row.action} • {row.target_type}#{row.target_id ?? "n/a"}</span>
-                  <span class="text-muted-foreground">{row.result} • {formatFileSize(row.recovery_bytes)}</span>
+                <div
+                  class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2"
+                >
+                  <span class="text-foreground"
+                    >{row.action} • {row.target_type}#{row.target_id ??
+                      "n/a"}</span
+                  >
+                  <span class="text-muted-foreground"
+                    >{row.result} • {formatFileSize(row.recovery_bytes)}</span
+                  >
                 </div>
               {/each}
             </div>
           {:else}
-            <p class="text-sm text-muted-foreground">No operation history yet.</p>
+            <p class="text-sm text-muted-foreground">
+              No operation history yet.
+            </p>
           {/if}
         </div>
       </section>

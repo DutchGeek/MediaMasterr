@@ -412,9 +412,7 @@
                     onclick={() => openHashPath(opportunity.target_path)}
                     class="overflow-hidden rounded-2xl border border-border bg-background/70 shadow-sm"
                   >
-                    <div
-                      class="relative aspect-[2/3] w-full bg-secondary/20"
-                    >
+                    <div class="relative aspect-[2/3] w-full bg-secondary/20">
                       <ArtworkImage
                         src={opportunity.poster_url}
                         alt={opportunity.title}
@@ -487,18 +485,25 @@
                       <div
                         class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent p-3"
                       >
-                        <p class="truncate text-sm font-semibold text-foreground">
+                        <p
+                          class="truncate text-sm font-semibold text-foreground"
+                        >
                           {item.title}
                         </p>
                         <p class="truncate text-xs text-muted-foreground">
-                          {item.scope} • {capitalizeFirstLetter(item.media_type)}
+                          {item.scope} • {capitalizeFirstLetter(
+                            item.media_type,
+                          )}
                         </p>
                       </div>
                     </div>
-                    <div class="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 text-xs"
+                    >
                       <span
                         class="rounded-full border border-border px-2 py-1 text-muted-foreground"
-                      >Recommendation</span>
+                        >Recommendation</span
+                      >
                       <span class="font-semibold text-emerald-500">
                         {formatSize(item.reclaimable_size_bytes)}
                       </span>
@@ -526,7 +531,9 @@
                       <p class="font-medium text-foreground truncate">
                         {formatLibraryDisplayName(library.label)}
                       </p>
-                      <p class="text-xs text-muted-foreground">{library.title_count} titles</p>
+                      <p class="text-xs text-muted-foreground">
+                        {library.title_count} titles
+                      </p>
                       <p class="text-xs text-muted-foreground">
                         Reclaimable {library.reclaimable_count} • Health {capitalizeFirstLetter(
                           library.health,
@@ -553,7 +560,9 @@
           </section>
 
           <section class="grid grid-cols-1 xl:grid-cols-4 gap-4">
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28">
+            <article
+              class="bg-card rounded-lg border border-border p-5 min-h-28"
+            >
               <p class="text-sm text-muted-foreground">System Health</p>
               <p class="text-3xl font-bold text-foreground mt-2">
                 {connectedServicesCount}
@@ -562,11 +571,14 @@
                 Connected services • Last sync {lastSystemSyncLabel}
               </p>
               <p class="text-xs text-muted-foreground mt-1">
-                Attention required {dashboard.decision_summary.blocked.attention_required}
+                Attention required {dashboard.decision_summary.blocked
+                  .attention_required}
               </p>
             </article>
 
-            <article class="bg-card rounded-lg border border-border p-5 min-h-28">
+            <article
+              class="bg-card rounded-lg border border-border p-5 min-h-28"
+            >
               <p class="text-sm text-muted-foreground">Artwork Coverage</p>
               <p class="text-3xl font-bold text-foreground mt-2">
                 {formatPercent(dashboard.artwork_health.coverage_percent)}
@@ -575,7 +587,8 @@
                 {dashboard.artwork_health.status}
               </p>
               <p class="text-xs text-muted-foreground mt-1">
-                Missing {dashboard.artwork_health.missing_posters} • Invalid {dashboard.artwork_health.invalid_posters}
+                Missing {dashboard.artwork_health.missing_posters} • Invalid {dashboard
+                  .artwork_health.invalid_posters}
               </p>
             </article>
 
@@ -631,7 +644,8 @@
                 <div class="flex items-center justify-between">
                   <span class="text-muted-foreground">Attention</span>
                   <span class="font-semibold text-foreground"
-                    >{dashboard.decision_summary.blocked.attention_required}</span
+                    >{dashboard.decision_summary.blocked
+                      .attention_required}</span
                   >
                 </div>
               </div>

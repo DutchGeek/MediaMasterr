@@ -84,7 +84,9 @@ async def get_qbittorrent_overview(
     for index, item in enumerate(torrents_raw):
         if not isinstance(item, dict):
             continue
-        torrent_summary = _correlation_service.torrent_summary_from_raw(item, index=index)
+        torrent_summary = _correlation_service.torrent_summary_from_raw(
+            item, index=index
+        )
         correlated_artwork = await _correlation_service.resolve_torrent_artwork(
             db,
             torrent_summary,
@@ -135,7 +137,9 @@ async def get_qbittorrent_overview(
                 upload_speed=upload_speed,
                 tracker=(
                     str(item.get("tracker") or item.get("tracker_domain"))
-                    if isinstance(item.get("tracker") or item.get("tracker_domain"), str)
+                    if isinstance(
+                        item.get("tracker") or item.get("tracker_domain"), str
+                    )
                     else None
                 ),
                 save_path=(

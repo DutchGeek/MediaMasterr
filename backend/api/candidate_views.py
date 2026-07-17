@@ -255,7 +255,6 @@ async def build_rule_preview_items(
                 )
             )
 
-
     items: list[RulePreviewEntry] = []
     for record in records:
         is_movie = record.media_type is MediaType.MOVIE

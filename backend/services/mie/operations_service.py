@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 from collections import Counter
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal, cast
 
-from sqlalchemy import Integer, and_, cast as sql_cast, func, or_, select
+from sqlalchemy import Integer, and_, func, or_, select
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.service_manager import service_manager
@@ -42,6 +43,7 @@ from backend.models.mie import (
     OperationWorkflowResponse,
     OperationWorkflowValidation,
     OperationWorkflowValidationCheck,
+    SafetyLevel,
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
@@ -198,6 +200,24 @@ class OperationsService:
         self._last_artwork_scan: ArtworkIntegrityScanSummary | None = None
 
     @staticmethod
+    def _coerce_card_severity(value: str) -> Literal["info", "low", "medium", "high"]:
+        if value in {"info", "low", "medium", "high"}:
+            return cast(Literal["info", "low", "medium", "high"], value)
+        return "info"
+
+    @staticmethod
+    def _coerce_safety_level(value: str) -> SafetyLevel:
+        if value in {"safe", "low_risk", "medium_risk", "high_risk"}:
+            return cast(SafetyLevel, value)
+        return "safe"
+
+    @staticmethod
+    def _coerce_access_mode(value: str | None) -> FilesystemAccessMode:
+        if value in {"discovery", "assisted", "automated"}:
+            return cast(FilesystemAccessMode, value)
+        return "assisted"
+
+    @staticmethod
     def _is_download_state(state: str) -> bool:
         lowered = (state or "").lower()
         return "down" in lowered and "stalled" not in lowered
@@ -229,7 +249,9 @@ class OperationsService:
 
         correlated: dict[str, CorrelatedArtwork] = {}
         for summary in summaries:
-            correlated[summary.id] = await self._correlation_service.resolve_torrent_artwork(
+            correlated[
+                summary.id
+            ] = await self._correlation_service.resolve_torrent_artwork(
                 self.db,
                 summary,
             )
@@ -248,8 +270,12 @@ class OperationsService:
                 )
             )
         ).all()
-        protected_movies = {int(movie_id) for movie_id, _ in rows if movie_id is not None}
-        protected_series = {int(series_id) for _, series_id in rows if series_id is not None}
+        protected_movies = {
+            int(movie_id) for movie_id, _ in rows if movie_id is not None
+        }
+        protected_series = {
+            int(series_id) for _, series_id in rows if series_id is not None
+        }
         return protected_movies, protected_series
 
     async def _refresh_media_assets_snapshot(
@@ -282,8 +308,10 @@ class OperationsService:
         }
 
         existing_assets = (
-            await self.db.execute(select(MediaAsset).order_by(MediaAsset.id.asc()))
-        ).scalars().all()
+            (await self.db.execute(select(MediaAsset).order_by(MediaAsset.id.asc())))
+            .scalars()
+            .all()
+        )
         by_movie = {
             int(asset.movie_id): asset
             for asset in existing_assets
@@ -296,10 +324,16 @@ class OperationsService:
         }
 
         movies = (
-            await self.db.execute(
-                select(Movie).where(Movie.removed_at.is_(None)).order_by(Movie.id.asc())
+            (
+                await self.db.execute(
+                    select(Movie)
+                    .where(Movie.removed_at.is_(None))
+                    .order_by(Movie.id.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for movie in movies:
             has_files = version_counts.get(movie.id, 0) > 0
@@ -353,10 +387,16 @@ class OperationsService:
             asset.last_indexed_at = datetime.now(UTC)
 
         series_rows = (
-            await self.db.execute(
-                select(Series).where(Series.removed_at.is_(None)).order_by(Series.id.asc())
+            (
+                await self.db.execute(
+                    select(Series)
+                    .where(Series.removed_at.is_(None))
+                    .order_by(Series.id.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for series in series_rows:
             has_files = bool(series.size and series.size > 0)
             has_torrent = series.id in torrent_series_ids
@@ -411,7 +451,14 @@ class OperationsService:
         await self.db.flush()
 
     async def _overview_counts(self) -> dict[str, int]:
-        reclaim_count = int((await self.db.execute(select(func.count()).select_from(ReclaimCandidate))).scalar() or 0)
+        reclaim_count = int(
+            (
+                await self.db.execute(
+                    select(func.count()).select_from(ReclaimCandidate)
+                )
+            ).scalar()
+            or 0
+        )
 
         movie_without_versions = int(
             (
@@ -421,7 +468,9 @@ class OperationsService:
                     .where(Movie.removed_at.is_(None))
                     .where(
                         ~Movie.id.in_(
-                            select(MovieVersion.movie_id).where(MovieVersion.movie_id.is_not(None))
+                            select(MovieVersion.movie_id).where(
+                                MovieVersion.movie_id.is_not(None)
+                            )
                         )
                     )
                 )
@@ -446,9 +495,9 @@ class OperationsService:
         broken_imports = int(
             (
                 await self.db.execute(
-                    select(func.count()).select_from(MovieVersion).where(
-                        or_(MovieVersion.path.is_(None), MovieVersion.path == "")
-                    )
+                    select(func.count())
+                    .select_from(MovieVersion)
+                    .where(or_(MovieVersion.path.is_(None), MovieVersion.path == ""))
                 )
             ).scalar()
             or 0
@@ -457,7 +506,11 @@ class OperationsService:
         estimated_recovery_bytes = int(
             (
                 await self.db.execute(
-                    select(func.coalesce(func.sum(ReclaimCandidate.estimated_space_bytes), 0))
+                    select(
+                        func.coalesce(
+                            func.sum(ReclaimCandidate.estimated_space_bytes), 0
+                        )
+                    )
                 )
             ).scalar()
             or 0
@@ -484,7 +537,9 @@ class OperationsService:
         )
 
         summary_by_id = {
-            self._correlation_service.torrent_summary_from_raw(item, index=index).id: item
+            self._correlation_service.torrent_summary_from_raw(
+                item, index=index
+            ).id: item
             for index, item in enumerate(torrents_raw)
             if isinstance(item, dict)
         }
@@ -518,7 +573,9 @@ class OperationsService:
             if self._is_completed(progress) and ratio >= 1 and not is_protected:
                 ready_to_detach += 1
 
-        duplicate_torrents = sum(max(0, count - 1) for count in normalized_names.values() if count > 1)
+        duplicate_torrents = sum(
+            max(0, count - 1) for count in normalized_names.values() if count > 1
+        )
 
         counts: dict[str, int] = {
             "downloading": downloading,
@@ -570,7 +627,7 @@ class OperationsService:
                 title=title,
                 description=description,
                 count=counts.get(key, 0),
-                severity=severity,  # type: ignore[arg-type]
+                severity=self._coerce_card_severity(severity),
             )
             for key, title, description, severity in CARD_DEFINITIONS
         ]
@@ -584,8 +641,12 @@ class OperationsService:
                     Movie.title.label("movie_title"),
                     Series.title.label("series_title"),
                 )
-                .outerjoin(Movie, Movie.id == sql_cast(CleanupPlanItem.target_id, Integer))
-                .outerjoin(Series, Series.id == sql_cast(CleanupPlanItem.target_id, Integer))
+                .outerjoin(
+                    Movie, Movie.id == sql_cast(CleanupPlanItem.target_id, Integer)
+                )
+                .outerjoin(
+                    Series, Series.id == sql_cast(CleanupPlanItem.target_id, Integer)
+                )
                 .order_by(CleanupPlanItem.created_at.desc())
                 .limit(250)
             )
@@ -595,7 +656,11 @@ class OperationsService:
         for row in rows:
             item = row.CleanupPlanItem
             title = row.movie_title or row.series_title or item.title
-            reasons = [r.strip() for r in item.summary.split(";") if r.strip()] if item.summary else []
+            reasons = (
+                [r.strip() for r in item.summary.split(";") if r.strip()]
+                if item.summary
+                else []
+            )
             if not reasons and item.summary:
                 reasons = [item.summary]
             resolved_artwork = await media_asset_artwork_resolver.resolve(
@@ -608,7 +673,11 @@ class OperationsService:
                     if item.target_type in {"series", "season", "episode"}
                     else None
                 ),
-                media_id=(int(item.target_id) if item.target_id and item.target_id.isdigit() else None),
+                media_id=(
+                    int(item.target_id)
+                    if item.target_id and item.target_id.isdigit()
+                    else None
+                ),
                 provider_poster_url=None,
                 provider_backdrop_url=None,
                 fallback_reason=f"cleanup_plan_{item.card_key}",
@@ -622,7 +691,7 @@ class OperationsService:
                     explanation=item.summary,
                     reasons=reasons,
                     action=item.action,
-                    safety_level=item.safety_level,  # type: ignore[arg-type]
+                    safety_level=self._coerce_safety_level(item.safety_level),
                     target_type=item.target_type,
                     target_id=item.target_id,
                     estimated_recovery_bytes=item.estimated_recovery_bytes,
@@ -642,7 +711,10 @@ class OperationsService:
                 )
                 .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
                 .outerjoin(Series, Series.id == ReclaimCandidate.series_id)
-                .order_by(ReclaimCandidate.estimated_space_bytes.desc(), ReclaimCandidate.created_at.desc())
+                .order_by(
+                    ReclaimCandidate.estimated_space_bytes.desc(),
+                    ReclaimCandidate.created_at.desc(),
+                )
                 .limit(150)
             )
         ).all()
@@ -650,13 +722,23 @@ class OperationsService:
         items: list[OperationsRecommendation] = []
         for row in rows:
             candidate = row.ReclaimCandidate
-            target_title = row.movie_title or row.series_title or f"Candidate #{candidate.id}"
-            reasons = [candidate.reason] if candidate.reason else ["Rule engine matched candidate."]
+            target_title = (
+                row.movie_title or row.series_title or f"Candidate #{candidate.id}"
+            )
+            reasons = (
+                [candidate.reason]
+                if candidate.reason
+                else ["Rule engine matched candidate."]
+            )
             media_id = candidate.movie_id or candidate.series_id
             resolved_artwork = await media_asset_artwork_resolver.resolve(
                 self.db,
                 context="operations.recommendations.reclaim_candidate",
-                media_type=(MediaType.MOVIE if candidate.movie_id is not None else MediaType.SERIES),
+                media_type=(
+                    MediaType.MOVIE
+                    if candidate.movie_id is not None
+                    else MediaType.SERIES
+                ),
                 media_id=media_id,
                 provider_poster_url=None,
                 provider_backdrop_url=None,
@@ -687,7 +769,11 @@ class OperationsService:
 
         duplicate_rows = (
             await self.db.execute(
-                select(Movie.id, Movie.title, func.count(MovieVersion.id).label("version_count"))
+                select(
+                    Movie.id,
+                    Movie.title,
+                    func.count(MovieVersion.id).label("version_count"),
+                )
                 .join(MovieVersion, MovieVersion.movie_id == Movie.id)
                 .where(Movie.removed_at.is_(None))
                 .group_by(Movie.id)
@@ -729,7 +815,9 @@ class OperationsService:
 
         torrents_raw, correlated = await self._load_torrent_state()
         summary_by_id = {
-            self._correlation_service.torrent_summary_from_raw(item, index=index).id: item
+            self._correlation_service.torrent_summary_from_raw(
+                item, index=index
+            ).id: item
             for index, item in enumerate(torrents_raw)
             if isinstance(item, dict)
         }
@@ -805,25 +893,47 @@ class OperationsService:
                 )
 
         artwork_issue_rows = (
-            await self.db.execute(
-                select(MediaAsset)
-                .where(MediaAsset.artwork_status.in_(["MISSING", "PLACEHOLDER", "INVALID", "NEEDS_REFRESH", "STALE"]))
-                .order_by(MediaAsset.artwork_status.asc(), MediaAsset.updated_at.desc())
-                .limit(60)
+            (
+                await self.db.execute(
+                    select(MediaAsset)
+                    .where(
+                        MediaAsset.artwork_status.in_(
+                            [
+                                "MISSING",
+                                "PLACEHOLDER",
+                                "INVALID",
+                                "NEEDS_REFRESH",
+                                "STALE",
+                            ]
+                        )
+                    )
+                    .order_by(
+                        MediaAsset.artwork_status.asc(), MediaAsset.updated_at.desc()
+                    )
+                    .limit(60)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for asset in artwork_issue_rows:
             media_id = asset.movie_id or asset.series_id
             if media_id is None:
                 continue
-            media_type = MediaType.MOVIE if asset.movie_id is not None else MediaType.SERIES
+            media_type = (
+                MediaType.MOVIE if asset.movie_id is not None else MediaType.SERIES
+            )
             if media_type is MediaType.MOVIE:
                 title = (
-                    await self.db.execute(select(Movie.title).where(Movie.id == media_id))
+                    await self.db.execute(
+                        select(Movie.title).where(Movie.id == media_id)
+                    )
                 ).scalar_one_or_none() or f"Movie #{media_id}"
             else:
                 title = (
-                    await self.db.execute(select(Series.title).where(Series.id == media_id))
+                    await self.db.execute(
+                        select(Series.title).where(Series.id == media_id)
+                    )
                 ).scalar_one_or_none() or f"Series #{media_id}"
 
             card_key = (
@@ -853,11 +963,16 @@ class OperationsService:
                     explanation="Artwork integrity scan flagged this media asset.",
                     reasons=[
                         f"Status={asset.artwork_status}",
-                        str((asset.artwork_diagnostics or {}).get("reason") or "Integrity repair required"),
+                        str(
+                            (asset.artwork_diagnostics or {}).get("reason")
+                            or "Integrity repair required"
+                        ),
                     ],
                     action="refresh_artwork",
                     safety_level="low_risk",
-                    target_type=("movie" if media_type is MediaType.MOVIE else "series"),
+                    target_type=(
+                        "movie" if media_type is MediaType.MOVIE else "series"
+                    ),
                     target_id=str(media_id),
                     estimated_recovery_bytes=0,
                     poster_url=resolved_artwork.poster_url,
@@ -909,7 +1024,9 @@ class OperationsService:
             items = await self._fallback_recommendations()
         return OperationsRecommendationsResponse(items=items, total=len(items))
 
-    async def _find_recommendation(self, recommendation_id: str) -> OperationsRecommendation | None:
+    async def _find_recommendation(
+        self, recommendation_id: str
+    ) -> OperationsRecommendation | None:
         response = await self.recommendations()
         for item in response.items:
             if item.id == recommendation_id:
@@ -919,25 +1036,35 @@ class OperationsService:
     async def _duplicate_release_preview_details(
         self, recommendation: OperationsRecommendation
     ) -> tuple[list[str], int]:
-        if recommendation.target_type != "movie" or not recommendation.target_id or not recommendation.target_id.isdigit():
+        if (
+            recommendation.target_type != "movie"
+            or not recommendation.target_id
+            or not recommendation.target_id.isdigit()
+        ):
             return ([], 0)
 
         movie_id = int(recommendation.target_id)
         movie_row = (
             await self.db.execute(
-                select(Movie.id, Movie.title, Movie.view_count, Movie.last_viewed_at).where(Movie.id == movie_id)
+                select(
+                    Movie.id, Movie.title, Movie.view_count, Movie.last_viewed_at
+                ).where(Movie.id == movie_id)
             )
         ).first()
         if movie_row is None:
             return ([], 0)
 
         versions = (
-            await self.db.execute(
-                select(MovieVersion)
-                .where(MovieVersion.movie_id == movie_id)
-                .order_by(MovieVersion.size.desc(), MovieVersion.id.asc())
+            (
+                await self.db.execute(
+                    select(MovieVersion)
+                    .where(MovieVersion.movie_id == movie_id)
+                    .order_by(MovieVersion.size.desc(), MovieVersion.id.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not versions:
             return ([], 0)
 
@@ -955,7 +1082,9 @@ class OperationsService:
                         ),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
             if row is not None
         }
 
@@ -984,9 +1113,7 @@ class OperationsService:
                 )
             )
 
-        estimated_reclaim = int(
-            sum(max(0, int(v.size or 0)) for v in versions[1:])
-        )
+        estimated_reclaim = int(sum(max(0, int(v.size or 0)) for v in versions[1:]))
         impacted_files = max(0, len(versions) - 1)
         details.extend(
             [
@@ -1000,7 +1127,9 @@ class OperationsService:
         )
         return (details, estimated_reclaim)
 
-    async def recommendation_preview(self, recommendation_id: str) -> OperationWorkflowResponse:
+    async def recommendation_preview(
+        self, recommendation_id: str
+    ) -> OperationWorkflowResponse:
         recommendation = await self._find_recommendation(recommendation_id)
         if recommendation is None:
             return OperationWorkflowResponse(
@@ -1020,7 +1149,10 @@ class OperationsService:
         ]
         estimated_recovery_bytes = recommendation.estimated_recovery_bytes
         if recommendation.card_key == "duplicate_releases":
-            duplicate_details, duplicate_recovery = await self._duplicate_release_preview_details(recommendation)
+            (
+                duplicate_details,
+                duplicate_recovery,
+            ) = await self._duplicate_release_preview_details(recommendation)
             if duplicate_details:
                 details = duplicate_details
             if duplicate_recovery > 0:
@@ -1036,10 +1168,14 @@ class OperationsService:
             recommendation_id=recommendation_id,
             preview=preview,
             validation=validation.validation,
-            execution=OperationWorkflowExecution(executed=False, result="pending", message="Ready"),
+            execution=OperationWorkflowExecution(
+                executed=False, result="pending", message="Ready"
+            ),
         )
 
-    async def recommendation_validate(self, recommendation_id: str) -> OperationWorkflowResponse:
+    async def recommendation_validate(
+        self, recommendation_id: str
+    ) -> OperationWorkflowResponse:
         recommendation = await self._find_recommendation(recommendation_id)
         if recommendation is None:
             return OperationWorkflowResponse(
@@ -1055,19 +1191,27 @@ class OperationsService:
                     ],
                     valid=False,
                 ),
-                execution=OperationWorkflowExecution(executed=False, result="pending", message="Not validated"),
+                execution=OperationWorkflowExecution(
+                    executed=False, result="pending", message="Not validated"
+                ),
             )
 
         checks: list[OperationWorkflowValidationCheck] = [
             OperationWorkflowValidationCheck(
                 label="Target identity present",
-                passed=bool(recommendation.target_id or recommendation.target_type == "system"),
-                detail="Target identifier resolved" if recommendation.target_id else "No specific target id",
+                passed=bool(
+                    recommendation.target_id or recommendation.target_type == "system"
+                ),
+                detail="Target identifier resolved"
+                if recommendation.target_id
+                else "No specific target id",
             ),
             OperationWorkflowValidationCheck(
                 label="Safety level is explainable",
                 passed=bool(recommendation.reasons),
-                detail="Reasons provided" if recommendation.reasons else "Missing recommendation reasons",
+                detail="Reasons provided"
+                if recommendation.reasons
+                else "Missing recommendation reasons",
             ),
             OperationWorkflowValidationCheck(
                 label="Action is supported",
@@ -1085,17 +1229,24 @@ class OperationsService:
             ),
         ]
 
-        if recommendation.target_type == "reclaim_candidate" and recommendation.target_id is not None:
+        if (
+            recommendation.target_type == "reclaim_candidate"
+            and recommendation.target_id is not None
+        ):
             candidate = (
                 await self.db.execute(
-                    select(ReclaimCandidate.id).where(ReclaimCandidate.id == int(recommendation.target_id))
+                    select(ReclaimCandidate.id).where(
+                        ReclaimCandidate.id == int(recommendation.target_id)
+                    )
                 )
             ).scalar_one_or_none()
             checks.append(
                 OperationWorkflowValidationCheck(
                     label="Candidate row exists",
                     passed=candidate is not None,
-                    detail="Reclaim candidate located" if candidate is not None else "Candidate missing",
+                    detail="Reclaim candidate located"
+                    if candidate is not None
+                    else "Candidate missing",
                 )
             )
 
@@ -1144,10 +1295,16 @@ class OperationsService:
                 details=[recommendation.summary],
             ),
             validation=OperationWorkflowValidation(checks=checks, valid=valid),
-            execution=OperationWorkflowExecution(executed=False, result="pending", message="Validated" if valid else "Validation failed"),
+            execution=OperationWorkflowExecution(
+                executed=False,
+                result="pending",
+                message="Validated" if valid else "Validation failed",
+            ),
         )
 
-    async def recommendation_execute(self, recommendation_id: str) -> OperationWorkflowResponse:
+    async def recommendation_execute(
+        self, recommendation_id: str
+    ) -> OperationWorkflowResponse:
         validated = await self.recommendation_validate(recommendation_id)
         recommendation = await self._find_recommendation(recommendation_id)
         if recommendation is None:
@@ -1188,12 +1345,16 @@ class OperationsService:
 
     async def audit_log(self) -> OperationAuditListResponse:
         rows = (
-            await self.db.execute(
-                select(OperationHistory)
-                .order_by(OperationHistory.created_at.desc())
-                .limit(200)
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .order_by(OperationHistory.created_at.desc())
+                    .limit(200)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return OperationAuditListResponse(
             items=[
                 OperationAuditEntryResponse(
@@ -1226,8 +1387,10 @@ class OperationsService:
 
     async def artwork_issues_summary(self) -> ArtworkIssuesSummary:
         if self._last_artwork_scan is None:
-            self._last_artwork_scan = await self._artwork_integrity_service.scan_and_repair(
-                migration_mode=False
+            self._last_artwork_scan = (
+                await self._artwork_integrity_service.scan_and_repair(
+                    migration_mode=False
+                )
             )
 
         scan = self._last_artwork_scan
@@ -1236,12 +1399,8 @@ class OperationsService:
         coverage = (valid / total * 100.0) if total > 0 else 0.0
 
         latest_refresh = (
-            (
-                await self.db.execute(
-                    select(func.max(MediaAsset.artwork_last_refresh_at))
-                )
-            ).scalar_one_or_none()
-        )
+            await self.db.execute(select(func.max(MediaAsset.artwork_last_refresh_at)))
+        ).scalar_one_or_none()
 
         return ArtworkIssuesSummary(
             coverage_percent=round(coverage, 2),
@@ -1262,13 +1421,17 @@ class OperationsService:
             .first()
         )
         roots = (
-            (await self.db.execute(select(FilesystemRoot).order_by(FilesystemRoot.name.asc())))
+            (
+                await self.db.execute(
+                    select(FilesystemRoot).order_by(FilesystemRoot.name.asc())
+                )
+            )
             .scalars()
             .all()
         )
 
         return FilesystemConfigResponse(
-            access_mode=(
+            access_mode=self._coerce_access_mode(
                 settings.filesystem_access_mode if settings is not None else "assisted"
             ),
             roots=[
@@ -1287,7 +1450,9 @@ class OperationsService:
         plans = (
             (
                 await self.db.execute(
-                    select(CleanupPlan).order_by(CleanupPlan.created_at.desc()).limit(100)
+                    select(CleanupPlan)
+                    .order_by(CleanupPlan.created_at.desc())
+                    .limit(100)
                 )
             )
             .scalars()
@@ -1311,4 +1476,11 @@ class OperationsService:
         )
 
     async def operation_history_count(self) -> int:
-        return int((await self.db.execute(select(func.count()).select_from(OperationHistory))).scalar() or 0)
+        return int(
+            (
+                await self.db.execute(
+                    select(func.count()).select_from(OperationHistory)
+                )
+            ).scalar()
+            or 0
+        )

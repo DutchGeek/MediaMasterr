@@ -64,14 +64,20 @@ class MediaIntelligenceService:
         assets = (await self.db.execute(select(MediaAsset))).scalars().all()
         total_assets = len(assets)
         total_movies = sum(1 for asset in assets if asset.media_type == MediaType.MOVIE)
-        total_series = sum(1 for asset in assets if asset.media_type == MediaType.SERIES)
+        total_series = sum(
+            1 for asset in assets if asset.media_type == MediaType.SERIES
+        )
 
-        lifecycle_counts = Counter((asset.lifecycle_state or "unknown") for asset in assets)
+        lifecycle_counts = Counter(
+            (asset.lifecycle_state or "unknown") for asset in assets
+        )
 
         factors: list[MieHealthFactor] = []
         score = 100
 
-        degraded_count = sum(1 for asset in assets if (asset.health_state or "") != "healthy")
+        degraded_count = sum(
+            1 for asset in assets if (asset.health_state or "") != "healthy"
+        )
         if degraded_count:
             penalty = min(40, degraded_count * 3)
             score -= penalty
@@ -176,7 +182,9 @@ class MediaIntelligenceService:
             overseerr_completed=seerr_completed,
             lifecycle=[
                 MieLifecycleBucket(state=state, count=count)
-                for state, count in sorted(lifecycle_counts.items(), key=lambda pair: pair[0])
+                for state, count in sorted(
+                    lifecycle_counts.items(), key=lambda pair: pair[0]
+                )
             ],
             health=MieAssetHealthScore(
                 score=score,
@@ -193,14 +201,22 @@ class MediaIntelligenceService:
         items: list[MieTimelineEvent] = []
 
         history_rows = (
-            await self.db.execute(
-                select(OperationHistory)
-                .order_by(OperationHistory.created_at.desc())
-                .limit(limit)
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .order_by(OperationHistory.created_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in history_rows:
-            media_id = int(row.target_id) if row.target_id and row.target_id.isdigit() else None
+            media_id = (
+                int(row.target_id)
+                if row.target_id and row.target_id.isdigit()
+                else None
+            )
             media_type: MediaType | None = None
             if row.target_type == "movie":
                 media_type = MediaType.MOVIE
@@ -222,20 +238,26 @@ class MediaIntelligenceService:
             )
 
         candidate_rows = (
-            await self.db.execute(
-                select(ReclaimCandidate)
-                .order_by(ReclaimCandidate.created_at.desc())
-                .limit(limit)
+            (
+                await self.db.execute(
+                    select(ReclaimCandidate)
+                    .order_by(ReclaimCandidate.created_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
-        for row in candidate_rows:
-            media_id = row.movie_id or row.series_id
-            media_type = MediaType.MOVIE if row.movie_id is not None else MediaType.SERIES
-            summary = row.reason or "Rule engine marked candidate"
+            .scalars()
+            .all()
+        )
+        for candidate in candidate_rows:
+            media_id = candidate.movie_id or candidate.series_id
+            media_type = (
+                MediaType.MOVIE if candidate.movie_id is not None else MediaType.SERIES
+            )
+            summary = candidate.reason or "Rule engine marked candidate"
             items.append(
                 MieTimelineEvent(
-                    id=f"candidate:{row.id}",
-                    happened_at=row.created_at,
+                    id=f"candidate:{candidate.id}",
+                    happened_at=candidate.created_at,
                     event_type="candidate",
                     title="Reclaim candidate created",
                     summary=summary,
@@ -247,20 +269,28 @@ class MediaIntelligenceService:
             )
 
         protected_rows = (
-            await self.db.execute(
-                select(ProtectedMedia)
-                .order_by(ProtectedMedia.created_at.desc())
-                .limit(limit)
+            (
+                await self.db.execute(
+                    select(ProtectedMedia)
+                    .order_by(ProtectedMedia.created_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
-        for row in protected_rows:
-            media_id = row.movie_id or row.series_id
-            media_type = row.media_type if isinstance(row.media_type, MediaType) else None
-            summary = row.reason or "Protection applied"
+            .scalars()
+            .all()
+        )
+        for protected in protected_rows:
+            media_id = protected.movie_id or protected.series_id
+            media_type = (
+                protected.media_type
+                if isinstance(protected.media_type, MediaType)
+                else None
+            )
+            summary = protected.reason or "Protection applied"
             items.append(
                 MieTimelineEvent(
-                    id=f"protected:{row.id}",
-                    happened_at=row.created_at,
+                    id=f"protected:{protected.id}",
+                    happened_at=protected.created_at,
                     event_type="protection",
                     title="Protection applied",
                     summary=summary,
@@ -331,13 +361,17 @@ class MediaIntelligenceService:
         if media_type is MediaType.MOVIE:
             media = (
                 await self.db.execute(
-                    select(Movie.id, Movie.title, Movie.tmdb_id).where(Movie.id == media_id)
+                    select(Movie.id, Movie.title, Movie.tmdb_id).where(
+                        Movie.id == media_id
+                    )
                 )
             ).first()
         else:
             media = (
                 await self.db.execute(
-                    select(Series.id, Series.title, Series.tmdb_id).where(Series.id == media_id)
+                    select(Series.id, Series.title, Series.tmdb_id).where(
+                        Series.id == media_id
+                    )
                 )
             ).first()
 
@@ -350,7 +384,10 @@ class MediaIntelligenceService:
                         id=root_id,
                         kind="media",
                         label="Unknown media",
-                        metadata={"media_type": media_type.value, "media_id": str(media_id)},
+                        metadata={
+                            "media_type": media_type.value,
+                            "media_id": str(media_id),
+                        },
                     )
                 ],
                 edges=[],
@@ -370,14 +407,18 @@ class MediaIntelligenceService:
         )
 
         asset = (
-            await self.db.execute(
-                select(MediaAsset).where(
-                    MediaAsset.movie_id == media_id
-                    if media_type is MediaType.MOVIE
-                    else MediaAsset.series_id == media_id
+            (
+                await self.db.execute(
+                    select(MediaAsset).where(
+                        MediaAsset.movie_id == media_id
+                        if media_type is MediaType.MOVIE
+                        else MediaAsset.series_id == media_id
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if asset is not None:
             asset_node_id = f"asset:{asset.id}"
             nodes.append(
@@ -401,17 +442,21 @@ class MediaIntelligenceService:
             )
 
         candidate_rows = (
-            await self.db.execute(
-                select(ReclaimCandidate)
-                .where(
-                    ReclaimCandidate.movie_id == media_id
-                    if media_type is MediaType.MOVIE
-                    else ReclaimCandidate.series_id == media_id
+            (
+                await self.db.execute(
+                    select(ReclaimCandidate)
+                    .where(
+                        ReclaimCandidate.movie_id == media_id
+                        if media_type is MediaType.MOVIE
+                        else ReclaimCandidate.series_id == media_id
+                    )
+                    .order_by(ReclaimCandidate.created_at.desc())
+                    .limit(25)
                 )
-                .order_by(ReclaimCandidate.created_at.desc())
-                .limit(25)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for candidate in candidate_rows:
             node_id = f"candidate:{candidate.id}"
             nodes.append(
@@ -420,70 +465,88 @@ class MediaIntelligenceService:
                     kind="candidate",
                     label="Reclaim candidate",
                     metadata={
-                        "estimated_space_bytes": str(candidate.estimated_space_bytes or 0),
-                        "approved_for_deletion": str(candidate.approved_for_deletion).lower(),
+                        "estimated_space_bytes": str(
+                            candidate.estimated_space_bytes or 0
+                        ),
+                        "approved_for_deletion": str(
+                            candidate.approved_for_deletion
+                        ).lower(),
                     },
                 )
             )
             edges.append(
-                MieRelationshipEdge(source=root_id, target=node_id, relation="candidate")
+                MieRelationshipEdge(
+                    source=root_id, target=node_id, relation="candidate"
+                )
             )
 
         protected_rows = (
-            await self.db.execute(
-                select(ProtectedMedia)
-                .where(
-                    ProtectedMedia.movie_id == media_id
-                    if media_type is MediaType.MOVIE
-                    else ProtectedMedia.series_id == media_id
+            (
+                await self.db.execute(
+                    select(ProtectedMedia)
+                    .where(
+                        ProtectedMedia.movie_id == media_id
+                        if media_type is MediaType.MOVIE
+                        else ProtectedMedia.series_id == media_id
+                    )
+                    .order_by(ProtectedMedia.created_at.desc())
+                    .limit(25)
                 )
-                .order_by(ProtectedMedia.created_at.desc())
-                .limit(25)
             )
-        ).scalars().all()
-        for row in protected_rows:
-            node_id = f"protected:{row.id}"
+            .scalars()
+            .all()
+        )
+        for protected in protected_rows:
+            node_id = f"protected:{protected.id}"
             nodes.append(
                 MieRelationshipNode(
                     id=node_id,
                     kind="protection",
                     label="Protection rule",
                     metadata={
-                        "permanent": str(row.permanent).lower(),
-                        "reason": row.reason or "",
+                        "permanent": str(protected.permanent).lower(),
+                        "reason": protected.reason or "",
                     },
                 )
             )
             edges.append(
-                MieRelationshipEdge(source=root_id, target=node_id, relation="protected_by")
+                MieRelationshipEdge(
+                    source=root_id, target=node_id, relation="protected_by"
+                )
             )
 
         history_rows = (
-            await self.db.execute(
-                select(OperationHistory)
-                .where(
-                    OperationHistory.target_type == media_type.value,
-                    OperationHistory.target_id == str(media_id),
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .where(
+                        OperationHistory.target_type == media_type.value,
+                        OperationHistory.target_id == str(media_id),
+                    )
+                    .order_by(OperationHistory.created_at.desc())
+                    .limit(25)
                 )
-                .order_by(OperationHistory.created_at.desc())
-                .limit(25)
             )
-        ).scalars().all()
-        for row in history_rows:
-            node_id = f"operation:{row.id}"
+            .scalars()
+            .all()
+        )
+        for history in history_rows:
+            node_id = f"operation:{history.id}"
             nodes.append(
                 MieRelationshipNode(
                     id=node_id,
                     kind="operation",
-                    label=f"Action {row.action}",
+                    label=f"Action {history.action}",
                     metadata={
-                        "result": row.result,
-                        "safety_level": row.safety_level,
+                        "result": history.result,
+                        "safety_level": history.safety_level,
                     },
                 )
             )
             edges.append(
-                MieRelationshipEdge(source=root_id, target=node_id, relation="operated_by")
+                MieRelationshipEdge(
+                    source=root_id, target=node_id, relation="operated_by"
+                )
             )
 
         if service_manager.seerr is not None:

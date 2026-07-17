@@ -157,14 +157,21 @@ class ArtworkService:
         resolved_poster = poster_url
         resolved_backdrop = backdrop_url
 
-        exact_poster, exact_backdrop = await self._resolve_exact_media_identity(db, identity)
+        exact_poster, exact_backdrop = await self._resolve_exact_media_identity(
+            db, identity
+        )
         if exact_poster:
             resolved_poster = exact_poster
         if exact_backdrop:
             resolved_backdrop = exact_backdrop
 
         if not resolved_poster:
-            ext_poster, ext_backdrop, resolved_media_type, resolved_media_id = await self._resolve_exact_external_identity(
+            (
+                ext_poster,
+                ext_backdrop,
+                resolved_media_type,
+                resolved_media_id,
+            ) = await self._resolve_exact_external_identity(
                 db,
                 identity,
             )
@@ -182,7 +189,9 @@ class ArtworkService:
         poster = resolve_poster_url(
             resolved_poster,
             context=context,
-            media_type=identity.media_type.value if identity.media_type is not None else None,
+            media_type=identity.media_type.value
+            if identity.media_type is not None
+            else None,
             media_id=identity.media_id,
             fallback_reason=fallback_reason,
         )

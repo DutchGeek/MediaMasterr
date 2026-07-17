@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,19 @@ class ArtworkIntegrityService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _coerce_status(value: str | None) -> ArtworkStatus:
+        if value in {
+            "VALID",
+            "MISSING",
+            "PLACEHOLDER",
+            "INVALID",
+            "STALE",
+            "NEEDS_REFRESH",
+        }:
+            return cast(ArtworkStatus, value)
+        return "MISSING"
 
     @staticmethod
     def _classify_status(asset: MediaAsset) -> tuple[ArtworkStatus, str, float]:
@@ -72,7 +86,11 @@ class ArtworkIntegrityService:
         *,
         migration_mode: bool = False,
     ) -> ArtworkIntegrityScanSummary:
-        rows = (await self.db.execute(select(MediaAsset).order_by(MediaAsset.id.asc()))).scalars().all()
+        rows = (
+            (await self.db.execute(select(MediaAsset).order_by(MediaAsset.id.asc())))
+            .scalars()
+            .all()
+        )
 
         poster_to_assets: dict[str, list[MediaAsset]] = defaultdict(list)
         for asset in rows:
@@ -106,9 +124,16 @@ class ArtworkIntegrityService:
                 reason = "Detected artwork cache collision across unrelated assets"
                 confidence = min(confidence, 0.3)
 
-            if migration_mode and status in {"PLACEHOLDER", "INVALID", "MISSING", "NEEDS_REFRESH"}:
+            if migration_mode and status in {
+                "PLACEHOLDER",
+                "INVALID",
+                "MISSING",
+                "NEEDS_REFRESH",
+            }:
                 asset.poster_url = None
-                asset.backdrop_url = None if status in {"PLACEHOLDER", "INVALID"} else asset.backdrop_url
+                asset.backdrop_url = (
+                    None if status in {"PLACEHOLDER", "INVALID"} else asset.backdrop_url
+                )
                 status = "NEEDS_REFRESH"
                 reason = "Artwork assignment cleared during integrity migration"
                 confidence = 0.0
@@ -158,7 +183,7 @@ class ArtworkIntegrityService:
             logo=asset.logo_url,
             source=asset.artwork_source or "cache",
             confidence=float(asset.artwork_confidence or 0.0),
-            status=(asset.artwork_status or "MISSING"),
+            status=ArtworkIntegrityService._coerce_status(asset.artwork_status),
             validated=(asset.artwork_status == "VALID"),
             reason=diagnostics.get("reason") if isinstance(diagnostics, dict) else None,
             last_refreshed_at=asset.artwork_last_refresh_at,

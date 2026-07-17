@@ -134,9 +134,7 @@ class MediaCorrelationService:
         parsed_title, _ = MediaCorrelationService._parse_torrent_identity(name)
         residual_noise = {"dl", "uhd", "nf", "amzn", "bluray", "webrip", "webdl"}
         parts = [
-            part
-            for part in parsed_title.split()
-            if part and part not in residual_noise
+            part for part in parsed_title.split() if part and part not in residual_noise
         ]
         return " ".join(parts[:4])[:96]
 
@@ -192,7 +190,11 @@ class MediaCorrelationService:
         candidate = MediaCorrelationService._normalize_identity_text(candidate_title)
         if not parsed or not candidate:
             return False
-        return parsed == candidate or parsed.startswith(candidate) or candidate.startswith(parsed)
+        return (
+            parsed == candidate
+            or parsed.startswith(candidate)
+            or candidate.startswith(parsed)
+        )
 
     @staticmethod
     def _movie_identity_confident(
@@ -212,10 +214,17 @@ class MediaCorrelationService:
             or candidate.movie.year is None
             or candidate.movie.year == parsed_year
         )
-        path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.version.path)
+        path_overlap = MediaCorrelationService._path_overlap_depth(
+            save_path, candidate.version.path
+        )
         return (
-            (parsed_imdb_id is not None and (candidate.movie.imdb_id or "").lower() == parsed_imdb_id)
-            or (parsed_tmdb_id is not None and candidate.movie.tmdb_id == parsed_tmdb_id)
+            (
+                parsed_imdb_id is not None
+                and (candidate.movie.imdb_id or "").lower() == parsed_imdb_id
+            )
+            or (
+                parsed_tmdb_id is not None and candidate.movie.tmdb_id == parsed_tmdb_id
+            )
             or path_overlap >= 2
             or (path_overlap >= 1 and title_match and year_match)
         )
@@ -235,11 +244,22 @@ class MediaCorrelationService:
         title_match = MediaCorrelationService._titles_compatible(
             parsed_title, candidate.series.title
         )
-        path_overlap = MediaCorrelationService._path_overlap_depth(save_path, candidate.episode.path)
+        path_overlap = MediaCorrelationService._path_overlap_depth(
+            save_path, candidate.episode.path
+        )
         return (
-            (parsed_imdb_id is not None and (candidate.series.imdb_id or "").lower() == parsed_imdb_id)
-            or (parsed_tmdb_id is not None and candidate.series.tmdb_id == parsed_tmdb_id)
-            or (parsed_tvdb_id is not None and (candidate.series.tvdb_id or "") == parsed_tvdb_id)
+            (
+                parsed_imdb_id is not None
+                and (candidate.series.imdb_id or "").lower() == parsed_imdb_id
+            )
+            or (
+                parsed_tmdb_id is not None
+                and candidate.series.tmdb_id == parsed_tmdb_id
+            )
+            or (
+                parsed_tvdb_id is not None
+                and (candidate.series.tvdb_id or "") == parsed_tvdb_id
+            )
             or path_overlap >= 2
             or (path_overlap >= 1 and title_match)
             or (
@@ -257,8 +277,20 @@ class MediaCorrelationService:
     def _path_overlap_depth(left: str | None, right: str | None) -> int:
         if not left or not right:
             return 0
-        left_parts = [p for p in normalize_fpath(left, strip_ending_slash=True, lower=True).split("/") if p]
-        right_parts = [p for p in normalize_fpath(right, strip_ending_slash=True, lower=True).split("/") if p]
+        left_parts = [
+            p
+            for p in normalize_fpath(left, strip_ending_slash=True, lower=True).split(
+                "/"
+            )
+            if p
+        ]
+        right_parts = [
+            p
+            for p in normalize_fpath(right, strip_ending_slash=True, lower=True).split(
+                "/"
+            )
+            if p
+        ]
         depth = 0
         for l, r in zip(left_parts, right_parts):
             if l != r:
@@ -279,7 +311,9 @@ class MediaCorrelationService:
         normalized_path = normalize_fpath(
             version_path or "", strip_ending_slash=True, lower=True
         )
-        overlap_depth = MediaCorrelationService._path_overlap_depth(save_path, normalized_path)
+        overlap_depth = MediaCorrelationService._path_overlap_depth(
+            save_path, normalized_path
+        )
         if overlap_depth >= 3:
             score += 110
         elif overlap_depth == 2:
@@ -314,7 +348,9 @@ class MediaCorrelationService:
         normalized_path = normalize_fpath(
             episode_path or "", strip_ending_slash=True, lower=True
         )
-        overlap_depth = MediaCorrelationService._path_overlap_depth(save_path, normalized_path)
+        overlap_depth = MediaCorrelationService._path_overlap_depth(
+            save_path, normalized_path
+        )
         if overlap_depth >= 3:
             score += 110
         elif overlap_depth == 2:
@@ -550,11 +586,11 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
-        parsed_season_number, parsed_episode_number = self._parse_torrent_episode_markers(
-            torrent.name
+        parsed_season_number, parsed_episode_number = (
+            self._parse_torrent_episode_markers(torrent.name)
         )
-        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
-            torrent.name
+        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = (
+            self._parse_torrent_external_ids(torrent.name)
         )
         category = (torrent.category or "").lower() or None
 
@@ -772,11 +808,11 @@ class MediaCorrelationService:
         )
         token = self._name_token(torrent.name)
         parsed_title, parsed_year = self._parse_torrent_identity(torrent.name)
-        parsed_season_number, parsed_episode_number = self._parse_torrent_episode_markers(
-            torrent.name
+        parsed_season_number, parsed_episode_number = (
+            self._parse_torrent_episode_markers(torrent.name)
         )
-        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = self._parse_torrent_external_ids(
-            torrent.name
+        parsed_imdb_id, parsed_tmdb_id, parsed_tvdb_id = (
+            self._parse_torrent_external_ids(torrent.name)
         )
         category = (torrent.category or "").lower() or None
 
@@ -803,13 +839,17 @@ class MediaCorrelationService:
         elif best_episode:
             selected_mode = "episode"
 
-        if selected_mode == "movie" and best_movie and self._movie_identity_confident(
-            parsed_title=parsed_title,
-            parsed_year=parsed_year,
-            parsed_imdb_id=parsed_imdb_id,
-            parsed_tmdb_id=parsed_tmdb_id,
-            save_path=save_path,
-            candidate=best_movie,
+        if (
+            selected_mode == "movie"
+            and best_movie
+            and self._movie_identity_confident(
+                parsed_title=parsed_title,
+                parsed_year=parsed_year,
+                parsed_imdb_id=parsed_imdb_id,
+                parsed_tmdb_id=parsed_tmdb_id,
+                save_path=save_path,
+                candidate=best_movie,
+            )
         ):
             return CorrelatedArtwork(
                 poster_url=best_movie.movie.poster_url,
@@ -823,15 +863,19 @@ class MediaCorrelationService:
                 ),
             )
 
-        if selected_mode == "episode" and best_episode and self._episode_identity_confident(
-            parsed_title=parsed_title,
-            parsed_season_number=parsed_season_number,
-            parsed_episode_number=parsed_episode_number,
-            parsed_imdb_id=parsed_imdb_id,
-            parsed_tmdb_id=parsed_tmdb_id,
-            parsed_tvdb_id=parsed_tvdb_id,
-            save_path=save_path,
-            candidate=best_episode,
+        if (
+            selected_mode == "episode"
+            and best_episode
+            and self._episode_identity_confident(
+                parsed_title=parsed_title,
+                parsed_season_number=parsed_season_number,
+                parsed_episode_number=parsed_episode_number,
+                parsed_imdb_id=parsed_imdb_id,
+                parsed_tmdb_id=parsed_tmdb_id,
+                parsed_tvdb_id=parsed_tvdb_id,
+                save_path=save_path,
+                candidate=best_episode,
+            )
         ):
             return CorrelatedArtwork(
                 poster_url=best_episode.series.poster_url,

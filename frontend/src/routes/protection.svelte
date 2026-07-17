@@ -45,7 +45,8 @@
     rules.filter((rule) => rule.source.toLowerCase().includes("manual")).length,
   );
   const automatedRuleCount = $derived(
-    rules.filter((rule) => !rule.source.toLowerCase().includes("manual")).length,
+    rules.filter((rule) => !rule.source.toLowerCase().includes("manual"))
+      .length,
   );
   const activeProtectedItems = $derived(
     items.filter((item) => item.status.toLowerCase() === "active").length,
@@ -190,7 +191,9 @@
                   <tr class="border-b border-border/60">
                     <td class="py-2 text-foreground">{rule.rule}</td>
                     <td class="py-2 text-muted-foreground">{rule.source}</td>
-                    <td class="py-2 text-foreground">{rule.protected_items ?? "Unknown"}</td>
+                    <td class="py-2 text-foreground"
+                      >{rule.protected_items ?? "Unknown"}</td
+                    >
                     <td class="py-2 text-foreground">{rule.status}</td>
                     <td class="py-2 text-muted-foreground"
                       >{rule.last_updated
@@ -267,7 +270,9 @@
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Rule Mapped Items</dt>
-              <dd class="text-foreground">{stats?.reconciled_rule_items ?? 0}</dd>
+              <dd class="text-foreground">
+                {stats?.reconciled_rule_items ?? 0}
+              </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Unmatched Protected Items</dt>
@@ -286,10 +291,14 @@
           {:else}
             <ul class="mt-2 space-y-2 text-sm">
               {#each expiringSoon as item}
-                <li class="rounded-md border border-border/60 bg-background/40 p-2">
+                <li
+                  class="rounded-md border border-border/60 bg-background/40 p-2"
+                >
                   <p class="text-foreground truncate">{item.path}</p>
                   <p class="text-xs text-muted-foreground">
-                    Expires {item.expiration ? formatDistanceToNow(item.expiration) : "n/a"}
+                    Expires {item.expiration
+                      ? formatDistanceToNow(item.expiration)
+                      : "n/a"}
                   </p>
                 </li>
               {/each}

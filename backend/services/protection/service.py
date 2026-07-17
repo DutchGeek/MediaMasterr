@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, select
@@ -9,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.encryption import fer_decrypt, fer_encrypt
 from backend.core.logger import LOG
-from backend.database.models import ProtectedMedia, ProtectionProviderConfig, ReclaimRule
+from backend.database.models import (
+    ProtectedMedia,
+    ProtectionProviderConfig,
+    ReclaimRule,
+)
 
 from .models import ProtectionProviderStatus, ProtectionStatistics
 from .provider import ProtectionProvider
@@ -23,6 +26,8 @@ from .schemas import (
     ProtectionStatsResponse,
     ProtectionStatusResponse,
 )
+
+
 @dataclass(slots=True)
 class _ProtectionSnapshot:
     stats: ProtectionStatistics
@@ -339,8 +344,13 @@ class ProtectionService:
                 if rule_name
             }
 
-        provider_has_rule_counts = any((rule.protected_items or 0) > 0 for rule in rules)
-        item_reasons = [((item.reason or "").strip().lower(), idx) for idx, item in enumerate(item_responses)]
+        provider_has_rule_counts = any(
+            (rule.protected_items or 0) > 0 for rule in rules
+        )
+        item_reasons = [
+            ((item.reason or "").strip().lower(), idx)
+            for idx, item in enumerate(item_responses)
+        ]
 
         rule_responses: list[ProtectionRuleResponse] = []
         matched_item_indexes: set[int] = set()

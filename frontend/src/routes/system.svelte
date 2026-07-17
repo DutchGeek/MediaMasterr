@@ -179,13 +179,14 @@
     loading = true;
     error = "";
     try {
-      const [health, version, diagnostics, taskPayload, protectionStatus] = await Promise.all([
-        get_api<HealthResponse>("/api/info/health"),
-        get_api<VersionResponse>("/api/info/version"),
-        get_api<SystemDiagnosticsResponse>("/api/system/diagnostics"),
-        get_api<TasksResponse>("/api/tasks/tasks"),
-        get_api<ProtectionStatus>("/api/protection/status"),
-      ]);
+      const [health, version, diagnostics, taskPayload, protectionStatus] =
+        await Promise.all([
+          get_api<HealthResponse>("/api/info/health"),
+          get_api<VersionResponse>("/api/info/version"),
+          get_api<SystemDiagnosticsResponse>("/api/system/diagnostics"),
+          get_api<TasksResponse>("/api/tasks/tasks"),
+          get_api<ProtectionStatus>("/api/protection/status"),
+        ]);
 
       backendStatus =
         diagnostics.health.backend ??
@@ -204,7 +205,10 @@
       );
       providers = hasProtectionProvider
         ? diagnosticsProviders
-        : [...diagnosticsProviders, probeProtectionDiagnostics(protectionStatus)];
+        : [
+            ...diagnosticsProviders,
+            probeProtectionDiagnostics(protectionStatus),
+          ];
 
       tasks = taskPayload.tasks;
 
@@ -342,31 +346,43 @@
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">API Version</dt>
-                  <dd class="text-foreground">{provider.apiVersion ?? "n/a"}</dd>
+                  <dd class="text-foreground">
+                    {provider.apiVersion ?? "n/a"}
+                  </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Status</dt>
-                  <dd class="text-foreground">{statusLabel(provider.status)}</dd>
+                  <dd class="text-foreground">
+                    {statusLabel(provider.status)}
+                  </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Reason</dt>
-                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                  <dd
+                    class="text-foreground text-right max-w-[65%] break-words"
+                  >
                     {provider.reason ?? "n/a"}
                   </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Endpoint</dt>
-                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                  <dd
+                    class="text-foreground text-right max-w-[65%] break-words"
+                  >
                     {provider.endpoint ?? "n/a"}
                   </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">HTTP</dt>
-                  <dd class="text-foreground">{provider.httpStatus ?? "n/a"}</dd>
+                  <dd class="text-foreground">
+                    {provider.httpStatus ?? "n/a"}
+                  </dd>
                 </div>
                 <div class="flex justify-between gap-2">
                   <dt class="text-muted-foreground">Last Error</dt>
-                  <dd class="text-foreground text-right max-w-[65%] break-words">
+                  <dd
+                    class="text-foreground text-right max-w-[65%] break-words"
+                  >
                     {provider.lastError ?? "None"}
                   </dd>
                 </div>
@@ -499,13 +515,17 @@
               <dt class="text-muted-foreground">Database Size</dt>
               <dd class="text-foreground">
                 {systemDiagnostics?.diagnostics.database_size_bytes != null
-                  ? formatFileSize(systemDiagnostics.diagnostics.database_size_bytes)
+                  ? formatFileSize(
+                      systemDiagnostics.diagnostics.database_size_bytes,
+                    )
                   : "n/a"}
               </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Cached Objects</dt>
-              <dd class="text-foreground">{systemDiagnostics?.diagnostics.cached_objects ?? 0}</dd>
+              <dd class="text-foreground">
+                {systemDiagnostics?.diagnostics.cached_objects ?? 0}
+              </dd>
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Memory Usage</dt>
@@ -524,7 +544,9 @@
             </div>
             <div class="flex justify-between">
               <dt class="text-muted-foreground">Queue Sizes</dt>
-              <dd class="text-foreground">{systemDiagnostics?.diagnostics.queue_size ?? 0}</dd>
+              <dd class="text-foreground">
+                {systemDiagnostics?.diagnostics.queue_size ?? 0}
+              </dd>
             </div>
           </dl>
         </article>

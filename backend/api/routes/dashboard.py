@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
@@ -46,12 +46,30 @@ from backend.models.dashboard import (
     DashboardServiceSummary,
     DashboardViewer,
 )
+from backend.services.event_engine import EventEngine
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
 from backend.services.mie.operations_service import OperationsService
-from backend.services.event_engine import EventEngine
 from backend.user_types import MEDIA_SERVERS
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
+
+
+class _LibraryStateEntry(TypedDict):
+    label: str
+    library_size_bytes: int
+    title_count: int
+    reclaimable_size_bytes: int
+    reclaimable_ids: set[str]
+
+
+def _empty_library_entry(label: str) -> _LibraryStateEntry:
+    return {
+        "label": label,
+        "library_size_bytes": 0,
+        "title_count": 0,
+        "reclaimable_size_bytes": 0,
+        "reclaimable_ids": set(),
+    }
 
 
 async def build_dashboard_response(
@@ -200,7 +218,13 @@ async def build_dashboard_response(
     operations_recommendations = operations_workspace.recommendations.items
     card_by_key = {card.key: card for card in operations_cards}
 
-    def _recommendation_media_identity(target_type: str, target_id: str | None) -> tuple[MediaType | None, int | None]:
+    def _card_count(key: str) -> int:
+        card = card_by_key.get(key)
+        return card.count if card is not None else 0
+
+    def _recommendation_media_identity(
+        target_type: str, target_id: str | None
+    ) -> tuple[MediaType | None, int | None]:
         if not target_id or not target_id.isdigit():
             return None, None
         parsed_target_id = int(target_id)
@@ -213,18 +237,20 @@ async def build_dashboard_response(
     first_recommendation_poster_by_card: dict[str, str] = {}
     for item in operations_recommendations:
         if item.card_key not in first_recommendation_poster_by_card:
-            media_type, media_id = _recommendation_media_identity(
-                item.target_type, item.target_id
+            recommendation_media_type, recommendation_media_id = (
+                _recommendation_media_identity(item.target_type, item.target_id)
             )
             resolved_artwork = await media_asset_artwork_resolver.resolve(
                 db,
                 context="dashboard.operations_recommendations",
-                media_type=media_type,
-                media_id=media_id,
+                media_type=recommendation_media_type,
+                media_id=recommendation_media_id,
                 provider_poster_url=item.poster_url,
                 fallback_reason=f"recommendation_{item.card_key}",
             )
-            first_recommendation_poster_by_card[item.card_key] = resolved_artwork.poster_url
+            first_recommendation_poster_by_card[item.card_key] = (
+                resolved_artwork.poster_url
+            )
 
     reclaimable_movies_bytes = int(
         sum(
@@ -245,7 +271,7 @@ async def build_dashboard_response(
     if reclaimable_series_bytes == 0:
         reclaimable_series_bytes = int(series_size_total)
     recoverable_space_bytes = int(
-        (card_by_key.get("space_recovery").count if card_by_key.get("space_recovery") else 0)
+        _card_count("space_recovery")
         or (reclaimable_movies_bytes + reclaimable_series_bytes)
     )
 
@@ -253,7 +279,9 @@ async def build_dashboard_response(
     if is_admin:
         runtime_status = await service_manager.get_status()
 
-        def _service_runtime_health(service_name: str, enabled: bool) -> tuple[str, str | None]:
+        def _service_runtime_health(
+            service_name: str, enabled: bool
+        ) -> tuple[str, str | None]:
             runtime_key = service_name.lower()
             connected = runtime_status.get(runtime_key, False)
             if not enabled:
@@ -351,9 +379,9 @@ async def build_dashboard_response(
         ).scalar_one()
     )
 
-    ready_to_detach_count = int(card_by_key.get("ready_to_detach").count if card_by_key.get("ready_to_detach") else 0)
-    import_pending_count = int(card_by_key.get("import_pending").count if card_by_key.get("import_pending") else 0)
-    protected_seeding_count = int(card_by_key.get("protected_seeding").count if card_by_key.get("protected_seeding") else 0)
+    ready_to_detach_count = int(_card_count("ready_to_detach"))
+    import_pending_count = int(_card_count("import_pending"))
+    protected_seeding_count = int(_card_count("protected_seeding"))
     attention_required_count = int(
         sum(card.count for card in operations_cards if card.severity == "high")
         or failed_task_runs_7d
@@ -362,7 +390,11 @@ async def build_dashboard_response(
     top_card_opportunities: list[DashboardOpportunity] = []
     for card in sorted(
         [card for card in operations_cards if card.count > 0],
-        key=lambda row: (0 if row.severity == "high" else 1, -row.count, row.title.lower()),
+        key=lambda row: (
+            0 if row.severity == "high" else 1,
+            -row.count,
+            row.title.lower(),
+        ),
     )[:6]:
         top_poster = first_recommendation_poster_by_card.get(card.key)
         if top_poster is None:
@@ -379,7 +411,9 @@ async def build_dashboard_response(
                 title=card.title,
                 media_type="collection",
                 scope="Operations Collection",
-                reclaimable_size_bytes=(recoverable_space_bytes if card.key == "space_recovery" else 0),
+                reclaimable_size_bytes=(
+                    recoverable_space_bytes if card.key == "space_recovery" else 0
+                ),
                 poster_url=top_poster,
                 operation_key=card.key,
                 metric_count=card.count,
@@ -389,7 +423,7 @@ async def build_dashboard_response(
 
     recent_opportunities: list[DashboardOpportunity] = []
     for item in operations_recommendations[:5]:
-        media_type = "movie" if item.target_type == "movie" else "series"
+        opportunity_media_type = "movie" if item.target_type == "movie" else "series"
         rec_media_type, rec_media_id = _recommendation_media_identity(
             item.target_type, item.target_id
         )
@@ -404,7 +438,7 @@ async def build_dashboard_response(
         recent_opportunities.append(
             DashboardOpportunity(
                 title=item.title,
-                media_type=media_type,
+                media_type=opportunity_media_type,
                 scope="Recommendation",
                 reclaimable_size_bytes=int(item.estimated_recovery_bytes or 0),
                 poster_url=recent_artwork.poster_url,
@@ -423,7 +457,9 @@ async def build_dashboard_response(
                 func.coalesce(func.sum(MovieVersion.size), 0),
                 func.count(func.distinct(MovieVersion.movie_id)),
             )
-            .where(MovieVersion.library_name.is_not(None), MovieVersion.library_name != "")
+            .where(
+                MovieVersion.library_name.is_not(None), MovieVersion.library_name != ""
+            )
             .group_by(MovieVersion.library_name)
         )
     ).all()
@@ -439,41 +475,23 @@ async def build_dashboard_response(
         )
     ).all()
 
-    library_state: dict[str, dict[str, object]] = {}
+    library_state: dict[str, _LibraryStateEntry] = {}
     for library_name, size_total, title_count in movie_library_rows:
         key = str(library_name)
-        entry = library_state.setdefault(
-            key,
-            {
-                "label": key,
-                "library_size_bytes": 0,
-                "title_count": 0,
-                "reclaimable_size_bytes": 0,
-                "reclaimable_ids": set(),
-            },
-        )
-        entry["library_size_bytes"] = int(entry["library_size_bytes"]) + int(size_total or 0)
-        entry["title_count"] = int(entry["title_count"]) + int(title_count or 0)
+        entry = library_state.setdefault(key, _empty_library_entry(key))
+        entry["library_size_bytes"] += int(size_total or 0)
+        entry["title_count"] += int(title_count or 0)
 
     series_seen_by_library: dict[str, set[int]] = {}
     for library_name, series_id, series_size in series_library_rows:
         key = str(library_name)
-        entry = library_state.setdefault(
-            key,
-            {
-                "label": key,
-                "library_size_bytes": 0,
-                "title_count": 0,
-                "reclaimable_size_bytes": 0,
-                "reclaimable_ids": set(),
-            },
-        )
+        entry = library_state.setdefault(key, _empty_library_entry(key))
         seen_ids = series_seen_by_library.setdefault(key, set())
         if int(series_id) in seen_ids:
             continue
         seen_ids.add(int(series_id))
-        entry["library_size_bytes"] = int(entry["library_size_bytes"]) + int(series_size or 0)
-        entry["title_count"] = int(entry["title_count"]) + 1
+        entry["library_size_bytes"] += int(series_size or 0)
+        entry["title_count"] += 1
 
     movie_target_ids: set[int] = set()
     series_target_ids: set[int] = set()
@@ -492,9 +510,11 @@ async def build_dashboard_response(
     if reclaim_candidate_target_ids:
         candidate_targets = (
             await db.execute(
-                select(ReclaimCandidate.id, ReclaimCandidate.movie_id, ReclaimCandidate.series_id).where(
-                    ReclaimCandidate.id.in_(reclaim_candidate_target_ids)
-                )
+                select(
+                    ReclaimCandidate.id,
+                    ReclaimCandidate.movie_id,
+                    ReclaimCandidate.series_id,
+                ).where(ReclaimCandidate.id.in_(reclaim_candidate_target_ids))
             )
         ).all()
         for _candidate_id, movie_id, series_id in candidate_targets:
@@ -516,7 +536,9 @@ async def build_dashboard_response(
                 .distinct()
             )
         ).all():
-            movie_libraries_by_id.setdefault(int(movie_id), set()).add(str(library_name))
+            movie_libraries_by_id.setdefault(int(movie_id), set()).add(
+                str(library_name)
+            )
 
     series_libraries_by_id: dict[int, set[str]] = {}
     if series_target_ids:
@@ -531,7 +553,9 @@ async def build_dashboard_response(
                 .distinct()
             )
         ).all():
-            series_libraries_by_id.setdefault(int(series_id), set()).add(str(library_name))
+            series_libraries_by_id.setdefault(int(series_id), set()).add(
+                str(library_name)
+            )
 
     for item in operations_recommendations:
         if item.target_id is None or not item.target_id.isdigit():
@@ -545,32 +569,20 @@ async def build_dashboard_response(
 
         for library_name in linked_libraries:
             entry = library_state.setdefault(
-                library_name,
-                {
-                    "label": library_name,
-                    "library_size_bytes": 0,
-                    "title_count": 0,
-                    "reclaimable_size_bytes": 0,
-                    "reclaimable_ids": set(),
-                },
+                library_name, _empty_library_entry(library_name)
             )
-            entry["reclaimable_size_bytes"] = int(entry["reclaimable_size_bytes"]) + int(
-                item.estimated_recovery_bytes or 0
-            )
-            reclaimable_ids = entry["reclaimable_ids"]
-            if isinstance(reclaimable_ids, set):
-                reclaimable_ids.add(f"{item.target_type}:{target_id}")
+            entry["reclaimable_size_bytes"] += int(item.estimated_recovery_bytes or 0)
+            entry["reclaimable_ids"].add(f"{item.target_type}:{target_id}")
 
     library_buckets: list[DashboardLibraryBucket] = []
     for entry in sorted(
         library_state.values(),
         key=lambda row: (
-            -int(row.get("reclaimable_size_bytes", 0) or 0),
-            str(row.get("label", "")).lower(),
+            -row["reclaimable_size_bytes"],
+            row["label"].lower(),
         ),
     ):
-        reclaimable_ids = entry.get("reclaimable_ids", set())
-        reclaimable_count = len(reclaimable_ids) if isinstance(reclaimable_ids, set) else 0
+        reclaimable_count = len(entry["reclaimable_ids"])
         if reclaimable_count == 0:
             health = "healthy"
         elif reclaimable_count <= 3:
@@ -579,11 +591,11 @@ async def build_dashboard_response(
             health = "attention"
         library_buckets.append(
             DashboardLibraryBucket(
-                label=str(entry.get("label") or "Unknown"),
-                reclaimable_size_bytes=int(entry.get("reclaimable_size_bytes", 0) or 0),
+                label=entry["label"] or "Unknown",
+                reclaimable_size_bytes=entry["reclaimable_size_bytes"],
                 item_count=reclaimable_count,
-                library_size_bytes=int(entry.get("library_size_bytes", 0) or 0),
-                title_count=int(entry.get("title_count", 0) or 0),
+                library_size_bytes=entry["library_size_bytes"],
+                title_count=entry["title_count"],
                 reclaimable_count=reclaimable_count,
                 health=health,
             )
@@ -596,12 +608,14 @@ async def build_dashboard_response(
             tv_seasons=sum(
                 1
                 for item in operations_recommendations
-                if item.target_type == "season" and item.card_key in {"ready_to_detach", "import_pending"}
+                if item.target_type == "season"
+                and item.card_key in {"ready_to_detach", "import_pending"}
             ),
             episodes=sum(
                 1
                 for item in operations_recommendations
-                if item.target_type == "episode" and item.card_key in {"ready_to_detach", "import_pending"}
+                if item.target_type == "episode"
+                and item.card_key in {"ready_to_detach", "import_pending"}
             ),
         ),
         blocked=DashboardBlockedSummary(

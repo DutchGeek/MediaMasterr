@@ -1,5 +1,5 @@
 const BASE_URL = (
-  ((import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL || "/")
+  (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL || "/"
 ).replace(/\/?$/, "/");
 
 const withBase = (path: string): string => {
