@@ -30,7 +30,8 @@ export const PAGE_ACCESS_OPTIONS: PageAccessOption[] = [
     value: PageAccess.Identity,
     label: "Identity",
     path: "/identity",
-    description: "Manage identity matching, canonical source selection, and sync.",
+    description:
+      "Manage identity matching, canonical source selection, and sync.",
   },
   {
     value: PageAccess.Operations,

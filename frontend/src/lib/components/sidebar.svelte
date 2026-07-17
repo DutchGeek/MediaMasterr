@@ -85,7 +85,8 @@
       icon: Fingerprint,
       adminOnly: false,
       page: PageAccess.Identity,
-      tooltip: "Identity browser and comparison studio for canonical metadata control",
+      tooltip:
+        "Identity browser and comparison studio for canonical metadata control",
     },
     {
       path: "/qbittorrent",

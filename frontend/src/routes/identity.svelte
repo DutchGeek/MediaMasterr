@@ -262,7 +262,9 @@
     </div>
 
     {#if syncPreview}
-      <div class="mt-4 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+      <div
+        class="mt-4 rounded-lg border border-border/70 bg-muted/30 p-3 text-sm"
+      >
         <div>
           Targets: {syncPreview.target_count} | Potential Changes:
           {syncPreview.changed_count}
@@ -357,15 +359,21 @@
       </div>
 
       {#if loading}
-        <div class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
+        <div
+          class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground"
+        >
           Loading identity rows...
         </div>
       {:else if error}
-        <div class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+        <div
+          class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+        >
           {error}
         </div>
       {:else if items.length === 0}
-        <div class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
+        <div
+          class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground"
+        >
           No identity rows found for current filters.
         </div>
       {:else}
@@ -397,7 +405,8 @@
                 >
                   <div class="truncate font-medium">{item.title}</div>
                   <div class="text-xs text-muted-foreground">
-                    {mediaLabel(item.media_type)} {item.year ?? ""}
+                    {mediaLabel(item.media_type)}
+                    {item.year ?? ""}
                   </div>
                   <div class="mt-2 flex flex-wrap gap-2 text-xs">
                     <span class="rounded bg-muted px-2 py-0.5">
@@ -409,7 +418,9 @@
                     <span class="rounded bg-muted px-2 py-0.5">
                       Confidence: {item.provider_confidence}%
                     </span>
-                    <span class={`rounded px-2 py-0.5 ${conflictClass(item.conflict_level)}`}>
+                    <span
+                      class={`rounded px-2 py-0.5 ${conflictClass(item.conflict_level)}`}
+                    >
                       Conflict: {item.conflict_level}
                     </span>
                   </div>
@@ -460,11 +471,15 @@
       </div>
 
       {#if studioLoading}
-        <div class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
+        <div
+          class="rounded-lg border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground"
+        >
           Loading studio...
         </div>
       {:else if studioError}
-        <div class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+        <div
+          class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+        >
           {studioError}
         </div>
       {:else if studio}
@@ -507,7 +522,10 @@
                   <div>
                     <strong>{provider.provider}</strong>
                     {#if provider.is_canonical}
-                      <span class="ml-2 rounded bg-primary/20 px-2 py-0.5 text-xs">canonical</span>
+                      <span
+                        class="ml-2 rounded bg-primary/20 px-2 py-0.5 text-xs"
+                        >canonical</span
+                      >
                     {/if}
                   </div>
                   <button
@@ -522,7 +540,9 @@
                   Item: {provider.provider_item_id} | Confidence: {provider.confidence}%
                 </div>
                 {#if provider.path_tail}
-                  <div class="text-xs text-muted-foreground">Path: {provider.path_tail}</div>
+                  <div class="text-xs text-muted-foreground">
+                    Path: {provider.path_tail}
+                  </div>
                 {/if}
               </div>
             {/each}
@@ -531,11 +551,7 @@
 
         {#if activeTab === "artwork" || activeTab === "metadata" || activeTab === "external_ids"}
           <div class="space-y-2 text-sm">
-            {#each activeTab === "artwork"
-              ? studio.artwork
-              : activeTab === "metadata"
-                ? studio.metadata
-                : studio.external_ids as row}
+            {#each activeTab === "artwork" ? studio.artwork : activeTab === "metadata" ? studio.metadata : studio.external_ids as row}
               <div class="rounded-md border border-border/70 p-2">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
                 {#each row.values as value}
@@ -569,7 +585,9 @@
               <button
                 class="rounded-md bg-primary px-3 py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50"
                 onclick={saveOverride}
-                disabled={busy || !overrideField.trim() || !overrideValue.trim()}
+                disabled={busy ||
+                  !overrideField.trim() ||
+                  !overrideValue.trim()}
               >
                 Save Override
               </button>
@@ -597,12 +615,16 @@
               <div class="rounded-md border border-border/70 p-2">
                 <div class="font-medium">{row.summary}</div>
                 <div class="text-xs text-muted-foreground">
-                  {row.action} | {row.result} | {new Date(row.created_at).toLocaleString()}
+                  {row.action} | {row.result} | {new Date(
+                    row.created_at,
+                  ).toLocaleString()}
                 </div>
               </div>
             {/each}
             {#if studio.history.length === 0}
-              <div class="text-sm text-muted-foreground">No identity actions yet.</div>
+              <div class="text-sm text-muted-foreground">
+                No identity actions yet.
+              </div>
             {/if}
           </div>
         {/if}
@@ -618,7 +640,9 @@
           <div class="rounded-md border border-border/70 p-2">
             <div class="font-medium">{row.summary}</div>
             <div class="text-xs text-muted-foreground">
-              {row.action} | {row.result} | {new Date(row.created_at).toLocaleString()}
+              {row.action} | {row.result} | {new Date(
+                row.created_at,
+              ).toLocaleString()}
             </div>
           </div>
         {/each}
