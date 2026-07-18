@@ -36,7 +36,14 @@ class MediaAssetArtworkResolver:
     @staticmethod
     def _normalize_status(value: str | None, *, poster: str) -> str:
         normalized = (value or "").strip().upper()
-        allowed = {"VALID", "MISSING", "PLACEHOLDER", "INVALID", "STALE", "NEEDS_REFRESH"}
+        allowed = {
+            "VALID",
+            "MISSING",
+            "PLACEHOLDER",
+            "INVALID",
+            "STALE",
+            "NEEDS_REFRESH",
+        }
         if normalized in allowed:
             return normalized
         if is_placeholder_artwork_url(poster):

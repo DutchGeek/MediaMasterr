@@ -37,7 +37,9 @@ def build_payload(args: argparse.Namespace) -> dict[str, str | None]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate MediaMasterr build_info.json")
+    parser = argparse.ArgumentParser(
+        description="Generate MediaMasterr build_info.json"
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--application-version", required=True)
     parser.add_argument("--backend-version", required=True)

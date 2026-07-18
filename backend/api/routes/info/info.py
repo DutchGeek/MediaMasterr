@@ -9,8 +9,8 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.__version__ import __version__
-from backend.core.build_info import get_build_info
 from backend.core.auth import get_current_user, has_permission
+from backend.core.build_info import get_build_info
 from backend.database import get_db
 from backend.database.models import (
     AppUpdateState,

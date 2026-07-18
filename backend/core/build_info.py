@@ -4,13 +4,13 @@ import json
 import os
 import socket
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from backend.core.__version__ import __version__
 
-STARTUP_TIME = datetime.now(timezone.utc).isoformat(timespec="seconds")
+STARTUP_TIME = datetime.now(UTC).isoformat(timespec="seconds")
 
 _build_info_cache: dict[str, str | None] | None = None
 

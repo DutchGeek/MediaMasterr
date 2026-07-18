@@ -34,8 +34,8 @@ from backend.models.mie import (
     IdentityWorkspaceItem,
     IdentityWorkspaceResponse,
 )
-from backend.services.query_engine import QueryEngineSpec, apply_spec
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
+from backend.services.query_engine import QueryEngineSpec, apply_spec
 
 
 class IdentityCenterService:
@@ -573,18 +573,19 @@ class IdentityCenterService:
             reverse=True,
         ):
             match_signals = match_row.signals or {}
-            preview_candidate = cast(str | None, match_signals.get("poster_url")) or cast(
-                str | None, match_signals.get("artwork_poster")
-            )
-            preview = self._normalize_artwork_value(
-                field_key="poster",
-                value=preview_candidate,
-                media_type=media_type,
-                media_id=media_id,
-            ) or canonical_poster
+            preview_candidate = cast(
+                str | None, match_signals.get("poster_url")
+            ) or cast(str | None, match_signals.get("artwork_poster"))
             preview = (
-                preview if isinstance(preview, str) and preview.strip() else None
+                self._normalize_artwork_value(
+                    field_key="poster",
+                    value=preview_candidate,
+                    media_type=media_type,
+                    media_id=media_id,
+                )
+                or canonical_poster
             )
+            preview = preview if isinstance(preview, str) and preview.strip() else None
             provider_matches.append(
                 IdentityProviderMatch(
                     provider=str(match_row.source_service),
