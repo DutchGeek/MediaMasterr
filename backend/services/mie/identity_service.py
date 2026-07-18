@@ -20,12 +20,17 @@ from backend.database.models import (
 from backend.enums import MediaType
 from backend.models.mie import (
     IdentityActionResponse,
+    IdentityArtworkCard,
+    IdentityArtworkProfileEntry,
+    IdentityArtworkProviderOption,
+    IdentityArtworkProviderSelectionRequest,
     IdentityCanonicalSelectionRequest,
     IdentityComparisonField,
     IdentityFieldValue,
     IdentityHistoryEntry,
     IdentityOverrideEntry,
     IdentityOverrideUpsertRequest,
+    IdentityProviderComparisonRow,
     IdentityProviderMatch,
     IdentityStudioResponse,
     IdentitySyncHistoryResponse,
@@ -41,8 +46,63 @@ from backend.services.query_engine import QueryEngineSpec, apply_spec
 class IdentityCenterService:
     """Read/write service for the Identity Center workspace."""
 
+    OVERRIDE_FIELD_OPTIONS: tuple[str, ...] = (
+        "title",
+        "original_title",
+        "sort_title",
+        "year",
+        "runtime",
+        "overview",
+        "tagline",
+        "language",
+        "tmdb_id",
+        "imdb_id",
+        "tvdb_id",
+        "canonical_provider",
+        "metadata_profile",
+        "artwork_profile",
+        "poster_provider",
+        "backdrop_provider",
+    )
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _normalize_provider_key(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    @staticmethod
+    def _artwork_state_for(
+        *,
+        has_providers: bool,
+        artwork_status: str,
+    ) -> Literal["present", "missing", "pending", "error"]:
+        if has_providers:
+            return "present"
+        status_key = artwork_status.strip().lower()
+        if status_key in {"needs_refresh", "stale"}:
+            return "pending"
+        if status_key in {"invalid"}:
+            return "error"
+        return "missing"
+
+    @staticmethod
+    def _provider_difference_text(
+        *,
+        canonical_value: str | None,
+        provider_value: str | None,
+        field_label: str,
+    ) -> str:
+        if provider_value is None:
+            return f"{field_label} unavailable"
+        if canonical_value is None:
+            return f"{field_label} provider-specific"
+        if provider_value == canonical_value:
+            return f"{field_label} identical"
+        if field_label.lower() in {"poster", "backdrop", "logo", "banner"}:
+            return "Artwork differs"
+        return f"{field_label} differs"
 
     @staticmethod
     def _preferred_provider(media_type: MediaType) -> str:
@@ -69,6 +129,10 @@ class IdentityCenterService:
         if action == "identity_override_upsert":
             field = metadata.get("field") or "field"
             return f"Override updated for {field}."
+        if action == "identity_set_artwork_provider":
+            field = metadata.get("field") or "artwork"
+            provider = metadata.get("provider") or "unknown"
+            return f"{str(field).title()} provider set to {provider}."
         if action == "identity_sync_run":
             return "Identity sync run requested."
         return "Identity action executed."
@@ -137,6 +201,36 @@ class IdentityCenterService:
             elif target_type == MediaType.SERIES.value:
                 keys.add((MediaType.SERIES, int(target_id)))
         return keys
+
+    async def _artwork_provider_preferences(
+        self,
+        *,
+        media_type: MediaType,
+        media_id: int,
+    ) -> dict[str, str]:
+        rows = (
+            (
+                await self.db.execute(
+                    select(OperationHistory)
+                    .where(
+                        OperationHistory.action == "identity_set_artwork_provider",
+                        OperationHistory.target_type == media_type.value,
+                        OperationHistory.target_id == str(media_id),
+                    )
+                    .order_by(OperationHistory.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        selected: dict[str, str] = {}
+        for row in rows:
+            metadata_json = row.metadata_json or {}
+            field = metadata_json.get("field")
+            provider = metadata_json.get("provider")
+            if isinstance(field, str) and isinstance(provider, str):
+                selected[field] = provider
+        return selected
 
     async def _filtered_media_ids(
         self,
@@ -641,10 +735,17 @@ class IdentityCenterService:
                 )
             )
 
+        artwork_preferences = await self._artwork_provider_preferences(
+            media_type=media_type,
+            media_id=media_id,
+        )
+
         metadata_values = {
             "title": target.title,
             "original_title": getattr(target, "original_title", None),
+            "sort_title": getattr(target, "sort_title", None),
             "year": str(getattr(target, "year", "") or "") or None,
+            "runtime": (str(getattr(target, "runtime", "") or "") or None),
             "language": getattr(target, "original_language", None),
             "status": getattr(target, "status", None),
             "tagline": getattr(target, "tagline", None),
@@ -687,37 +788,61 @@ class IdentityCenterService:
 
         metadata: list[IdentityComparisonField] = []
         for key, value in metadata_values.items():
+            field_values: list[IdentityFieldValue] = [
+                IdentityFieldValue(
+                    provider="current",
+                    value=value,
+                    confidence=100,
+                    is_canonical=True,
+                )
+            ]
+            for provider in provider_matches:
+                candidate = provider.signals.get(key)
+                if candidate is None:
+                    candidate = provider.signals.get(f"metadata_{key}")
+                field_values.append(
+                    IdentityFieldValue(
+                        provider=provider.provider,
+                        value=(str(candidate) if candidate is not None else None),
+                        confidence=provider.confidence,
+                        is_canonical=provider.provider == canonical_provider,
+                    )
+                )
             metadata.append(
                 IdentityComparisonField(
                     key=key,
                     label=key.replace("_", " ").title(),
-                    values=[
-                        IdentityFieldValue(
-                            provider="canonical",
-                            value=value,
-                            confidence=100,
-                            is_canonical=True,
-                        )
-                    ],
+                    values=field_values,
                 )
             )
 
         external_ids: list[IdentityComparisonField] = []
         for key, value in external_values.items():
-            if value is None:
-                continue
+            external_field_values: list[IdentityFieldValue] = [
+                IdentityFieldValue(
+                    provider="current",
+                    value=value,
+                    confidence=100,
+                    is_canonical=True,
+                )
+            ]
+            for provider in provider_matches:
+                candidate = provider.signals.get(key)
+                if candidate is None:
+                    candidate = provider.signals.get(f"identifier_{key}")
+                external_field_values.append(
+                    IdentityFieldValue(
+                        provider=provider.provider,
+                        value=(str(candidate) if candidate is not None else None),
+                        confidence=provider.confidence,
+                        is_canonical=provider.provider == canonical_provider,
+                    )
+                )
             external_ids.append(
                 IdentityComparisonField(
                     key=key,
                     label=key.replace("_", " ").upper(),
-                    values=[
-                        IdentityFieldValue(
-                            provider="canonical",
-                            value=value,
-                            confidence=100,
-                            is_canonical=True,
-                        )
-                    ],
+                    values=external_field_values,
                 )
             )
 
@@ -729,16 +854,20 @@ class IdentityCenterService:
         ]
 
         artwork: list[IdentityComparisonField] = []
+        artwork_cards: list[IdentityArtworkCard] = []
+        canonical_artwork_profile: list[IdentityArtworkProfileEntry] = []
         for field_key, field_label, canonical_value in artwork_fields:
-            values: list[IdentityFieldValue] = []
-            values.append(
+            values: list[IdentityFieldValue] = [
                 IdentityFieldValue(
-                    provider="canonical",
+                    provider="current",
                     value=canonical_value,
                     confidence=int(asset.artwork_confidence * 100) if asset else 100,
                     is_canonical=True,
                 )
-            )
+            ]
+
+            provider_options: list[IdentityArtworkProviderOption] = []
+            optional_type = field_key in {"logo", "banner"}
             for provider in provider_matches:
                 candidate = provider.signals.get(f"{field_key}_url")
                 if candidate is None:
@@ -758,14 +887,168 @@ class IdentityCenterService:
                         provider=provider.provider,
                         value=normalized_candidate,
                         confidence=provider.confidence,
-                        is_canonical=provider.is_canonical,
+                        is_canonical=(
+                            provider.provider
+                            == artwork_preferences.get(field_key, canonical_provider)
+                        ),
                     )
                 )
+                width = provider.signals.get(f"{field_key}_width")
+                height = provider.signals.get(f"{field_key}_height")
+                resolution = (
+                    f"{width}x{height}"
+                    if isinstance(width, (int, str)) and isinstance(height, (int, str))
+                    else None
+                )
+                provider_options.append(
+                    IdentityArtworkProviderOption(
+                        provider=provider.provider,
+                        image_url=normalized_candidate,
+                        resolution=resolution,
+                        last_updated=provider.updated_at,
+                        confidence=provider.confidence,
+                        selected=(
+                            provider.provider
+                            == artwork_preferences.get(field_key, canonical_provider)
+                        ),
+                    )
+                )
+
+            if optional_type and len(provider_options) == 0:
+                canonical_artwork_profile.append(
+                    IdentityArtworkProfileEntry(
+                        key=field_key,
+                        label=field_label,
+                        provider=None,
+                    )
+                )
+                continue
+
+            selected_provider: str | None = artwork_preferences.get(
+                field_key,
+                canonical_provider,
+            )
+            if selected_provider and not any(
+                option.provider == selected_provider for option in provider_options
+            ):
+                selected_provider = None
+
+            shared_across = False
+            if len(provider_options) > 1:
+                shared_across = (
+                    len({option.image_url for option in provider_options}) == 1
+                )
+
+            for option in provider_options:
+                option.selected = option.provider == selected_provider
+
+            artwork_state = self._artwork_state_for(
+                has_providers=len(provider_options) > 0,
+                artwork_status=(asset.artwork_status if asset else "unknown")
+                or "unknown",
+            )
+            missing_message = (
+                f"No {field_label} Available"
+                if artwork_state == "missing"
+                else (
+                    f"{field_label} sync pending"
+                    if artwork_state == "pending"
+                    else f"{field_label} retrieval error"
+                )
+            )
+            artwork_cards.append(
+                IdentityArtworkCard(
+                    key=field_key,
+                    label=field_label,
+                    state=artwork_state,
+                    selected_provider=selected_provider,
+                    shared_across_providers=shared_across,
+                    providers=(
+                        provider_options[:1] if shared_across else provider_options
+                    ),
+                    message=(None if artwork_state == "present" else missing_message),
+                )
+            )
+            canonical_artwork_profile.append(
+                IdentityArtworkProfileEntry(
+                    key=field_key,
+                    label=field_label,
+                    provider=selected_provider,
+                )
+            )
             artwork.append(
                 IdentityComparisonField(
                     key=field_key,
                     label=field_label,
                     values=values,
+                )
+            )
+
+        provider_comparison: list[IdentityProviderComparisonRow] = []
+        for provider in provider_matches:
+            poster_diff = self._provider_difference_text(
+                canonical_value=canonical_poster,
+                provider_value=(
+                    cast(str | None, provider.signals.get("poster_url"))
+                    or cast(str | None, provider.signals.get("artwork_poster"))
+                ),
+                field_label="Poster",
+            )
+            backdrop_diff = self._provider_difference_text(
+                canonical_value=canonical_backdrop,
+                provider_value=(
+                    cast(str | None, provider.signals.get("backdrop_url"))
+                    or cast(str | None, provider.signals.get("artwork_backdrop"))
+                ),
+                field_label="Backdrop",
+            )
+
+            metadata_has_diff = any(
+                (value.provider == provider.provider)
+                and ((value.value or "") != (row.values[0].value or ""))
+                for row in metadata
+                for value in row.values[1:]
+            )
+            external_has_diff = any(
+                (value.provider == provider.provider)
+                and ((value.value or "") != (row.values[0].value or ""))
+                for row in external_ids
+                for value in row.values[1:]
+            )
+
+            differences = [poster_diff, backdrop_diff]
+            if metadata_has_diff:
+                differences.append("Metadata differs")
+            if external_has_diff:
+                differences.append("Identifiers differ")
+
+            provider_comparison.append(
+                IdentityProviderComparisonRow(
+                    provider=provider.provider,
+                    connection_status=provider.connection_status,
+                    matched=True,
+                    identifiers=(
+                        "IDs differ" if external_has_diff else "IDs identical"
+                    ),
+                    metadata=(
+                        "Metadata differs"
+                        if metadata_has_diff
+                        else "Metadata identical"
+                    ),
+                    artwork=(
+                        "Poster selected"
+                        if provider.provider
+                        == artwork_preferences.get("poster", canonical_provider)
+                        else "Poster differs"
+                    ),
+                    health=(
+                        "Healthy"
+                        if provider.confidence >= 90
+                        else "Review"
+                        if provider.confidence >= 75
+                        else "Attention"
+                    ),
+                    differences=differences,
                 )
             )
 
@@ -836,6 +1119,9 @@ class IdentityCenterService:
             overview=overview,
             providers=provider_matches,
             artwork=artwork,
+            artwork_cards=artwork_cards,
+            canonical_artwork_profile=canonical_artwork_profile,
+            provider_comparison=provider_comparison,
             metadata=metadata,
             external_ids=external_ids,
             overrides=overrides,
@@ -877,6 +1163,7 @@ class IdentityCenterService:
                     ],
                 )
             ],
+            override_field_options=list(self.OVERRIDE_FIELD_OPTIONS),
             generated_at=datetime.now(UTC),
         )
 
@@ -940,6 +1227,59 @@ class IdentityCenterService:
             message=f"Canonical provider set to {payload.provider}.",
         )
 
+    async def set_artwork_provider(
+        self,
+        *,
+        media_type: MediaType,
+        media_id: int,
+        payload: IdentityArtworkProviderSelectionRequest,
+        user_id: int | None,
+    ) -> IdentityActionResponse:
+        await self._fetch_target(media_type, media_id)
+
+        self.db.add(
+            OperationHistory(
+                action="identity_set_artwork_provider",
+                target_type=media_type.value,
+                target_id=str(media_id),
+                result="completed",
+                safety_level="safe",
+                metadata_json={
+                    "field": payload.artwork_field,
+                    "provider": payload.provider,
+                    "reason": payload.reason,
+                },
+                created_by_user_id=user_id,
+            )
+        )
+        # Queue a sync event immediately so workflow changes are visible in sync history.
+        self.db.add(
+            OperationHistory(
+                action="identity_sync_run",
+                target_type="identity",
+                target_id="all",
+                result="queued",
+                safety_level="safe",
+                metadata_json={
+                    "trigger": "artwork_provider_change",
+                    "field": payload.artwork_field,
+                    "provider": payload.provider,
+                    "requested_at": datetime.now(UTC).isoformat(),
+                },
+                created_by_user_id=user_id,
+            )
+        )
+        await self.db.commit()
+
+        return IdentityActionResponse(
+            accepted=True,
+            action="set_artwork_provider",
+            message=(
+                f"{payload.artwork_field.title()} provider set to "
+                f"{payload.provider}. Sync queued."
+            ),
+        )
+
     async def upsert_override(
         self,
         *,
@@ -949,6 +1289,16 @@ class IdentityCenterService:
         user_id: int | None,
     ) -> IdentityActionResponse:
         await self._fetch_target(media_type, media_id)
+
+        if payload.field not in self.OVERRIDE_FIELD_OPTIONS:
+            return IdentityActionResponse(
+                accepted=False,
+                action="upsert_override",
+                message=(
+                    f"Invalid override field '{payload.field}'."
+                    " Select a supported override target."
+                ),
+            )
 
         self.db.add(
             OperationHistory(

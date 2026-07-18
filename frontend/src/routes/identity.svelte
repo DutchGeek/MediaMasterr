@@ -54,8 +54,6 @@
   let posterSize = $state(160);
   let displayMode = $state<"grid" | "list" | "table">("grid");
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
-  let selectedArtworkByField = $state<Record<string, string>>({});
-  let selectedExtendedArtworkByField = $state<Record<string, string>>({});
   let artworkDimensions = $state<Record<string, string>>({});
 
   let workspace = $state<IdentityWorkspaceResponse | null>(null);
@@ -124,15 +122,6 @@
     "anidb",
     "myanimelist",
     "tvmaze",
-  ];
-
-  const extendedArtworkTypes = [
-    { key: "collection_poster", label: "Collection Poster" },
-    { key: "collection_backdrop", label: "Collection Backdrop" },
-    { key: "season_posters", label: "Season Posters" },
-    { key: "season_banners", label: "Season Banners" },
-    { key: "episode_artwork", label: "Episode Artwork" },
-    { key: "anime_artwork", label: "Anime Artwork" },
   ];
 
   const sortByOptions = [
@@ -289,33 +278,6 @@
     return `${"█".repeat(filled)}${"░".repeat(10 - filled)} ${clamped}%`;
   };
 
-  const artworkDifferenceNote = (
-    row: IdentityStudioResponse["artwork"][number],
-    value: IdentityStudioResponse["artwork"][number]["values"][number],
-  ): string => {
-    if (value.is_canonical) return "Canonical artwork";
-    const canonicalRaw =
-      row.values.find((candidate) => candidate.is_canonical)?.value ?? null;
-    const canonicalUrl = resolveRenderableImageUrl(canonicalRaw);
-    const providerUrl = resolveRenderableImageUrl(value.value);
-    if (!providerUrl) return "Unavailable from provider";
-    if (!canonicalUrl) return "Provider-specific artwork";
-    if (providerUrl !== canonicalUrl) {
-      return value.confidence >= 75
-        ? "Different provider artwork"
-        : "Artwork differs from Canonical - review recommended";
-    }
-    return "Matches canonical artwork";
-  };
-
-  const missingArtworkLabel = (
-    value: IdentityStudioResponse["artwork"][number]["values"][number],
-  ): string => {
-    if (value.is_canonical) return "Missing Artwork";
-    if (value.confidence <= 0) return "Not Yet Synced";
-    return "Unavailable from Provider";
-  };
-
   const isValidStudioTab = (value: string): value is StudioTab =>
     tabOrder.some((tab) => tab.key === value);
 
@@ -466,52 +428,10 @@
     });
   });
 
-  const providerUpdatedAtLabel = (provider: string): string => {
-    const match = trustedProviders.find(
-      (candidate) => candidate.provider === provider,
-    );
-    return match?.updated_at
-      ? new Date(match.updated_at).toLocaleString()
-      : "Unknown";
-  };
-
   const confidenceStatus = (confidence: number): string => {
     if (confidence >= 90) return "Healthy";
     if (confidence >= 75) return "Review";
     return "Attention";
-  };
-
-  const providerSignalPreview = (
-    provider: IdentityStudioResponse["providers"][number],
-    field: "poster" | "backdrop" | "logo",
-  ): string | null => {
-    const direct = provider.signals?.[`${field}_url`];
-    if (typeof direct === "string" && direct.trim()) return direct;
-    const alt = provider.signals?.[`artwork_${field}`];
-    if (typeof alt === "string" && alt.trim()) return alt;
-    return field === "poster" ? provider.artwork_preview_url : null;
-  };
-
-  const providerExternalIdEntries = (
-    provider: IdentityStudioResponse["providers"][number],
-  ): Array<{ key: string; value: string }> => {
-    const entries = Object.entries(provider.signals ?? {})
-      .filter(
-        ([key, value]) =>
-          /(_id|imdb|tmdb|tvdb|trakt|anidb|tvmaze)/i.test(key) && value,
-      )
-      .slice(0, 8)
-      .map(([key, value]) => ({ key, value: String(value) }));
-    return entries;
-  };
-
-  const metadataDiffers = (
-    row: IdentityStudioResponse["metadata"][number],
-    provider: string,
-  ): boolean => {
-    const providerValue =
-      row.values.find((value) => value.provider === provider)?.value ?? null;
-    return (providerValue ?? "") !== (canonicalValue(row) ?? "");
   };
 
   const onArtworkImageLoad = (key: string, provider: string, event: Event) => {
@@ -727,6 +647,30 @@
     }
   }
 
+  async function setArtworkProvider(artworkField: string, provider: string) {
+    if (!selectedItem) return;
+    busy = true;
+    syncMessage = "";
+    try {
+      const response = await post_api<IdentityActionResponse>(
+        `/api/mie/identity/${selectedItem.media_type}/${selectedItem.media_id}/artwork-provider`,
+        {
+          artwork_field: artworkField,
+          provider,
+          reason: "Selected in Identity Studio artwork comparison",
+        },
+      );
+      syncMessage = response.message;
+      await loadStudio(selectedItem);
+      await loadWorkspace();
+      await loadSyncHistory();
+    } catch (e: any) {
+      syncMessage = e?.message ?? "Failed to set artwork provider";
+    } finally {
+      busy = false;
+    }
+  }
+
   async function saveOverride() {
     if (!selectedItem || !overrideField.trim() || !overrideValue.trim()) return;
     busy = true;
@@ -774,40 +718,6 @@
     } finally {
       busy = false;
     }
-  }
-
-  async function useProviderPreset(
-    provider: string,
-    mode: "identity" | "artwork" | "metadata" | "everything",
-  ) {
-    if (!selectedItem) return;
-    if (mode === "identity") {
-      await setCanonical(provider);
-      return;
-    }
-    if (mode === "artwork") {
-      await upsertOverride(
-        "artwork_profile",
-        provider,
-        `Artwork profile from ${provider}`,
-      );
-      return;
-    }
-    if (mode === "metadata") {
-      await upsertOverride(
-        "metadata_profile",
-        provider,
-        `Metadata profile from ${provider}`,
-      );
-      return;
-    }
-
-    await setCanonical(provider);
-    await upsertOverride(
-      "sync_provider",
-      provider,
-      `Unified profile from ${provider}`,
-    );
   }
 
   function toggleSelection(item: IdentityWorkspaceItem) {
@@ -1609,321 +1519,211 @@
         {/if}
 
         {#if activeTab === "providers"}
-          <div class="grid gap-3 lg:grid-cols-2 text-sm">
-            {#each trustedProviders as provider}
-              <article
-                class="rounded-xl border border-border/70 bg-background/70 p-3"
+          <div class="space-y-3 text-sm">
+            {#if studio.provider_comparison.length === 0}
+              <div
+                class="rounded-xl border border-border/70 bg-muted/20 p-4 text-muted-foreground"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <strong class="text-base">{provider.provider}</strong>
-                    {#if provider.is_canonical}
-                      <span
-                        class="ml-2 rounded bg-primary/20 px-2 py-0.5 text-xs"
-                        >canonical</span
-                      >
-                    {/if}
-                    <div class="mt-1 text-xs text-muted-foreground">
-                      Last Updated: {provider.updated_at
-                        ? new Date(provider.updated_at).toLocaleString()
-                        : "Unknown"}
+                No provider matches available for comparison.
+              </div>
+            {:else}
+              {#each studio.provider_comparison as row}
+                <article
+                  class="rounded-xl border border-border/70 bg-background/70 p-3"
+                >
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div class="text-base font-semibold text-foreground">
+                      {row.provider}
                     </div>
-                    <div class="mt-1 text-xs text-muted-foreground">
-                      Confidence {provider.confidence}% • IDs {provider.external_ids_count}
-                      • Collections {provider.collection_count}
+                    <div class="text-xs text-muted-foreground">
+                      {row.connection_status}
                     </div>
                   </div>
-
-                  {#if providerSignalPreview(provider, "poster")}
-                    <img
-                      src={providerSignalPreview(provider, "poster") ??
-                        undefined}
-                      alt={`${provider.provider} poster`}
-                      class="h-24 w-16 rounded object-cover"
-                    />
+                  <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div
+                      class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
+                    >
+                      <div class="text-muted-foreground">Matched</div>
+                      <div class="font-medium text-foreground">
+                        {row.matched ? "Yes" : "No"}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
+                    >
+                      <div class="text-muted-foreground">Identifiers</div>
+                      <div class="font-medium text-foreground">
+                        {row.identifiers}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
+                    >
+                      <div class="text-muted-foreground">Metadata</div>
+                      <div class="font-medium text-foreground">
+                        {row.metadata}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
+                    >
+                      <div class="text-muted-foreground">Artwork</div>
+                      <div class="font-medium text-foreground">
+                        {row.artwork}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
+                    >
+                      <div class="text-muted-foreground">Health</div>
+                      <div class="font-medium text-foreground">
+                        {row.health}
+                      </div>
+                    </div>
+                  </div>
+                  {#if row.differences.length > 0}
+                    <div
+                      class="mt-2 rounded-md border border-border/60 bg-background/80 p-2 text-xs"
+                    >
+                      <div class="font-medium text-foreground">Differences</div>
+                      <ul class="mt-1 list-disc pl-4 text-muted-foreground">
+                        {#each row.differences as diff}
+                          <li>{diff}</li>
+                        {/each}
+                      </ul>
+                    </div>
                   {/if}
-                </div>
-
-                <div class="mt-3 grid gap-2 sm:grid-cols-3">
-                  <div
-                    class="rounded-md border border-border/60 bg-muted/10 p-2"
-                  >
-                    <div
-                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
-                    >
-                      Poster
-                    </div>
-                    {#if providerSignalPreview(provider, "poster")}
-                      <img
-                        src={providerSignalPreview(provider, "poster") ??
-                          undefined}
-                        alt={`${provider.provider} poster preview`}
-                        class="mt-1 h-20 w-full rounded object-cover"
-                      />
-                    {:else}
-                      <div
-                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
-                      >
-                        No poster
-                      </div>
-                    {/if}
-                  </div>
-                  <div
-                    class="rounded-md border border-border/60 bg-muted/10 p-2"
-                  >
-                    <div
-                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
-                    >
-                      Backdrop
-                    </div>
-                    {#if providerSignalPreview(provider, "backdrop")}
-                      <img
-                        src={providerSignalPreview(provider, "backdrop") ??
-                          undefined}
-                        alt={`${provider.provider} backdrop preview`}
-                        class="mt-1 h-20 w-full rounded object-cover"
-                      />
-                    {:else}
-                      <div
-                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
-                      >
-                        No backdrop
-                      </div>
-                    {/if}
-                  </div>
-                  <div
-                    class="rounded-md border border-border/60 bg-muted/10 p-2"
-                  >
-                    <div
-                      class="text-[11px] uppercase tracking-wide text-muted-foreground"
-                    >
-                      Logo
-                    </div>
-                    {#if providerSignalPreview(provider, "logo")}
-                      <img
-                        src={providerSignalPreview(provider, "logo") ??
-                          undefined}
-                        alt={`${provider.provider} logo preview`}
-                        class="mt-1 h-20 w-full rounded object-contain bg-black/10"
-                      />
-                    {:else}
-                      <div
-                        class="mt-1 rounded bg-secondary/30 px-2 py-4 text-center text-xs text-muted-foreground"
-                      >
-                        No logo
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-
-                <div class="mt-3 grid gap-2 md:grid-cols-2">
-                  <div
-                    class="rounded-md border border-border/60 bg-background/70 p-2 text-xs"
-                  >
-                    <div class="font-semibold text-foreground">
-                      Metadata Summary
-                    </div>
-                    {#each studio.metadata.slice(0, 5) as row}
-                      <div class="mt-1 flex items-start justify-between gap-2">
-                        <span class="text-muted-foreground">{row.label}</span>
-                        <span
-                          class={metadataDiffers(row, provider.provider)
-                            ? "text-amber-500"
-                            : "text-foreground"}
-                        >
-                          {metadataValue(row, provider.provider) ??
-                            "Not supplied"}
-                        </span>
-                      </div>
-                    {/each}
-                  </div>
-                  <div
-                    class="rounded-md border border-border/60 bg-background/70 p-2 text-xs"
-                  >
-                    <div class="font-semibold text-foreground">
-                      External IDs
-                    </div>
-                    {#if providerExternalIdEntries(provider).length > 0}
-                      {#each providerExternalIdEntries(provider) as entry}
-                        <div
-                          class="mt-1 flex items-start justify-between gap-2"
-                        >
-                          <span class="text-muted-foreground">{entry.key}</span>
-                          <span class="text-foreground break-all"
-                            >{entry.value}</span
-                          >
-                        </div>
-                      {/each}
-                    {:else}
-                      <div class="mt-1 text-muted-foreground">
-                        No provider IDs exposed.
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-
-                <div class="mt-2 text-xs text-muted-foreground">
-                  Item: {provider.provider_item_id}
-                </div>
-                {#if provider.path_tail}
-                  <div class="mt-1 text-xs text-muted-foreground break-all">
-                    Path: {provider.path_tail}
-                  </div>
-                {/if}
-
-                <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <button
-                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
-                    onclick={() =>
-                      void upsertOverride(
-                        "id_profile",
-                        provider.provider,
-                        `External ID profile from ${provider.provider}`,
-                      )}
-                    disabled={busy}
-                  >
-                    Use IDs
-                  </button>
-                  <button
-                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
-                    onclick={() =>
-                      void useProviderPreset(provider.provider, "artwork")}
-                    disabled={busy}
-                  >
-                    Use Artwork
-                  </button>
-                  <button
-                    class="rounded-md border border-border px-2 py-1 hover:bg-accent"
-                    onclick={() =>
-                      void useProviderPreset(provider.provider, "metadata")}
-                    disabled={busy}
-                  >
-                    Use Metadata
-                  </button>
-                  <button
-                    class="rounded-md bg-primary px-2 py-1 text-primary-foreground hover:opacity-90"
-                    onclick={() =>
-                      void useProviderPreset(provider.provider, "everything")}
-                    disabled={busy}
-                  >
-                    Use Everything
-                  </button>
-                </div>
-              </article>
-            {/each}
+                </article>
+              {/each}
+            {/if}
           </div>
         {/if}
 
         {#if activeTab === "artwork"}
           <div class="space-y-3 text-sm">
-            {#each studio.artwork as row}
+            {#each studio.artwork_cards as card}
               <div class="rounded-xl border border-border/70 bg-muted/10 p-3">
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-sm font-semibold text-foreground">
-                    {row.label}
+                    {card.label}
                   </h3>
-                  <span class="text-xs text-muted-foreground">
-                    Selected: {selectedArtworkByField[row.key] ?? "canonical"}
-                  </span>
+                  {#if card.state === "present"}
+                    <span class="text-xs text-muted-foreground">
+                      Selected: {card.selected_provider ?? "-"}
+                    </span>
+                  {:else}
+                    <span class="text-xs text-muted-foreground"
+                      >{card.state}</span
+                    >
+                  {/if}
                 </div>
 
-                <div class="mt-2 space-y-2">
-                  {#each row.values as value}
-                    {@const previewUrl = resolveRenderableImageUrl(value.value)}
-                    <label
-                      class={`block rounded-xl border p-2 ${
-                        value.is_canonical
-                          ? "border-primary/70 bg-primary/10"
-                          : "border-border/70 bg-background/80"
-                      }`}
+                {#if card.state !== "present"}
+                  <div
+                    class="mt-2 rounded-lg border border-border/60 bg-background/80 p-3 text-xs text-muted-foreground"
+                  >
+                    {card.message ?? `No ${card.label} Available`}
+                  </div>
+                {:else}
+                  {#if card.shared_across_providers}
+                    <div
+                      class="mt-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200"
                     >
-                      <div class="flex items-center justify-between gap-2">
-                        <div class="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            name={`artwork-${row.key}`}
-                            checked={(selectedArtworkByField[row.key] ??
-                              "canonical") === value.provider}
-                            onchange={() =>
-                              (selectedArtworkByField = {
-                                ...selectedArtworkByField,
-                                [row.key]: value.provider,
-                              })}
-                          />
-                          <div
-                            class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                          >
-                            {value.provider}
-                          </div>
-                          {#if value.is_canonical}
-                            <span
-                              class="rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary"
-                            >
-                              Canonical ✓
-                            </span>
-                          {/if}
-                        </div>
-                      </div>
-
-                      <div class="mt-2 grid gap-3 lg:grid-cols-[260px_1fr]">
-                        <div>
-                          {#if previewUrl}
-                            <img
-                              src={previewUrl}
-                              alt={`${row.label} from ${value.provider}`}
-                              class="h-80 w-full rounded object-cover"
-                              onload={(event) =>
-                                onArtworkImageLoad(
-                                  row.key,
-                                  value.provider,
-                                  event,
+                      Shared Across Providers
+                    </div>
+                  {/if}
+                  <div class="mt-2 space-y-2">
+                    {#each card.providers as option}
+                      {@const previewUrl = resolveRenderableImageUrl(
+                        option.image_url,
+                      )}
+                      <label
+                        class={`block rounded-xl border p-2 ${
+                          option.selected
+                            ? "border-primary/70 bg-primary/10"
+                            : "border-border/70 bg-background/80"
+                        }`}
+                      >
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name={`artwork-${card.key}`}
+                              checked={option.selected}
+                              onchange={() =>
+                                void setArtworkProvider(
+                                  card.key,
+                                  option.provider,
                                 )}
+                              disabled={busy}
                             />
-                          {:else}
                             <div
-                              class="flex h-80 w-full items-center justify-center rounded bg-secondary/30 p-3 text-center text-xs text-muted-foreground"
+                              class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
                             >
-                              {missingArtworkLabel(value)}
+                              {option.provider}
                             </div>
-                          {/if}
+                            {#if option.selected}
+                              <span
+                                class="rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                              >
+                                Selected ✓
+                              </span>
+                            {/if}
+                          </div>
                         </div>
 
-                        <div class="grid gap-2 text-xs text-muted-foreground">
-                          <div class="font-medium text-foreground">
-                            {artworkDifferenceNote(row, value)}
-                          </div>
+                        <div class="mt-2 grid gap-3 lg:grid-cols-[300px_1fr]">
                           <div>
-                            Resolution: {artworkDimensions[
-                              `${row.key}:${value.provider}`
-                            ] ?? "Unknown"}
+                            {#if previewUrl}
+                              <img
+                                src={previewUrl}
+                                alt={`${card.label} from ${option.provider}`}
+                                class="h-96 w-full rounded object-cover"
+                                onload={(event) =>
+                                  onArtworkImageLoad(
+                                    card.key,
+                                    option.provider,
+                                    event,
+                                  )}
+                              />
+                            {/if}
                           </div>
-                          <div>Source: {value.provider}</div>
-                          <div>
-                            Last Updated: {providerUpdatedAtLabel(
-                              value.provider,
-                            )}
-                          </div>
-                          <div class="space-y-1">
+                          <div class="grid gap-2 text-xs text-muted-foreground">
+                            <div>Provider: {option.provider}</div>
                             <div>
-                              Confidence: {confidenceBlockLabel(
-                                value.confidence,
-                              )}
+                              Resolution: {option.resolution ??
+                                artworkDimensions[
+                                  `${card.key}:${option.provider}`
+                                ] ??
+                                "Unknown"}
                             </div>
-                            <div class="h-1.5 w-full rounded bg-secondary/70">
-                              <div
-                                class="h-1.5 rounded bg-primary"
-                                style={`width:${Math.max(0, Math.min(100, value.confidence))}%`}
-                              ></div>
+                            <div>
+                              Last Updated: {option.last_updated
+                                ? new Date(option.last_updated).toLocaleString()
+                                : "Unknown"}
                             </div>
-                          </div>
-                          <div>
-                            Status: {confidenceStatus(value.confidence)}
-                          </div>
-                          {#if previewUrl}
+                            <div class="space-y-1">
+                              <div>
+                                Confidence: {confidenceBlockLabel(
+                                  option.confidence,
+                                )}
+                              </div>
+                              <div class="h-1.5 w-full rounded bg-secondary/70">
+                                <div
+                                  class="h-1.5 rounded bg-primary"
+                                  style={`width:${Math.max(0, Math.min(100, option.confidence))}%`}
+                                ></div>
+                              </div>
+                            </div>
+                            <div>
+                              Status: {confidenceStatus(option.confidence)}
+                            </div>
                             <div class="flex flex-wrap gap-2">
                               <a
                                 class="rounded border border-border px-2 py-1 text-foreground hover:bg-accent"
-                                href={previewUrl}
+                                href={previewUrl ?? undefined}
                                 target="_blank"
                                 rel="noreferrer"
                               >
@@ -1933,31 +1733,22 @@
                                 class="rounded border border-border px-2 py-1 text-foreground hover:bg-accent"
                                 onclick={(event) => {
                                   event.preventDefault();
-                                  void copyToClipboard(previewUrl, "Image URL");
+                                  if (previewUrl)
+                                    void copyToClipboard(
+                                      previewUrl,
+                                      "Image URL",
+                                    );
                                 }}
                               >
                                 Copy Image URL
                               </button>
                             </div>
-                          {/if}
-                          <details
-                            class="rounded border border-border/60 bg-background/60 p-2"
-                          >
-                            <summary class="cursor-pointer text-foreground">
-                              Advanced
-                            </summary>
-                            <div class="mt-2 grid gap-1 break-all">
-                              <div>Provider: {value.provider}</div>
-                              <div>
-                                URL: {previewUrl ?? "Unavailable"}
-                              </div>
-                            </div>
-                          </details>
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                  {/each}
-                </div>
+                      </label>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/each}
 
@@ -1970,60 +1761,13 @@
               <div
                 class="mt-2 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-3"
               >
-                {#each studio.artwork as row}
+                {#each studio.canonical_artwork_profile as row}
                   <div
                     class="rounded-md border border-border/60 bg-background/70 px-2 py-1"
                   >
                     <span class="font-medium text-foreground">{row.label}</span>
                     <div class="text-muted-foreground">
-                      {selectedArtworkByField[row.key] ?? "canonical"}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-
-            <div class="rounded-xl border border-border/70 bg-card p-3">
-              <div
-                class="text-xs uppercase tracking-wide text-muted-foreground"
-              >
-                Extended Artwork Targets
-              </div>
-              <div class="mt-3 grid gap-3 md:grid-cols-2">
-                {#each extendedArtworkTypes as artworkType}
-                  <div
-                    class="rounded-lg border border-border/60 bg-background/70 p-3"
-                  >
-                    <div class="font-medium text-foreground">
-                      {artworkType.label}
-                    </div>
-                    <div class="mt-2 space-y-2">
-                      {#each trustedProviders as provider}
-                        <label
-                          class="flex items-center justify-between gap-2 rounded-md border border-border/50 px-2 py-1 text-xs"
-                        >
-                          <span class="text-foreground"
-                            >{provider.provider}</span
-                          >
-                          <span class="text-muted-foreground"
-                            >{confidenceStatus(provider.confidence)}</span
-                          >
-                          <span class="text-muted-foreground"
-                            >{providerUpdatedAtLabel(provider.provider)}</span
-                          >
-                          <input
-                            type="checkbox"
-                            checked={(selectedExtendedArtworkByField[
-                              artworkType.key
-                            ] ?? "") === provider.provider}
-                            onchange={() =>
-                              (selectedExtendedArtworkByField = {
-                                ...selectedExtendedArtworkByField,
-                                [artworkType.key]: provider.provider,
-                              })}
-                          />
-                        </label>
-                      {/each}
+                      {row.provider ?? "-"}
                     </div>
                   </div>
                 {/each}
@@ -2045,7 +1789,7 @@
                       <tr>
                         <th class="py-1 pr-2">Current</th>
                         <th class="py-1 pr-2">Provider</th>
-                        <th class="py-1">Canonical</th>
+                        <th class="py-1 pr-2">Difference</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2066,7 +1810,11 @@
                             >{provider.provider}: {providerValue ??
                               "Not supplied"}</td
                           >
-                          <td class="py-1">{canonicalValue(row) ?? "-"}</td>
+                          <td class="py-1">
+                            {providerValue !== (canonicalValue(row) ?? null)
+                              ? "Different"
+                              : "Identical"}
+                          </td>
                         </tr>
                       {/each}
                     </tbody>
@@ -2318,11 +2066,15 @@
             <div
               class="grid gap-2 rounded-xl border border-border/70 bg-muted/20 p-3 md:grid-cols-2"
             >
-              <input
+              <select
                 class="rounded-md border border-border bg-background px-3 py-2"
-                placeholder="Field (artwork_profile, metadata_profile, tmdb_id, sync_behavior, lock_state...)"
                 bind:value={overrideField}
-              />
+              >
+                <option value="">Select override field</option>
+                {#each studio.override_field_options as option}
+                  <option value={option}>{option}</option>
+                {/each}
+              </select>
               <input
                 class="rounded-md border border-border bg-background px-3 py-2"
                 placeholder="Value"

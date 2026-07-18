@@ -13,6 +13,7 @@ from backend.enums import MediaType, PageAccess
 from backend.models.dashboard import DashboardResponse
 from backend.models.mie import (
     IdentityActionResponse,
+    IdentityArtworkProviderSelectionRequest,
     IdentityCanonicalSelectionRequest,
     IdentityOverrideUpsertRequest,
     IdentityStudioResponse,
@@ -167,6 +168,25 @@ async def set_identity_canonical_provider(
     db: AsyncSession = Depends(get_db),
 ) -> IdentityActionResponse:
     return await IdentityCenterService(db).set_canonical_provider(
+        media_type=media_type,
+        media_id=media_id,
+        payload=payload,
+        user_id=current_user.id,
+    )
+
+
+@router.post(
+    "/identity/{media_type}/{media_id}/artwork-provider",
+    response_model=IdentityActionResponse,
+)
+async def set_identity_artwork_provider(
+    media_type: MediaType,
+    media_id: int,
+    payload: IdentityArtworkProviderSelectionRequest,
+    current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> IdentityActionResponse:
+    return await IdentityCenterService(db).set_artwork_provider(
         media_type=media_type,
         media_id=media_id,
         payload=payload,

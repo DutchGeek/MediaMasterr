@@ -302,6 +302,44 @@ export interface IdentityComparisonField {
   values: IdentityFieldValue[];
 }
 
+export type IdentityArtworkState = "present" | "missing" | "pending" | "error";
+
+export interface IdentityArtworkProviderOption {
+  provider: string;
+  image_url: string;
+  resolution: string | null;
+  last_updated: string | null;
+  confidence: number;
+  selected: boolean;
+}
+
+export interface IdentityArtworkCard {
+  key: string;
+  label: string;
+  state: IdentityArtworkState;
+  selected_provider: string | null;
+  shared_across_providers: boolean;
+  providers: IdentityArtworkProviderOption[];
+  message: string | null;
+}
+
+export interface IdentityArtworkProfileEntry {
+  key: string;
+  label: string;
+  provider: string | null;
+}
+
+export interface IdentityProviderComparisonRow {
+  provider: string;
+  connection_status: string;
+  matched: boolean;
+  identifiers: string;
+  metadata: string;
+  artwork: string;
+  health: string;
+  differences: string[];
+}
+
 export interface IdentityOverrideEntry {
   field: string;
   value: string;
@@ -328,12 +366,16 @@ export interface IdentityStudioResponse {
   overview: IdentityComparisonField[];
   providers: IdentityProviderMatch[];
   artwork: IdentityComparisonField[];
+  artwork_cards: IdentityArtworkCard[];
+  canonical_artwork_profile: IdentityArtworkProfileEntry[];
+  provider_comparison: IdentityProviderComparisonRow[];
   metadata: IdentityComparisonField[];
   external_ids: IdentityComparisonField[];
   overrides: IdentityOverrideEntry[];
   history: IdentityHistoryEntry[];
   synchronization: IdentityComparisonField[];
   diagnostics: IdentityComparisonField[];
+  override_field_options: string[];
   generated_at: string;
 }
 

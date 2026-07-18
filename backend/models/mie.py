@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from backend.enums import MediaType
 from backend.models.artwork import ArtworkSelection
 
-
 FilesystemAccessMode = Literal["discovery", "assisted", "automated"]
 SafetyLevel = Literal["safe", "low_risk", "medium_risk", "high_risk"]
 
@@ -234,6 +233,7 @@ IdentityStudioTab = Literal[
     "synchronization",
     "diagnostics",
 ]
+IdentityArtworkState = Literal["present", "missing", "pending", "error"]
 
 
 class IdentityWorkspaceItem(BaseModel):
@@ -293,6 +293,42 @@ class IdentityComparisonField(BaseModel):
     values: list[IdentityFieldValue] = Field(default_factory=list)
 
 
+class IdentityArtworkProviderOption(BaseModel):
+    provider: str
+    image_url: str
+    resolution: str | None = None
+    last_updated: datetime | None = None
+    confidence: int = 0
+    selected: bool = False
+
+
+class IdentityArtworkCard(BaseModel):
+    key: str
+    label: str
+    state: IdentityArtworkState = "missing"
+    selected_provider: str | None = None
+    shared_across_providers: bool = False
+    providers: list[IdentityArtworkProviderOption] = Field(default_factory=list)
+    message: str | None = None
+
+
+class IdentityArtworkProfileEntry(BaseModel):
+    key: str
+    label: str
+    provider: str | None = None
+
+
+class IdentityProviderComparisonRow(BaseModel):
+    provider: str
+    connection_status: str = "unknown"
+    matched: bool = False
+    identifiers: str
+    metadata: str
+    artwork: str
+    health: str
+    differences: list[str] = Field(default_factory=list)
+
+
 class IdentityOverrideEntry(BaseModel):
     field: str
     value: str
@@ -319,16 +355,30 @@ class IdentityStudioResponse(BaseModel):
     overview: list[IdentityComparisonField] = Field(default_factory=list)
     providers: list[IdentityProviderMatch] = Field(default_factory=list)
     artwork: list[IdentityComparisonField] = Field(default_factory=list)
+    artwork_cards: list[IdentityArtworkCard] = Field(default_factory=list)
+    canonical_artwork_profile: list[IdentityArtworkProfileEntry] = Field(
+        default_factory=list
+    )
+    provider_comparison: list[IdentityProviderComparisonRow] = Field(
+        default_factory=list
+    )
     metadata: list[IdentityComparisonField] = Field(default_factory=list)
     external_ids: list[IdentityComparisonField] = Field(default_factory=list)
     overrides: list[IdentityOverrideEntry] = Field(default_factory=list)
     history: list[IdentityHistoryEntry] = Field(default_factory=list)
     synchronization: list[IdentityComparisonField] = Field(default_factory=list)
     diagnostics: list[IdentityComparisonField] = Field(default_factory=list)
+    override_field_options: list[str] = Field(default_factory=list)
     generated_at: datetime
 
 
 class IdentityCanonicalSelectionRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class IdentityArtworkProviderSelectionRequest(BaseModel):
+    artwork_field: Literal["poster", "backdrop", "logo", "banner"]
     provider: str = Field(min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
 
