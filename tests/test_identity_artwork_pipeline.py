@@ -113,3 +113,53 @@ async def test_identity_studio_returns_normalized_artwork_urls() -> None:
     assert canonical_poster.value == "https://image.tmdb.org/t/p/w342/asset-poster.jpg"
     assert radarr_poster.value == "https://image.tmdb.org/t/p/w342/provider-poster.jpg"
     assert radarr_backdrop.value == "https://image.tmdb.org/t/p/w1280/provider-backdrop.jpg"
+
+
+@pytest.mark.anyio
+async def test_identity_workspace_confidence_falls_back_to_health_signals() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(
+            title="Confidence Fallback Movie",
+            tmdb_id=6001,
+            imdb_id="tt1234567",
+            overview="Healthy metadata overview.",
+            original_language="en",
+            poster_url="/movie-poster.jpg",
+        )
+        movie.backdrop_url = "/movie-backdrop.jpg"
+        db.add(movie)
+        await db.flush()
+        db.add(
+            MediaAsset(
+                media_type=MediaType.MOVIE,
+                movie_id=movie.id,
+                poster_url="/asset-poster.jpg",
+                backdrop_url="/asset-backdrop.jpg",
+                artwork_status="VALID",
+                artwork_source="radarr",
+                artwork_confidence=0.95,
+            )
+        )
+        await db.commit()
+
+        response = await IdentityCenterService(db).workspace(media_type=MediaType.MOVIE)
+
+    await engine.dispose()
+
+    assert response.items
+    item = response.items[0]
+    assert item.provider_count == 0
+    assert item.provider_confidence == 100
+    assert item.identifier_status == "healthy"
+    assert item.metadata_status == "healthy"
+    assert item.artwork_status == "valid"

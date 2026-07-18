@@ -108,6 +108,7 @@
 
   const providerTrustStorageKey = "identity_provider_trust_order_v1";
   const studioTabStorageKey = "identity_studio_active_tab_v1";
+  const identityPrefsStorageKey = "identity_workspace_prefs_v1";
   const defaultProviderTrustOrder = [
     "manual",
     "plex",
@@ -200,6 +201,51 @@
   const itemKey = (item: IdentityWorkspaceItem): string =>
     `${item.media_type}:${item.media_id}`;
 
+  type IdentityWorkspacePrefs = {
+    search: string;
+    mediaFilter: "all" | MediaType;
+    candidatesOnly: boolean;
+    arrFilterIds: number[];
+    decisionFilterIds: number[];
+    smartFilterIds: number[];
+    sortBy: "title" | "confidence" | "updated";
+    sortOrder: "asc" | "desc";
+    minConfidence: number | null;
+    maxConfidence: number | null;
+    canonicalProviderFilter: string;
+    syncStatusFilter: string;
+    artworkStatusFilter: string;
+    metadataStatusFilter: string;
+    identifierStatusFilter: string;
+    overrideStatusFilter: string;
+    conflictLevelFilter: string;
+    needsReviewFilter: "all" | "yes" | "no";
+    page: number;
+    perPage: number;
+    posterSize: number;
+    displayMode: "grid" | "list" | "table";
+  };
+
+  const displayedItemKeys = $derived.by(
+    () => new Set((workspace?.items ?? []).map((item) => itemKey(item))),
+  );
+
+  const displayedSelectedCount = $derived.by(() => {
+    let count = 0;
+    for (const key of selectedKeys) {
+      if (displayedItemKeys.has(key)) count += 1;
+    }
+    return count;
+  });
+
+  const displayedCount = $derived.by(() => workspace?.items.length ?? 0);
+  const allDisplayedSelected = $derived.by(
+    () => displayedCount > 0 && displayedSelectedCount === displayedCount,
+  );
+  const someDisplayedSelected = $derived.by(
+    () => displayedSelectedCount > 0 && displayedSelectedCount < displayedCount,
+  );
+
   const selectedItems = $derived.by(() => {
     const rows = workspace?.items ?? [];
     return rows.filter((row) => selectedKeys.has(itemKey(row)));
@@ -237,8 +283,148 @@
     return `/${raw}`;
   };
 
+  const confidenceBlockLabel = (confidence: number): string => {
+    const clamped = Math.max(0, Math.min(100, confidence));
+    const filled = Math.round(clamped / 10);
+    return `${"█".repeat(filled)}${"░".repeat(10 - filled)} ${clamped}%`;
+  };
+
+  const artworkDifferenceNote = (
+    row: IdentityStudioResponse["artwork"][number],
+    value: IdentityStudioResponse["artwork"][number]["values"][number],
+  ): string => {
+    if (value.is_canonical) return "Canonical artwork";
+    const canonicalRaw =
+      row.values.find((candidate) => candidate.is_canonical)?.value ?? null;
+    const canonicalUrl = resolveRenderableImageUrl(canonicalRaw);
+    const providerUrl = resolveRenderableImageUrl(value.value);
+    if (!providerUrl) return "Unavailable from provider";
+    if (!canonicalUrl) return "Provider-specific artwork";
+    if (providerUrl !== canonicalUrl) {
+      return value.confidence >= 75
+        ? "Different provider artwork"
+        : "Artwork differs from Canonical - review recommended";
+    }
+    return "Matches canonical artwork";
+  };
+
+  const missingArtworkLabel = (
+    value: IdentityStudioResponse["artwork"][number]["values"][number],
+  ): string => {
+    if (value.is_canonical) return "Missing Artwork";
+    if (value.confidence <= 0) return "Not Yet Synced";
+    return "Unavailable from Provider";
+  };
+
   const isValidStudioTab = (value: string): value is StudioTab =>
     tabOrder.some((tab) => tab.key === value);
+
+  const applySavedWorkspacePrefs = (prefs: Partial<IdentityWorkspacePrefs>) => {
+    if (typeof prefs.search === "string") search = prefs.search;
+    if (
+      prefs.mediaFilter === "all" ||
+      prefs.mediaFilter === MediaType.Movie ||
+      prefs.mediaFilter === MediaType.Series
+    ) {
+      mediaFilter = prefs.mediaFilter;
+    }
+    if (typeof prefs.candidatesOnly === "boolean") {
+      candidatesOnly = prefs.candidatesOnly;
+    }
+    if (Array.isArray(prefs.arrFilterIds)) arrFilterIds = prefs.arrFilterIds;
+    if (Array.isArray(prefs.decisionFilterIds)) {
+      decisionFilterIds = prefs.decisionFilterIds;
+    }
+    if (Array.isArray(prefs.smartFilterIds))
+      smartFilterIds = prefs.smartFilterIds;
+    if (
+      prefs.sortBy === "title" ||
+      prefs.sortBy === "confidence" ||
+      prefs.sortBy === "updated"
+    ) {
+      sortBy = prefs.sortBy;
+    }
+    if (prefs.sortOrder === "asc" || prefs.sortOrder === "desc") {
+      sortOrder = prefs.sortOrder;
+    }
+    if (
+      typeof prefs.minConfidence === "number" ||
+      prefs.minConfidence === null
+    ) {
+      minConfidence = prefs.minConfidence ?? null;
+    }
+    if (
+      typeof prefs.maxConfidence === "number" ||
+      prefs.maxConfidence === null
+    ) {
+      maxConfidence = prefs.maxConfidence ?? null;
+    }
+    if (typeof prefs.canonicalProviderFilter === "string") {
+      canonicalProviderFilter = prefs.canonicalProviderFilter;
+    }
+    if (typeof prefs.syncStatusFilter === "string") {
+      syncStatusFilter = prefs.syncStatusFilter;
+    }
+    if (typeof prefs.artworkStatusFilter === "string") {
+      artworkStatusFilter = prefs.artworkStatusFilter;
+    }
+    if (typeof prefs.metadataStatusFilter === "string") {
+      metadataStatusFilter = prefs.metadataStatusFilter;
+    }
+    if (typeof prefs.identifierStatusFilter === "string") {
+      identifierStatusFilter = prefs.identifierStatusFilter;
+    }
+    if (typeof prefs.overrideStatusFilter === "string") {
+      overrideStatusFilter = prefs.overrideStatusFilter;
+    }
+    if (typeof prefs.conflictLevelFilter === "string") {
+      conflictLevelFilter = prefs.conflictLevelFilter;
+    }
+    if (
+      prefs.needsReviewFilter === "all" ||
+      prefs.needsReviewFilter === "yes" ||
+      prefs.needsReviewFilter === "no"
+    ) {
+      needsReviewFilter = prefs.needsReviewFilter;
+    }
+    if (typeof prefs.page === "number" && prefs.page >= 1) {
+      page = Math.floor(prefs.page);
+    }
+    if (typeof prefs.perPage === "number" && prefs.perPage >= 1) {
+      perPage = Math.floor(prefs.perPage);
+    }
+    if (typeof prefs.posterSize === "number" && prefs.posterSize >= 100) {
+      posterSize = Math.floor(prefs.posterSize);
+    }
+    if (
+      prefs.displayMode === "grid" ||
+      prefs.displayMode === "list" ||
+      prefs.displayMode === "table"
+    ) {
+      displayMode = prefs.displayMode;
+    }
+  };
+
+  const toggleSelectDisplayed = () => {
+    const keys = (workspace?.items ?? []).map((item) => itemKey(item));
+    if (keys.length === 0) return;
+    const next = new Set(selectedKeys);
+    if (allDisplayedSelected) {
+      for (const key of keys) next.delete(key);
+    } else {
+      for (const key of keys) next.add(key);
+    }
+    selectedKeys = next;
+  };
+
+  const copyToClipboard = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      syncMessage = `${label} copied.`;
+    } catch {
+      syncMessage = `Unable to copy ${label.toLowerCase()}.`;
+    }
+  };
 
   const setActiveTab = (tab: StudioTab) => {
     activeTab = tab;
@@ -436,6 +622,18 @@
 
       workspace = await get_api<IdentityWorkspaceResponse>(
         `/api/mie/identity?${params.toString()}`,
+      );
+
+      if (workspace.total_pages > 0 && page > workspace.total_pages) {
+        page = workspace.total_pages;
+        await loadWorkspace();
+        return;
+      }
+
+      // Keep bulk selection scoped to rows currently displayed by filters/page.
+      const visibleKeys = new Set(workspace.items.map((row) => itemKey(row)));
+      selectedKeys = new Set(
+        [...selectedKeys].filter((key) => visibleKeys.has(key)),
       );
 
       if (selectedItem) {
@@ -720,7 +918,7 @@
 
   function handleBulkAction(_key: string) {
     const count = selectedItems.length;
-    if (_key !== "queue_background_job" && count <= 0) {
+    if (count <= 0) {
       syncMessage = "Select one or more rows before running a bulk action.";
       return;
     }
@@ -762,7 +960,7 @@
     }
 
     void runSync();
-    syncMessage = `Queued ${_key.replaceAll("_", " ")} for ${Math.max(count, 1)} item(s).`;
+    syncMessage = `Queued ${_key.replaceAll("_", " ")} for ${count} item(s).`;
   }
 
   function validateExternalInput() {
@@ -854,10 +1052,53 @@
       activeTab = savedTab;
     }
 
+    const savedWorkspacePrefs = localStorage.getItem(identityPrefsStorageKey);
+    if (savedWorkspacePrefs) {
+      try {
+        const parsedPrefs = JSON.parse(savedWorkspacePrefs);
+        if (parsedPrefs && typeof parsedPrefs === "object") {
+          applySavedWorkspacePrefs(
+            parsedPrefs as Partial<IdentityWorkspacePrefs>,
+          );
+        }
+      } catch {
+        // Ignore invalid persisted preference payloads.
+      }
+    }
+
     parseHashFilters();
     void loadFilterCatalog();
     void loadWorkspace();
     void loadSyncHistory();
+  });
+
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    const payload: IdentityWorkspacePrefs = {
+      search,
+      mediaFilter,
+      candidatesOnly,
+      arrFilterIds,
+      decisionFilterIds,
+      smartFilterIds,
+      sortBy,
+      sortOrder,
+      minConfidence,
+      maxConfidence,
+      canonicalProviderFilter,
+      syncStatusFilter,
+      artworkStatusFilter,
+      metadataStatusFilter,
+      identifierStatusFilter,
+      overrideStatusFilter,
+      conflictLevelFilter,
+      needsReviewFilter,
+      page,
+      perPage,
+      posterSize,
+      displayMode,
+    };
+    localStorage.setItem(identityPrefsStorageKey, JSON.stringify(payload));
   });
 </script>
 
@@ -912,7 +1153,7 @@
     {/if}
   </div>
 
-  <div class="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+  <div class="grid items-start gap-4 xl:grid-cols-[1.1fr_1fr]">
     <section class="space-y-3 rounded-2xl border border-border bg-card p-4">
       <WorkspaceToolbar
         searchQuery={search}
@@ -931,6 +1172,12 @@
         viewMode={displayMode}
         viewModes={["grid", "list", "table"]}
         selectedCount={selectedKeys.size}
+        {displayedCount}
+        totalCount={workspace?.total ?? 0}
+        showSelectDisplayed={true}
+        selectDisplayedChecked={allDisplayedSelected}
+        selectDisplayedIndeterminate={someDisplayedSelected}
+        onToggleSelectDisplayed={toggleSelectDisplayed}
         {bulkActions}
         onSearchInput={handleSearch}
         onSortByChange={(value) => {
@@ -1072,7 +1319,7 @@
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
         <div class="text-muted-foreground">
-          {workspace?.total ?? 0} items | Selected: {selectedKeys.size}
+          Manage filters and selection above.
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -1584,7 +1831,11 @@
                   {#each row.values as value}
                     {@const previewUrl = resolveRenderableImageUrl(value.value)}
                     <label
-                      class="block rounded-xl border border-border/70 bg-background/80 p-2"
+                      class={`block rounded-xl border p-2 ${
+                        value.is_canonical
+                          ? "border-primary/70 bg-primary/10"
+                          : "border-border/70 bg-background/80"
+                      }`}
                     >
                       <div class="flex items-center justify-between gap-2">
                         <div class="flex items-center gap-2">
@@ -1604,16 +1855,23 @@
                           >
                             {value.provider}
                           </div>
+                          {#if value.is_canonical}
+                            <span
+                              class="rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                            >
+                              Canonical ✓
+                            </span>
+                          {/if}
                         </div>
                       </div>
 
-                      <div class="mt-2 grid gap-3 lg:grid-cols-[220px_1fr]">
+                      <div class="mt-2 grid gap-3 lg:grid-cols-[260px_1fr]">
                         <div>
                           {#if previewUrl}
                             <img
                               src={previewUrl}
                               alt={`${row.label} from ${value.provider}`}
-                              class="h-72 w-full rounded object-cover"
+                              class="h-80 w-full rounded object-cover"
                               onload={(event) =>
                                 onArtworkImageLoad(
                                   row.key,
@@ -1623,14 +1881,17 @@
                             />
                           {:else}
                             <div
-                              class="flex h-72 w-full items-center justify-center rounded bg-secondary/30 p-3 text-center text-xs text-muted-foreground"
+                              class="flex h-80 w-full items-center justify-center rounded bg-secondary/30 p-3 text-center text-xs text-muted-foreground"
                             >
-                              No preview image
+                              {missingArtworkLabel(value)}
                             </div>
                           {/if}
                         </div>
 
-                        <div class="grid gap-1 text-xs text-muted-foreground">
+                        <div class="grid gap-2 text-xs text-muted-foreground">
+                          <div class="font-medium text-foreground">
+                            {artworkDifferenceNote(row, value)}
+                          </div>
                           <div>
                             Resolution: {artworkDimensions[
                               `${row.key}:${value.provider}`
@@ -1642,13 +1903,56 @@
                               value.provider,
                             )}
                           </div>
-                          <div>Confidence: {value.confidence}%</div>
+                          <div class="space-y-1">
+                            <div>
+                              Confidence: {confidenceBlockLabel(
+                                value.confidence,
+                              )}
+                            </div>
+                            <div class="h-1.5 w-full rounded bg-secondary/70">
+                              <div
+                                class="h-1.5 rounded bg-primary"
+                                style={`width:${Math.max(0, Math.min(100, value.confidence))}%`}
+                              ></div>
+                            </div>
+                          </div>
                           <div>
                             Status: {confidenceStatus(value.confidence)}
                           </div>
-                          <div class="break-all text-foreground/80">
-                            URL: {previewUrl ?? "Unavailable"}
-                          </div>
+                          {#if previewUrl}
+                            <div class="flex flex-wrap gap-2">
+                              <a
+                                class="rounded border border-border px-2 py-1 text-foreground hover:bg-accent"
+                                href={previewUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open Image
+                              </a>
+                              <button
+                                class="rounded border border-border px-2 py-1 text-foreground hover:bg-accent"
+                                onclick={(event) => {
+                                  event.preventDefault();
+                                  void copyToClipboard(previewUrl, "Image URL");
+                                }}
+                              >
+                                Copy Image URL
+                              </button>
+                            </div>
+                          {/if}
+                          <details
+                            class="rounded border border-border/60 bg-background/60 p-2"
+                          >
+                            <summary class="cursor-pointer text-foreground">
+                              Advanced
+                            </summary>
+                            <div class="mt-2 grid gap-1 break-all">
+                              <div>Provider: {value.provider}</div>
+                              <div>
+                                URL: {previewUrl ?? "Unavailable"}
+                              </div>
+                            </div>
+                          </details>
                         </div>
                       </div>
                     </label>

@@ -82,6 +82,23 @@ class IdentityCenterService:
         return "attention"
 
     @staticmethod
+    def _calculated_confidence(
+        *,
+        match_confidence: int,
+        identifier_status: str,
+        metadata_status: str,
+        artwork_status: str,
+    ) -> int:
+        """Return provider confidence with health-based fallback for match gaps."""
+        if match_confidence > 0:
+            return max(0, min(100, match_confidence))
+
+        identifier_score = 35 if identifier_status == "healthy" else 10
+        metadata_score = 35 if metadata_status == "healthy" else 20
+        artwork_score = 30 if artwork_status == "valid" else 10
+        return max(0, min(100, identifier_score + metadata_score + artwork_score))
+
+    @staticmethod
     def _normalize_artwork_value(
         *,
         field_key: str,
@@ -259,10 +276,10 @@ class IdentityCenterService:
                 matches = match_index.get((MediaType.MOVIE, movie.id), [])
                 providers = {str(row.source_service) for row in matches}
                 canonical = self._choose_canonical_provider(MediaType.MOVIE, matches)
-                max_confidence = max(
+                match_confidence = max(
                     (int(row.confidence or 0) for row in matches), default=0
                 )
-                provider_count = max(1, len(providers))
+                provider_count = len(providers)
                 movie_identifier_status = (
                     "healthy" if movie.imdb_id and movie.tmdb_id else "attention"
                 )
@@ -276,6 +293,12 @@ class IdentityCenterService:
                     if asset and asset.artwork_status
                     else "unknown"
                 )
+                movie_confidence = self._calculated_confidence(
+                    match_confidence=match_confidence,
+                    identifier_status=movie_identifier_status,
+                    metadata_status=movie_metadata_status,
+                    artwork_status=movie_artwork_status,
+                )
                 resolved_movie_artwork = await media_asset_artwork_resolver.resolve(
                     self.db,
                     context="identity_workspace",
@@ -285,10 +308,10 @@ class IdentityCenterService:
                     provider_backdrop_url=movie.backdrop_url,
                     fallback_reason="identity_workspace",
                 )
-                movie_conflict = self._conflict_level(provider_count, max_confidence)
+                movie_conflict = self._conflict_level(provider_count, movie_confidence)
                 movie_needs_review = (
                     movie_conflict in {"high", "medium"}
-                    or max_confidence < 75
+                    or movie_confidence < 75
                     or movie_identifier_status != "healthy"
                     or movie_artwork_status
                     in {"missing", "invalid", "stale", "needs_refresh"}
@@ -303,7 +326,7 @@ class IdentityCenterService:
                         backdrop_url=resolved_movie_artwork.backdrop_url,
                         canonical_provider=canonical,
                         provider_count=provider_count,
-                        provider_confidence=max_confidence,
+                        provider_confidence=movie_confidence,
                         conflict_level=movie_conflict,
                         needs_review=movie_needs_review,
                         artwork_status=movie_artwork_status,
@@ -338,10 +361,10 @@ class IdentityCenterService:
                 matches = match_index.get((MediaType.SERIES, series.id), [])
                 providers = {str(row.source_service) for row in matches}
                 canonical = self._choose_canonical_provider(MediaType.SERIES, matches)
-                max_confidence = max(
+                match_confidence = max(
                     (int(row.confidence or 0) for row in matches), default=0
                 )
-                provider_count = max(1, len(providers))
+                provider_count = len(providers)
                 series_identifier_status = (
                     "healthy"
                     if series.imdb_id and series.tmdb_id and series.tvdb_id
@@ -357,6 +380,12 @@ class IdentityCenterService:
                     if asset and asset.artwork_status
                     else "unknown"
                 )
+                series_confidence = self._calculated_confidence(
+                    match_confidence=match_confidence,
+                    identifier_status=series_identifier_status,
+                    metadata_status=series_metadata_status,
+                    artwork_status=series_artwork_status,
+                )
                 resolved_series_artwork = await media_asset_artwork_resolver.resolve(
                     self.db,
                     context="identity_workspace",
@@ -366,10 +395,13 @@ class IdentityCenterService:
                     provider_backdrop_url=series.backdrop_url,
                     fallback_reason="identity_workspace",
                 )
-                series_conflict = self._conflict_level(provider_count, max_confidence)
+                series_conflict = self._conflict_level(
+                    provider_count,
+                    series_confidence,
+                )
                 series_needs_review = (
                     series_conflict in {"high", "medium"}
-                    or max_confidence < 75
+                    or series_confidence < 75
                     or series_identifier_status != "healthy"
                     or series_artwork_status
                     in {"missing", "invalid", "stale", "needs_refresh"}
@@ -384,7 +416,7 @@ class IdentityCenterService:
                         backdrop_url=resolved_series_artwork.backdrop_url,
                         canonical_provider=canonical,
                         provider_count=provider_count,
-                        provider_confidence=max_confidence,
+                        provider_confidence=series_confidence,
                         conflict_level=series_conflict,
                         needs_review=series_needs_review,
                         artwork_status=series_artwork_status,

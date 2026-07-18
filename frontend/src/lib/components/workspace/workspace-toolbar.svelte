@@ -42,6 +42,11 @@
     viewMode = "grid",
     viewModes = ["grid", "list", "table"],
     selectedCount = 0,
+    displayedCount = 0,
+    totalCount = 0,
+    showSelectDisplayed = false,
+    selectDisplayedChecked = false,
+    selectDisplayedIndeterminate = false,
     bulkActions = [],
     onSearchInput,
     onSortByChange,
@@ -56,6 +61,7 @@
     onPosterSizeChange,
     onViewModeChange,
     onBulkAction,
+    onToggleSelectDisplayed,
     onOpenDisplayOptions,
   }: {
     searchQuery: string;
@@ -75,6 +81,11 @@
     viewMode?: string;
     viewModes?: string[];
     selectedCount?: number;
+    displayedCount?: number;
+    totalCount?: number;
+    showSelectDisplayed?: boolean;
+    selectDisplayedChecked?: boolean;
+    selectDisplayedIndeterminate?: boolean;
     bulkActions?: BulkAction[];
     onSearchInput: (value: string) => void;
     onSortByChange: (value: string) => void;
@@ -92,8 +103,16 @@
     onPosterSizeChange: (value: number) => void;
     onViewModeChange: (value: string) => void;
     onBulkAction: (key: string) => void;
+    onToggleSelectDisplayed?: () => void;
     onOpenDisplayOptions?: () => void;
   } = $props();
+
+  let selectDisplayedRef = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    if (!selectDisplayedRef) return;
+    selectDisplayedRef.indeterminate = selectDisplayedIndeterminate;
+  });
 </script>
 
 <div class="space-y-3 rounded-2xl border border-border bg-card/70 p-3 md:p-4">
@@ -417,7 +436,25 @@
   </div>
 
   <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-    <div class="text-muted-foreground">Selected: {selectedCount}</div>
+    <div class="flex items-center gap-3 text-muted-foreground">
+      {#if showSelectDisplayed}
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            bind:this={selectDisplayedRef}
+            checked={selectDisplayedChecked}
+            onchange={() => onToggleSelectDisplayed?.()}
+          />
+          <span>Select Displayed</span>
+        </label>
+        <div class="leading-tight">
+          <div>Showing {displayedCount} of {totalCount}</div>
+          <div>Selected: {selectedCount}</div>
+        </div>
+      {:else}
+        <div>Selected: {selectedCount}</div>
+      {/if}
+    </div>
     <div class="flex flex-wrap gap-2">
       {#if bulkActions.length > 0}
         {#each bulkActions as action}
@@ -427,7 +464,7 @@
             onclick={() => onBulkAction(action.key)}
             disabled={selectedCount <= 0}
           >
-            {action.label}
+            {action.label}{selectedCount > 0 ? ` (${selectedCount})` : ""}
           </button>
         {/each}
       {/if}
