@@ -470,6 +470,126 @@
     return { field: externalField, value };
   };
 
+  const fallbackOverrideFieldOptions = [
+    "title",
+    "original_title",
+    "sort_title",
+    "year",
+    "runtime",
+    "overview",
+    "tagline",
+    "language",
+    "tmdb_id",
+    "imdb_id",
+    "tvdb_id",
+    "canonical_provider",
+    "metadata_profile",
+    "artwork_profile",
+    "poster_provider",
+    "backdrop_provider",
+  ];
+
+  const providerComparisonRows = $derived.by(() => {
+    if (!studio) return [];
+    const currentStudio = studio;
+    if ((currentStudio.provider_comparison ?? []).length > 0) {
+      return currentStudio.provider_comparison;
+    }
+    return trustedProviders.map((provider) => {
+      const metadataHasDiff = (currentStudio.metadata ?? []).some((row) => {
+        const providerValue =
+          row.values.find((value) => value.provider === provider.provider)
+            ?.value ?? null;
+        return (providerValue ?? "") !== (canonicalValue(row) ?? "");
+      });
+      return {
+        provider: provider.provider,
+        connection_status: provider.connection_status,
+        matched: true,
+        identifiers:
+          provider.external_ids_count > 0 ? "IDs available" : "IDs unavailable",
+        metadata: metadataHasDiff ? "Metadata differs" : "Metadata identical",
+        artwork: provider.is_canonical ? "Poster selected" : "Poster differs",
+        health: confidenceStatus(provider.confidence),
+        differences: metadataHasDiff
+          ? ["Metadata differs"]
+          : ["Metadata identical"],
+      };
+    });
+  });
+
+  const artworkCards = $derived.by(() => {
+    if (!studio) return [];
+    if ((studio.artwork_cards ?? []).length > 0) {
+      return studio.artwork_cards;
+    }
+    return (studio.artwork ?? [])
+      .filter((row) =>
+        ["poster", "backdrop", "logo", "banner"].includes(row.key),
+      )
+      .map((row) => {
+        const options = row.values
+          .filter(
+            (value) =>
+              value.provider !== "current" &&
+              value.provider !== "canonical" &&
+              !!resolveRenderableImageUrl(value.value),
+          )
+          .map((value) => ({
+            provider: value.provider,
+            image_url: resolveRenderableImageUrl(value.value) ?? "",
+            resolution: null,
+            last_updated: null,
+            confidence: value.confidence,
+            selected: value.is_canonical,
+          }));
+        const selectedOption =
+          options.find((option) => option.selected) ?? options[0] ?? null;
+        return {
+          key: row.key,
+          label: row.label,
+          state: (options.length > 0 ? "present" : "missing") as
+            | "present"
+            | "missing"
+            | "pending"
+            | "error",
+          selected_provider: selectedOption?.provider ?? null,
+          shared_across_providers:
+            options.length > 1 &&
+            new Set(options.map((option) => option.image_url)).size === 1,
+          providers:
+            options.length > 1 &&
+            new Set(options.map((option) => option.image_url)).size === 1
+              ? [options[0]]
+              : options,
+          message: options.length > 0 ? null : `No ${row.label} Available`,
+        };
+      })
+      .filter(
+        (card) =>
+          card.key === "poster" ||
+          card.key === "backdrop" ||
+          card.providers.length > 0,
+      );
+  });
+
+  const canonicalArtworkProfileEntries = $derived.by(() => {
+    if (!studio) return [];
+    if ((studio.canonical_artwork_profile ?? []).length > 0) {
+      return studio.canonical_artwork_profile;
+    }
+    return artworkCards.map((card) => ({
+      key: card.key,
+      label: card.label,
+      provider: card.selected_provider,
+    }));
+  });
+
+  const overrideFieldOptions = $derived.by(() => {
+    const fromStudio = studio?.override_field_options ?? [];
+    return fromStudio.length > 0 ? fromStudio : fallbackOverrideFieldOptions;
+  });
+
   async function loadFilterCatalog() {
     try {
       filterCatalog =
@@ -665,7 +785,20 @@
       await loadWorkspace();
       await loadSyncHistory();
     } catch (e: any) {
-      syncMessage = e?.message ?? "Failed to set artwork provider";
+      try {
+        const fallback = await post_api<IdentityActionResponse>(
+          `/api/mie/identity/${selectedItem.media_type}/${selectedItem.media_id}/canonical`,
+          {
+            provider,
+            reason: `Fallback artwork provider selection for ${artworkField}`,
+          },
+        );
+        syncMessage = `${fallback.message} (fallback route)`;
+        await loadStudio(selectedItem);
+        await loadWorkspace();
+      } catch {
+        syncMessage = e?.message ?? "Failed to set artwork provider";
+      }
     } finally {
       busy = false;
     }
@@ -1520,14 +1653,14 @@
 
         {#if activeTab === "providers"}
           <div class="space-y-3 text-sm">
-            {#if studio.provider_comparison.length === 0}
+            {#if providerComparisonRows.length === 0}
               <div
                 class="rounded-xl border border-border/70 bg-muted/20 p-4 text-muted-foreground"
               >
                 No provider matches available for comparison.
               </div>
             {:else}
-              {#each studio.provider_comparison as row}
+              {#each providerComparisonRows as row}
                 <article
                   class="rounded-xl border border-border/70 bg-background/70 p-3"
                 >
@@ -1583,13 +1716,13 @@
                       </div>
                     </div>
                   </div>
-                  {#if row.differences.length > 0}
+                  {#if (row.differences ?? []).length > 0}
                     <div
                       class="mt-2 rounded-md border border-border/60 bg-background/80 p-2 text-xs"
                     >
                       <div class="font-medium text-foreground">Differences</div>
                       <ul class="mt-1 list-disc pl-4 text-muted-foreground">
-                        {#each row.differences as diff}
+                        {#each row.differences ?? [] as diff}
                           <li>{diff}</li>
                         {/each}
                       </ul>
@@ -1603,7 +1736,7 @@
 
         {#if activeTab === "artwork"}
           <div class="space-y-3 text-sm">
-            {#each studio.artwork_cards as card}
+            {#each artworkCards as card}
               <div class="rounded-xl border border-border/70 bg-muted/10 p-3">
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-sm font-semibold text-foreground">
@@ -1761,7 +1894,7 @@
               <div
                 class="mt-2 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-3"
               >
-                {#each studio.canonical_artwork_profile as row}
+                {#each canonicalArtworkProfileEntries as row}
                   <div
                     class="rounded-md border border-border/60 bg-background/70 px-2 py-1"
                   >
@@ -2071,7 +2204,7 @@
                 bind:value={overrideField}
               >
                 <option value="">Select override field</option>
-                {#each studio.override_field_options as option}
+                {#each overrideFieldOptions as option}
                   <option value={option}>{option}</option>
                 {/each}
               </select>
