@@ -42,6 +42,7 @@ from backend.api.utils.middleware import (
     sliding_session_middleware,
 )
 from backend.core.logger import LOG
+from backend.core.build_info import load_build_info
 from backend.core.service_bootstrap import load_enabled_services
 from backend.core.service_manager import service_manager
 from backend.core.settings import settings
@@ -87,6 +88,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "CORS is configured to allow ALL origins ('*'). "
                 "This is insecure for production. Set CORS_ORIGINS to your frontend URL."
             )
+
+        build_info = load_build_info(force=True)
+        build_info_source = build_info.get("build_info_source")
+        if build_info_source is None:
+            LOG.warning("Build metadata file not found. Runtime version metadata is unavailable.")
+        else:
+            LOG.info(f"Loaded build metadata from {build_info_source}")
 
         # init db
         await init_db()

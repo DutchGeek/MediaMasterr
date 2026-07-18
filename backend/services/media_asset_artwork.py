@@ -33,6 +33,16 @@ class MediaAssetArtworkResolver:
     4) Placeholder
     """
 
+    @staticmethod
+    def _normalize_status(value: str | None, *, poster: str) -> str:
+        normalized = (value or "").strip().upper()
+        allowed = {"VALID", "MISSING", "PLACEHOLDER", "INVALID", "STALE", "NEEDS_REFRESH"}
+        if normalized in allowed:
+            return normalized
+        if is_placeholder_artwork_url(poster):
+            return "PLACEHOLDER"
+        return "VALID"
+
     async def resolve(
         self,
         db: AsyncSession,
@@ -113,12 +123,9 @@ class MediaAssetArtworkResolver:
             if provider_poster_url or provider_backdrop_url
             else "placeholder"
         )
-        status = (
-            media_asset_row.artwork_status
-            if media_asset_row is not None and media_asset_row.artwork_status
-            else "PLACEHOLDER"
-            if is_placeholder_artwork_url(poster)
-            else "VALID"
+        status = self._normalize_status(
+            media_asset_row.artwork_status if media_asset_row is not None else None,
+            poster=poster,
         )
         confidence = (
             float(media_asset_row.artwork_confidence)

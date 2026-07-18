@@ -107,6 +107,7 @@
   ];
 
   const providerTrustStorageKey = "identity_provider_trust_order_v1";
+  const studioTabStorageKey = "identity_studio_active_tab_v1";
   const defaultProviderTrustOrder = [
     "manual",
     "plex",
@@ -224,9 +225,24 @@
     return "Uncertain";
   };
 
-  const isUrlLike = (value: string | null | undefined): boolean => {
-    if (!value) return false;
-    return /^https?:\/\//i.test(value);
+  const resolveRenderableImageUrl = (
+    value: string | null | undefined,
+  ): string | null => {
+    const raw = value?.trim();
+    if (!raw) return null;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (/^data:image\//i.test(raw)) return raw;
+    if (/^blob:/i.test(raw)) return raw;
+    if (raw.startsWith("/")) return raw;
+    return `/${raw}`;
+  };
+
+  const isValidStudioTab = (value: string): value is StudioTab =>
+    tabOrder.some((tab) => tab.key === value);
+
+  const setActiveTab = (tab: StudioTab) => {
+    activeTab = tab;
+    localStorage.setItem(studioTabStorageKey, tab);
   };
 
   const metadataValue = (
@@ -446,7 +462,6 @@
       studio = await get_api<IdentityStudioResponse>(
         `/api/mie/identity/${item.media_type}/${item.media_id}/studio`,
       );
-      activeTab = "overview";
     } catch (e: any) {
       studioError = e?.message ?? "Failed to load studio data";
     } finally {
@@ -832,6 +847,11 @@
       }
     } else {
       providerTrustOrder = [...defaultProviderTrustOrder];
+    }
+
+    const savedTab = localStorage.getItem(studioTabStorageKey);
+    if (savedTab && isValidStudioTab(savedTab)) {
+      activeTab = savedTab;
     }
 
     parseHashFilters();
@@ -1279,7 +1299,7 @@
               class={activeTab === tab.key
                 ? "rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground"
                 : "rounded-md border border-border px-3 py-1 text-xs hover:bg-accent"}
-              onclick={() => (activeTab = tab.key)}
+              onclick={() => setActiveTab(tab.key)}
             >
               {tab.label}
             </button>
@@ -1548,7 +1568,7 @@
         {/if}
 
         {#if activeTab === "artwork"}
-          <div class="space-y-4 text-sm">
+          <div class="space-y-3 text-sm">
             {#each studio.artwork as row}
               <div class="rounded-xl border border-border/70 bg-muted/10 p-3">
                 <div class="flex items-center justify-between gap-2">
@@ -1560,60 +1580,68 @@
                   </span>
                 </div>
 
-                <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div class="mt-2 space-y-2">
                   {#each row.values as value}
+                    {@const previewUrl = resolveRenderableImageUrl(value.value)}
                     <label
-                      class="rounded-xl border border-border/70 bg-background/80 p-2"
+                      class="block rounded-xl border border-border/70 bg-background/80 p-2"
                     >
                       <div class="flex items-center justify-between gap-2">
-                        <div
-                          class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                        >
-                          {value.provider}
+                        <div class="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`artwork-${row.key}`}
+                            checked={(selectedArtworkByField[row.key] ??
+                              "canonical") === value.provider}
+                            onchange={() =>
+                              (selectedArtworkByField = {
+                                ...selectedArtworkByField,
+                                [row.key]: value.provider,
+                              })}
+                          />
+                          <div
+                            class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                          >
+                            {value.provider}
+                          </div>
                         </div>
-                        <input
-                          type="checkbox"
-                          name={`artwork-${row.key}`}
-                          checked={(selectedArtworkByField[row.key] ??
-                            "canonical") === value.provider}
-                          onchange={() =>
-                            (selectedArtworkByField = {
-                              ...selectedArtworkByField,
-                              [row.key]: value.provider,
-                            })}
-                        />
                       </div>
 
-                      {#if isUrlLike(value.value)}
-                        <img
-                          src={value.value ?? undefined}
-                          alt={`${row.label} from ${value.provider}`}
-                          class="mt-2 aspect-[2/3] w-full rounded object-cover"
-                          onload={(event) =>
-                            onArtworkImageLoad(row.key, value.provider, event)}
-                        />
-                      {:else}
-                        <div
-                          class="mt-2 rounded bg-secondary/30 p-6 text-center text-xs text-muted-foreground"
-                        >
-                          No preview image
+                      <div class="mt-2 grid gap-3 lg:grid-cols-[220px_1fr]">
+                        <div>
+                          {#if previewUrl}
+                            <img
+                              src={previewUrl}
+                              alt={`${row.label} from ${value.provider}`}
+                              class="h-72 w-full rounded object-cover"
+                              onload={(event) =>
+                                onArtworkImageLoad(row.key, value.provider, event)}
+                            />
+                          {:else}
+                            <div
+                              class="flex h-72 w-full items-center justify-center rounded bg-secondary/30 p-3 text-center text-xs text-muted-foreground"
+                            >
+                              No preview image
+                            </div>
+                          {/if}
                         </div>
-                      {/if}
 
-                      <div
-                        class="mt-2 grid gap-1 text-xs text-muted-foreground"
-                      >
-                        <div>
-                          Resolution: {artworkDimensions[
-                            `${row.key}:${value.provider}`
-                          ] ?? "Unknown"}
+                        <div class="grid gap-1 text-xs text-muted-foreground">
+                          <div>
+                            Resolution: {artworkDimensions[
+                              `${row.key}:${value.provider}`
+                            ] ?? "Unknown"}
+                          </div>
+                          <div>Source: {value.provider}</div>
+                          <div>
+                            Last Updated: {providerUpdatedAtLabel(value.provider)}
+                          </div>
+                          <div>Confidence: {value.confidence}%</div>
+                          <div>Status: {confidenceStatus(value.confidence)}</div>
+                          <div class="break-all text-foreground/80">
+                            URL: {previewUrl ?? "Unavailable"}
+                          </div>
                         </div>
-                        <div>Source: {value.provider}</div>
-                        <div>
-                          Last Updated: {providerUpdatedAtLabel(value.provider)}
-                        </div>
-                        <div>Confidence: {value.confidence}%</div>
-                        <div>Status: {confidenceStatus(value.confidence)}</div>
                       </div>
                     </label>
                   {/each}

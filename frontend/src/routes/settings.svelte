@@ -260,7 +260,9 @@
     },
     {
       label: "Info",
-      tabs: [{ id: SettingsTab.About, label: "About", icon: BookAlert }],
+      tabs: [
+        { id: SettingsTab.About, label: "System Information", icon: BookAlert },
+      ],
     },
   ];
 

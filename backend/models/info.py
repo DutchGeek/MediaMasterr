@@ -1,6 +1,34 @@
 from pydantic import BaseModel
 
 
+class VersionInfoResponse(BaseModel):
+    application_version: str
+    git_sha: str | None
+    short_sha: str | None
+    branch: str | None
+    tag: str | None
+    build_date: str | None
+    build_time: str | None
+    build_timestamp: str | None
+    github_workflow_run: str | None
+    github_run_number: str | None
+    github_repository: str | None
+    docker_image_tag: str | None
+    docker_image_digest: str | None
+    python_version: str
+    backend_version: str
+    frontend_version: str | None
+    startup_time: str
+    environment: str
+    container_id: str
+    hostname: str
+    running_sha: str | None
+    latest_built_sha: str | None
+    frontend_sha: str | None
+    backend_sha: str | None
+    status: str
+
+
 class SidebarIndicatorsResponse(BaseModel):
     has_candidates: bool
     has_pending_requests: bool

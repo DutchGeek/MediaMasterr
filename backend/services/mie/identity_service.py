@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.artwork import resolve_backdrop_url, resolve_poster_url
 from backend.database.models import (
     MediaAsset,
     Movie,
@@ -34,6 +35,7 @@ from backend.models.mie import (
     IdentityWorkspaceResponse,
 )
 from backend.services.query_engine import QueryEngineSpec, apply_spec
+from backend.services.media_asset_artwork import media_asset_artwork_resolver
 
 
 class IdentityCenterService:
@@ -78,6 +80,25 @@ class IdentityCenterService:
         if value >= 75:
             return "review"
         return "attention"
+
+    @staticmethod
+    def _normalize_artwork_value(
+        *,
+        field_key: str,
+        value: str | None,
+        media_type: MediaType,
+        media_id: int,
+    ) -> str | None:
+        if not value:
+            return None
+        if field_key == "backdrop":
+            return resolve_backdrop_url(value)
+        return resolve_poster_url(
+            value,
+            context="identity_studio_provider",
+            media_type=media_type.value,
+            media_id=media_id,
+        )
 
     async def _override_keys(self) -> set[tuple[MediaType, int]]:
         rows = (
@@ -255,6 +276,15 @@ class IdentityCenterService:
                     if asset and asset.artwork_status
                     else "unknown"
                 )
+                resolved_movie_artwork = await media_asset_artwork_resolver.resolve(
+                    self.db,
+                    context="identity_workspace",
+                    media_type=MediaType.MOVIE,
+                    media_id=movie.id,
+                    provider_poster_url=movie.poster_url,
+                    provider_backdrop_url=movie.backdrop_url,
+                    fallback_reason="identity_workspace",
+                )
                 movie_conflict = self._conflict_level(provider_count, max_confidence)
                 movie_needs_review = (
                     movie_conflict in {"high", "medium"}
@@ -269,10 +299,8 @@ class IdentityCenterService:
                         media_id=movie.id,
                         title=movie.title,
                         year=movie.year,
-                        poster_url=(asset.poster_url if asset else movie.poster_url),
-                        backdrop_url=(
-                            asset.backdrop_url if asset else movie.backdrop_url
-                        ),
+                        poster_url=resolved_movie_artwork.poster_url,
+                        backdrop_url=resolved_movie_artwork.backdrop_url,
                         canonical_provider=canonical,
                         provider_count=provider_count,
                         provider_confidence=max_confidence,
@@ -329,6 +357,15 @@ class IdentityCenterService:
                     if asset and asset.artwork_status
                     else "unknown"
                 )
+                resolved_series_artwork = await media_asset_artwork_resolver.resolve(
+                    self.db,
+                    context="identity_workspace",
+                    media_type=MediaType.SERIES,
+                    media_id=series.id,
+                    provider_poster_url=series.poster_url,
+                    provider_backdrop_url=series.backdrop_url,
+                    fallback_reason="identity_workspace",
+                )
                 series_conflict = self._conflict_level(provider_count, max_confidence)
                 series_needs_review = (
                     series_conflict in {"high", "medium"}
@@ -343,10 +380,8 @@ class IdentityCenterService:
                         media_id=series.id,
                         title=series.title,
                         year=series.year,
-                        poster_url=(asset.poster_url if asset else series.poster_url),
-                        backdrop_url=(
-                            asset.backdrop_url if asset else series.backdrop_url
-                        ),
+                        poster_url=resolved_series_artwork.poster_url,
+                        backdrop_url=resolved_series_artwork.backdrop_url,
                         canonical_provider=canonical,
                         provider_count=provider_count,
                         provider_confidence=max_confidence,
@@ -489,6 +524,31 @@ class IdentityCenterService:
     ) -> IdentityStudioResponse:
         target, asset = await self._fetch_target(media_type, media_id)
 
+        resolved_canonical_artwork = await media_asset_artwork_resolver.resolve(
+            self.db,
+            context="identity_studio",
+            media_type=media_type,
+            media_id=media_id,
+            provider_poster_url=getattr(target, "poster_url", None),
+            provider_backdrop_url=getattr(target, "backdrop_url", None),
+            fallback_reason="identity_studio",
+        )
+
+        canonical_poster = resolved_canonical_artwork.poster_url
+        canonical_backdrop = resolved_canonical_artwork.backdrop_url
+        canonical_logo = self._normalize_artwork_value(
+            field_key="logo",
+            value=asset.logo_url if asset else None,
+            media_type=media_type,
+            media_id=media_id,
+        )
+        canonical_banner = self._normalize_artwork_value(
+            field_key="banner",
+            value=asset.banner_url if asset else None,
+            media_type=media_type,
+            media_id=media_id,
+        )
+
         match_rows = (
             (
                 await self.db.execute(
@@ -513,10 +573,17 @@ class IdentityCenterService:
             reverse=True,
         ):
             match_signals = match_row.signals or {}
+            preview_candidate = cast(str | None, match_signals.get("poster_url")) or cast(
+                str | None, match_signals.get("artwork_poster")
+            )
+            preview = self._normalize_artwork_value(
+                field_key="poster",
+                value=preview_candidate,
+                media_type=media_type,
+                media_id=media_id,
+            ) or canonical_poster
             preview = (
-                cast(str | None, match_signals.get("poster_url"))
-                or cast(str | None, match_signals.get("artwork_poster"))
-                or (asset.poster_url if asset else None)
+                preview if isinstance(preview, str) and preview.strip() else None
             )
             provider_matches.append(
                 IdentityProviderMatch(
@@ -621,15 +688,6 @@ class IdentityCenterService:
                 )
             )
 
-        canonical_poster = (
-            asset.poster_url if asset else getattr(target, "poster_url", None)
-        )
-        canonical_backdrop = (
-            asset.backdrop_url if asset else getattr(target, "backdrop_url", None)
-        )
-        canonical_logo = asset.logo_url if asset else None
-        canonical_banner = asset.banner_url if asset else None
-
         artwork_fields: list[tuple[str, str, str | None]] = [
             ("poster", "Poster", canonical_poster),
             ("backdrop", "Backdrop", canonical_backdrop),
@@ -654,10 +712,18 @@ class IdentityCenterService:
                     candidate = provider.signals.get(f"artwork_{field_key}")
                 if not isinstance(candidate, str) or not candidate.strip():
                     continue
+                normalized_candidate = self._normalize_artwork_value(
+                    field_key=field_key,
+                    value=candidate,
+                    media_type=media_type,
+                    media_id=media_id,
+                )
+                if normalized_candidate is None:
+                    continue
                 values.append(
                     IdentityFieldValue(
                         provider=provider.provider,
-                        value=candidate,
+                        value=normalized_candidate,
                         confidence=provider.confidence,
                         is_canonical=provider.is_canonical,
                     )

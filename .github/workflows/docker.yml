@@ -92,18 +92,57 @@ jobs:
         id: buildmeta
         shell: bash
         run: |
-          VERSION=$(python -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')
+          VERSION=$(python -c 'from pathlib import Path; import json; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')
+          FRONTEND_VERSION=$(python -c 'from pathlib import Path; import json; print(json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))["version"])')
           echo "full_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "frontend_version=${FRONTEND_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
           echo "docker_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "release_channel=${{ steps.channel.outputs.value }}" >> "$GITHUB_OUTPUT"
+          echo "github_workflow=${GITHUB_WORKFLOW}" >> "$GITHUB_OUTPUT"
           echo "workflow_run_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "workflow_run_attempt=${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "github_repository=${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "oci_revision=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "oci_source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "oci_version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate build metadata artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/generate_build_info.py \
+            --output build/build_info.json \
+            --application-version "${{ steps.buildmeta.outputs.version }}" \
+            --backend-version "${{ steps.buildmeta.outputs.version }}" \
+            --frontend-version "${{ steps.buildmeta.outputs.frontend_version }}" \
+            --environment container \
+            --git-sha "${{ steps.buildmeta.outputs.full_sha }}" \
+            --short-sha "${{ steps.buildmeta.outputs.short_sha }}" \
+            --branch "${{ steps.buildmeta.outputs.branch }}" \
+            --tag "${{ steps.buildmeta.outputs.tag }}" \
+            --build-date "${{ steps.buildmeta.outputs.build_date }}" \
+            --build-time "${{ steps.buildmeta.outputs.build_time }}" \
+            --build-timestamp "${{ steps.buildmeta.outputs.timestamp }}" \
+            --github-workflow-run "${{ steps.buildmeta.outputs.github_workflow }}" \
+            --github-run-number "${{ steps.buildmeta.outputs.workflow_run_number }}" \
+            --github-repository "${{ steps.buildmeta.outputs.github_repository }}" \
+            --docker-image-tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.buildmeta.outputs.full_sha }}" \
+            --docker-image-digest unknown \
+            --running-sha "${{ steps.buildmeta.outputs.full_sha }}" \
+            --latest-built-sha "${{ steps.buildmeta.outputs.full_sha }}" \
+            --frontend-sha "${{ steps.buildmeta.outputs.full_sha }}" \
+            --backend-sha "${{ steps.buildmeta.outputs.full_sha }}"
 
       - name: Build and push
         id: build
@@ -120,18 +159,8 @@ jobs:
             VITE_APP_CHANNEL=${{ steps.channel.outputs.value }}
             BUILD_VERSION=${{ steps.buildmeta.outputs.version }}
             BUILD_COMMIT_SHA=${{ steps.buildmeta.outputs.full_sha }}
-            BUILD_SHORT_SHA=${{ steps.buildmeta.outputs.short_sha }}
             BUILD_TIMESTAMP=${{ steps.buildmeta.outputs.timestamp }}
-            BUILD_DOCKER_TAG=${{ steps.buildmeta.outputs.docker_tag }}
-            BUILD_RELEASE_CHANNEL=${{ steps.buildmeta.outputs.release_channel }}
-            BUILD_WORKFLOW_RUN_NUMBER=${{ steps.buildmeta.outputs.workflow_run_number }}
-            BUILD_WORKFLOW_RUN_ATTEMPT=${{ steps.buildmeta.outputs.workflow_run_attempt }}
-            BUILD_OCI_REVISION=${{ steps.buildmeta.outputs.oci_revision }}
-            BUILD_OCI_SOURCE=${{ steps.buildmeta.outputs.oci_source }}
-            BUILD_OCI_VERSION=${{ steps.buildmeta.outputs.oci_version }}
             BUILD_REPOSITORY=${{ steps.buildmeta.outputs.oci_source }}
-            BUILD_DOCKER_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            BUILD_CONTAINER_DIGEST=unknown
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

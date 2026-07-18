@@ -1,4 +1,3 @@
-import os
 import re
 import sys
 from pathlib import Path
@@ -9,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.__version__ import __version__, program_name, program_url
+from backend.core.__version__ import __version__
+from backend.core.build_info import get_build_info
 from backend.core.auth import get_current_user, has_permission
 from backend.database import get_db
 from backend.database.models import (
@@ -22,7 +22,11 @@ from backend.database.models import (
     User,
 )
 from backend.enums import Permission, ProtectionRequestStatus, UserRole
-from backend.models.info import SidebarIndicatorsResponse, UiIndicatorsResponse
+from backend.models.info import (
+    SidebarIndicatorsResponse,
+    UiIndicatorsResponse,
+    VersionInfoResponse,
+)
 from backend.services.admin_notices import has_unread_active_notices
 
 from .default_backdrops import TOP_RATED_BACKDROPS
@@ -86,43 +90,38 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/version")
-async def get_version() -> dict[str, str | None]:
-    """Get application version."""
-    commit_sha = os.getenv("APP_COMMIT_SHA")
-    short_sha = os.getenv("APP_SHORT_SHA") or (commit_sha[:7] if commit_sha else None)
-    build_timestamp = os.getenv("APP_BUILD_TIMESTAMP")
-    release_channel = os.getenv("APP_RELEASE_CHANNEL")
-    docker_tag = os.getenv("APP_DOCKER_TAG")
-    docker_image = os.getenv("APP_DOCKER_IMAGE")
-    container_digest = os.getenv("APP_CONTAINER_DIGEST")
-    docker_digest = os.getenv("APP_DOCKER_DIGEST") or container_digest
-    workflow_run_number = os.getenv("APP_WORKFLOW_RUN_NUMBER")
-    workflow_run_attempt = os.getenv("APP_WORKFLOW_RUN_ATTEMPT")
-    oci_revision = os.getenv("APP_OCI_REVISION") or commit_sha
-    oci_source = os.getenv("APP_OCI_SOURCE") or program_url
-    oci_version = os.getenv("APP_OCI_VERSION") or str(__version__)
-    repository = os.getenv("APP_GIT_REPOSITORY") or program_url
+@router.get("/version", response_model=VersionInfoResponse)
+async def get_version() -> VersionInfoResponse:
+    """Get application version and build metadata from backend startup metadata."""
+    build_info = get_build_info()
 
-    return {
-        "version": str(__version__),
-        "program": program_name,
-        "url": program_url,
-        "commit_sha": commit_sha,
-        "short_sha": short_sha,
-        "build_timestamp": build_timestamp,
-        "release_channel": release_channel,
-        "docker_tag": docker_tag,
-        "docker_image": docker_image,
-        "docker_digest": docker_digest,
-        "container_digest": container_digest,
-        "workflow_run_number": workflow_run_number,
-        "workflow_run_attempt": workflow_run_attempt,
-        "oci_revision": oci_revision,
-        "oci_source": oci_source,
-        "oci_version": oci_version,
-        "repository": repository,
-    }
+    return VersionInfoResponse(
+        application_version=build_info.get("application_version") or str(__version__),
+        git_sha=build_info.get("git_sha"),
+        short_sha=build_info.get("short_sha"),
+        branch=build_info.get("branch"),
+        tag=build_info.get("tag"),
+        build_date=build_info.get("build_date"),
+        build_time=build_info.get("build_time"),
+        build_timestamp=build_info.get("build_timestamp"),
+        github_workflow_run=build_info.get("github_workflow_run"),
+        github_run_number=build_info.get("github_run_number"),
+        github_repository=build_info.get("github_repository"),
+        docker_image_tag=build_info.get("docker_image_tag"),
+        docker_image_digest=build_info.get("docker_image_digest"),
+        python_version=sys.version.split()[0],
+        backend_version=build_info.get("backend_version") or str(__version__),
+        frontend_version=build_info.get("frontend_version"),
+        startup_time=build_info.get("startup_time") or "Unavailable",
+        environment=build_info.get("environment") or "development",
+        container_id=build_info.get("container_id") or "Unavailable",
+        hostname=build_info.get("hostname") or "Unavailable",
+        running_sha=build_info.get("running_sha"),
+        latest_built_sha=build_info.get("latest_built_sha"),
+        frontend_sha=build_info.get("frontend_sha"),
+        backend_sha=build_info.get("backend_sha"),
+        status=build_info.get("status") or "Unavailable",
+    )
 
 
 @router.get("/update-status")
