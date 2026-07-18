@@ -1615,7 +1615,11 @@
                               alt={`${row.label} from ${value.provider}`}
                               class="h-72 w-full rounded object-cover"
                               onload={(event) =>
-                                onArtworkImageLoad(row.key, value.provider, event)}
+                                onArtworkImageLoad(
+                                  row.key,
+                                  value.provider,
+                                  event,
+                                )}
                             />
                           {:else}
                             <div
@@ -1634,10 +1638,14 @@
                           </div>
                           <div>Source: {value.provider}</div>
                           <div>
-                            Last Updated: {providerUpdatedAtLabel(value.provider)}
+                            Last Updated: {providerUpdatedAtLabel(
+                              value.provider,
+                            )}
                           </div>
                           <div>Confidence: {value.confidence}%</div>
-                          <div>Status: {confidenceStatus(value.confidence)}</div>
+                          <div>
+                            Status: {confidenceStatus(value.confidence)}
+                          </div>
                           <div class="break-all text-foreground/80">
                             URL: {previewUrl ?? "Unavailable"}
                           </div>

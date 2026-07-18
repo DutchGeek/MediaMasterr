@@ -576,7 +576,7 @@ class IdentityCenterService:
             preview_candidate = cast(
                 str | None, match_signals.get("poster_url")
             ) or cast(str | None, match_signals.get("artwork_poster"))
-            preview = (
+            preview: str | None = (
                 self._normalize_artwork_value(
                     field_key="poster",
                     value=preview_candidate,

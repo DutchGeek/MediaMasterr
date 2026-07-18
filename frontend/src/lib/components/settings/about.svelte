@@ -186,15 +186,20 @@
       <span class="align-middle">System Information</span>
     </h2>
     <p class="mt-1 text-xs text-muted-foreground">
-      {BRANDING.applicationName} v{displayValue(versionInfo?.application_version)}
+      {BRANDING.applicationName} v{displayValue(
+        versionInfo?.application_version,
+      )}
     </p>
   </div>
 
   {#if hasVersionMismatch}
-    <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
+    <div
+      class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100"
+    >
       <strong>Version Mismatch</strong>
       <p class="mt-1 text-muted-foreground dark:text-amber-100/80">
-        The backend and frontend build metadata do not match. Refresh the deployment or rebuild the frontend and backend together.
+        The backend and frontend build metadata do not match. Refresh the
+        deployment or rebuild the frontend and backend together.
       </p>
     </div>
   {/if}
@@ -243,7 +248,9 @@
     </div>
   </section>
 
-  <section class="space-y-3 rounded-2xl border border-border/60 bg-card p-5 shadow-sm">
+  <section
+    class="space-y-3 rounded-2xl border border-border/60 bg-card p-5 shadow-sm"
+  >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h3 class="text-foreground">Deployment Verification</h3>
@@ -252,13 +259,25 @@
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" onclick={() => void refreshDiagnostics()}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onclick={() => void refreshDiagnostics()}
+        >
           Refresh Build Info
         </Button>
-        <Button size="sm" variant="secondary" onclick={() => void copySystemReport()}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onclick={() => void copySystemReport()}
+        >
           Copy System Report
         </Button>
-        <Button size="sm" variant="secondary" onclick={() => void downloadDiagnostics()}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onclick={() => void downloadDiagnostics()}
+        >
           Download Diagnostics
         </Button>
       </div>
@@ -266,53 +285,77 @@
 
     <div class="grid gap-3 lg:grid-cols-2">
       <div class="rounded-xl border border-border/60 bg-background p-4">
-        <h4 class="text-sm font-semibold text-foreground">Core build metadata</h4>
+        <h4 class="text-sm font-semibold text-foreground">
+          Core build metadata
+        </h4>
         <dl class="mt-3 space-y-2 text-sm">
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Application version</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.application_version)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.application_version)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Git SHA</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.git_sha)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.git_sha)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Short SHA</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.short_sha)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.short_sha)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Branch</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.branch)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.branch)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Tag</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.tag)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.tag)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Build date</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.build_date)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.build_date)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Build time</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.build_time)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.build_time)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Build timestamp</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.build_timestamp)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.build_timestamp)}
+            </dd>
           </div>
         </dl>
       </div>
 
       <div class="rounded-xl border border-border/60 bg-background p-4">
-        <h4 class="text-sm font-semibold text-foreground">Deployment metadata</h4>
+        <h4 class="text-sm font-semibold text-foreground">
+          Deployment metadata
+        </h4>
         <dl class="mt-3 space-y-2 text-sm">
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">GitHub workflow run</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.github_workflow_run)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.github_workflow_run)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">GitHub run number</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.github_run_number)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.github_run_number)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">GitHub repository</dt>
@@ -333,65 +376,111 @@
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Docker image tag</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.docker_image_tag)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.docker_image_tag)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Docker image digest</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.docker_image_digest)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.docker_image_digest)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Python version</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.python_version)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.python_version)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Backend version</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.backend_version)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.backend_version)}
+            </dd>
           </div>
           <div class="flex items-start justify-between gap-4">
             <dt class="text-muted-foreground">Frontend version</dt>
-            <dd class="break-all text-right text-foreground">{displayValue(versionInfo?.frontend_version)}</dd>
+            <dd class="break-all text-right text-foreground">
+              {displayValue(versionInfo?.frontend_version)}
+            </dd>
           </div>
         </dl>
       </div>
 
-      <div class="rounded-xl border border-border/60 bg-background p-4 lg:col-span-2">
-        <h4 class="text-sm font-semibold text-foreground">Runtime environment</h4>
+      <div
+        class="rounded-xl border border-border/60 bg-background p-4 lg:col-span-2"
+      >
+        <h4 class="text-sm font-semibold text-foreground">
+          Runtime environment
+        </h4>
         <dl class="mt-3 grid gap-2 text-sm md:grid-cols-2">
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Startup time</dt>
-            <dd class="break-all text-foreground">{displayValue(versionInfo?.startup_time)}</dd>
+            <dd class="break-all text-foreground">
+              {displayValue(versionInfo?.startup_time)}
+            </dd>
           </div>
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Environment</dt>
-            <dd class="break-all text-foreground">{displayValue(versionInfo?.environment)}</dd>
+            <dd class="break-all text-foreground">
+              {displayValue(versionInfo?.environment)}
+            </dd>
           </div>
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Container ID</dt>
-            <dd class="break-all text-foreground">{displayValue(versionInfo?.container_id)}</dd>
+            <dd class="break-all text-foreground">
+              {displayValue(versionInfo?.container_id)}
+            </dd>
           </div>
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Hostname</dt>
-            <dd class="break-all text-foreground">{displayValue(versionInfo?.hostname)}</dd>
+            <dd class="break-all text-foreground">
+              {displayValue(versionInfo?.hostname)}
+            </dd>
           </div>
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Browser origin</dt>
-            <dd class="break-all text-foreground">{typeof window === "undefined" ? "Unavailable" : window.location.origin}</dd>
+            <dd class="break-all text-foreground">
+              {typeof window === "undefined"
+                ? "Unavailable"
+                : window.location.origin}
+            </dd>
           </div>
-          <div class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1">
+          <div
+            class="flex items-start justify-between gap-4 md:flex-col md:items-start md:gap-1"
+          >
             <dt class="text-muted-foreground">Browser path</dt>
-            <dd class="break-all text-foreground">{typeof window === "undefined" ? "Unavailable" : window.location.pathname}</dd>
+            <dd class="break-all text-foreground">
+              {typeof window === "undefined"
+                ? "Unavailable"
+                : window.location.pathname}
+            </dd>
           </div>
         </dl>
       </div>
     </div>
 
     {#if versionError || changelogError}
-      <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+      <div
+        class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+      >
         {#if versionError}
           <p>Runtime metadata warning: {versionError}</p>
         {/if}
         {#if changelogError}
-          <p class={versionError ? "mt-1" : ""}>Release notes warning: {changelogError}</p>
+          <p class={versionError ? "mt-1" : ""}>
+            Release notes warning: {changelogError}
+          </p>
         {/if}
       </div>
     {/if}
@@ -483,7 +572,8 @@
                 <Badge class="h-4 px-1 text-[10px] leading-none">Current</Badge>
               {/if}
               {#if release.date}
-                <span class="text-xs text-muted-foreground">{release.date}</span>
+                <span class="text-xs text-muted-foreground">{release.date}</span
+                >
               {/if}
             </span>
           </Select.Item>
