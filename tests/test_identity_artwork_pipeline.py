@@ -176,7 +176,9 @@ async def test_identity_workspace_confidence_falls_back_to_health_signals() -> N
 
 
 @pytest.mark.anyio
-async def test_identity_studio_falls_back_to_asset_artwork_when_match_rows_missing() -> None:
+async def test_identity_studio_falls_back_to_asset_artwork_when_match_rows_missing() -> (
+    None
+):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     session_maker = async_sessionmaker(
         engine,

@@ -396,9 +396,7 @@
     localStorage.setItem(studioTabStorageKey, tab);
   };
 
-  const metadataProviders = (
-    row: IdentityStudioResponse["metadata"][number],
-  ) =>
+  const metadataProviders = (row: IdentityStudioResponse["metadata"][number]) =>
     row.values.filter(
       (value) => value.provider !== "current" && value.provider !== "canonical",
     );
@@ -2054,7 +2052,8 @@
                     Provider Trust Configuration
                   </div>
                   <div class="text-sm text-foreground">
-                    Adjust ordering when canonical decisions should prioritize a different provider.
+                    Adjust ordering when canonical decisions should prioritize a
+                    different provider.
                   </div>
                 </div>
                 <button

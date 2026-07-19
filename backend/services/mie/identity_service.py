@@ -780,7 +780,9 @@ class IdentityCenterService:
                 )
             )
 
-        asset_source = self._normalize_provider_key(asset.artwork_source if asset else None)
+        asset_source = self._normalize_provider_key(
+            asset.artwork_source if asset else None
+        )
         if not provider_matches and asset_source:
             canonical_provider = asset_source
             fallback_signals: dict[str, str] = {}
@@ -1129,7 +1131,10 @@ class IdentityCenterService:
                 differences.append("Metadata differs")
             if external_has_diff:
                 differences.append("Identifiers differ")
-            if any(diff not in {"Poster identical", "Backdrop identical"} for diff in differences):
+            if any(
+                diff not in {"Poster identical", "Backdrop identical"}
+                for diff in differences
+            ):
                 providers_with_differences += 1
 
             provider_comparison.append(
@@ -1170,7 +1175,9 @@ class IdentityCenterService:
                     IdentityFieldValue(
                         provider="calculated",
                         value=(
-                            ", ".join(provider.provider for provider in provider_matches)
+                            ", ".join(
+                                provider.provider for provider in provider_matches
+                            )
                             if provider_matches
                             else canonical_provider
                         ),
@@ -1242,7 +1249,8 @@ class IdentityCenterService:
                         provider="calculated",
                         value=(
                             f"{canonical_provider} is canonical because it is preferred"
-                            if canonical_provider == self._preferred_provider(media_type)
+                            if canonical_provider
+                            == self._preferred_provider(media_type)
                             else f"{canonical_provider} is canonical because it has the strongest match"
                         ),
                         confidence=100,
