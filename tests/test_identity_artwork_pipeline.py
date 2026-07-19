@@ -9,11 +9,87 @@ from backend.database.models import (
     MediaAsset,
     Movie,
     OperationHistory,
+    Series,
     SupplementalMediaMatch,
 )
 from backend.enums import MediaType, Service
 from backend.models.mie import IdentityArtworkProviderSelectionRequest
 from backend.services.mie.identity_service import IdentityCenterService
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("term", "expected_title"),
+    [
+        ("life", "A Bug's Life"),
+        ("LIFE", "A Bug's Life"),
+        ("bugs life alt", "A Bug's Life"),
+        ("1998", "A Bug's Life"),
+        ("tt0120623", "A Bug's Life"),
+        ("862", "A Bug's Life"),
+        ("98765", "Bugs Collection"),
+    ],
+)
+async def test_identity_workspace_search_matches_requested_fields(
+    term: str,
+    expected_title: str,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(
+            title="A Bug's Life",
+            original_title="A Bug's Life",
+            tmdb_title="Bugs Life Alt",
+            year=1998,
+            imdb_id="tt0120623",
+            tmdb_id=862,
+            poster_url="/bugs-life-poster.jpg",
+        )
+        series = Series(
+            title="Bugs Collection",
+            original_title="Bugs Collection",
+            tmdb_title="Collection Bugs",
+            year=2001,
+            imdb_id="tt7654321",
+            tmdb_id=12345,
+            tvdb_id="98765",
+            poster_url="/bugs-collection-poster.jpg",
+        )
+        db.add_all([movie, series])
+        await db.flush()
+        db.add_all(
+            [
+                MediaAsset(
+                    media_type=MediaType.MOVIE,
+                    movie_id=movie.id,
+                    artwork_status="VALID",
+                    artwork_source="radarr",
+                    artwork_confidence=0.9,
+                ),
+                MediaAsset(
+                    media_type=MediaType.SERIES,
+                    series_id=series.id,
+                    artwork_status="VALID",
+                    artwork_source="sonarr",
+                    artwork_confidence=0.9,
+                ),
+            ]
+        )
+        await db.commit()
+
+        response = await IdentityCenterService(db).workspace(search=term)
+
+    await engine.dispose()
+
+    titles = {item.title for item in response.items}
+    assert expected_title in titles
 
 
 @pytest.mark.anyio

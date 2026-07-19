@@ -113,6 +113,27 @@ class IdentityCenterService:
             return cleaned or None
         return str(value)
 
+    def _matches_workspace_search(self, *, search_value: str, target: Movie | Series) -> bool:
+        if not search_value:
+            return True
+
+        searchable_values: tuple[Any, ...] = (
+            target.title,
+            getattr(target, "original_title", None),
+            getattr(target, "sort_title", None),
+            getattr(target, "tmdb_title", None),
+            getattr(target, "year", None),
+            getattr(target, "imdb_id", None),
+            getattr(target, "tmdb_id", None),
+            getattr(target, "tvdb_id", None),
+        )
+
+        for raw_value in searchable_values:
+            normalized = self._stringify(raw_value)
+            if normalized and search_value in normalized.lower():
+                return True
+        return False
+
     @staticmethod
     def _difference_summary(current: str | None, provider: str | None, key: str) -> str:
         if provider is None:
@@ -267,7 +288,6 @@ class IdentityCenterService:
         self,
         *,
         media_type: MediaType,
-        search: str | None,
         candidates_only: bool,
         imported_filter_ids: list[int],
         decision_filter_ids: list[int],
@@ -282,7 +302,7 @@ class IdentityCenterService:
             self.db,
             spec=QueryEngineSpec(
                 media_type=media_type,
-                search=search,
+                search=None,
                 candidates_only=candidates_only,
                 imported_filter_ids=imported_filter_ids,
                 decision_filter_ids=decision_filter_ids,
@@ -361,11 +381,10 @@ class IdentityCenterService:
         smart_ids = [int(v) for v in (smart_filter_ids or [])]
         allowed_movie_ids: set[int] | None = None
         allowed_series_ids: set[int] | None = None
-        if imported_ids or decision_ids or smart_ids or candidates_only or search_value:
+        if imported_ids or decision_ids or smart_ids or candidates_only:
             if media_type in {None, MediaType.MOVIE}:
                 allowed_movie_ids = await self._filtered_media_ids(
                     media_type=MediaType.MOVIE,
-                    search=search,
                     candidates_only=candidates_only,
                     imported_filter_ids=imported_ids,
                     decision_filter_ids=decision_ids,
@@ -374,7 +393,6 @@ class IdentityCenterService:
             if media_type in {None, MediaType.SERIES}:
                 allowed_series_ids = await self._filtered_media_ids(
                     media_type=MediaType.SERIES,
-                    search=search,
                     candidates_only=candidates_only,
                     imported_filter_ids=imported_ids,
                     decision_filter_ids=decision_ids,
@@ -396,7 +414,10 @@ class IdentityCenterService:
             for movie, asset in movie_rows:
                 if allowed_movie_ids is not None and movie.id not in allowed_movie_ids:
                     continue
-                if search_value and search_value not in movie.title.lower():
+                if not self._matches_workspace_search(
+                    search_value=search_value,
+                    target=movie,
+                ):
                     continue
                 matches = match_index.get((MediaType.MOVIE, movie.id), [])
                 providers = {str(row.source_service) for row in matches}
@@ -488,7 +509,10 @@ class IdentityCenterService:
                     and series.id not in allowed_series_ids
                 ):
                     continue
-                if search_value and search_value not in series.title.lower():
+                if not self._matches_workspace_search(
+                    search_value=search_value,
+                    target=series,
+                ):
                     continue
                 matches = match_index.get((MediaType.SERIES, series.id), [])
                 providers = {str(row.source_service) for row in matches}
