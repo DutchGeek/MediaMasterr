@@ -467,6 +467,63 @@
     };
   };
 
+  const normalizeProviderKey = (provider: string | null | undefined): string =>
+    (provider ?? "").trim().toLowerCase();
+
+  const comparisonStateForProvider = (
+    fields: IdentityComparisonField[] | undefined,
+    providerKey: string,
+  ): "available" | "missing" => {
+    if (!fields || fields.length === 0) return "missing";
+    for (const field of fields) {
+      for (const value of field.values ?? []) {
+        if (
+          normalizeProviderKey(value.provider) === providerKey &&
+          value.value !== null &&
+          `${value.value}`.trim().length > 0
+        ) {
+          return "available";
+        }
+      }
+    }
+    return "missing";
+  };
+
+  const providerStatusLabel = (
+    provider: IdentityStudioResponse["providers"][number],
+    state: "metadata" | "artwork" | "identifiers",
+  ): string => {
+    const key = normalizeProviderKey(provider.provider);
+    if (state === "metadata") {
+      const quality = (provider.metadata_quality ?? "").trim();
+      if (quality.length > 0 && quality.toLowerCase() !== "unknown") {
+        return quality;
+      }
+      return comparisonStateForProvider(studio?.metadata, key) === "available"
+        ? "Metadata available"
+        : "Metadata missing";
+    }
+
+    if (state === "artwork") {
+      const hasArtworkFromSignals =
+        typeof provider.signals?.poster_url === "string" ||
+        typeof provider.signals?.backdrop_url === "string" ||
+        typeof provider.signals?.artwork_poster === "string" ||
+        typeof provider.signals?.artwork_backdrop === "string";
+      if (hasArtworkFromSignals) return "Artwork available";
+      return comparisonStateForProvider(studio?.artwork, key) === "available"
+        ? "Artwork available"
+        : "Artwork missing";
+    }
+
+    if (provider.external_ids_count > 0) {
+      return `${provider.external_ids_count} IDs`;
+    }
+    return comparisonStateForProvider(studio?.external_ids, key) === "available"
+      ? "IDs available"
+      : "IDs missing";
+  };
+
   const inferExternalField = (
     raw: string,
   ): { field: string; value: string } | null => {
@@ -494,8 +551,141 @@
     return { field: externalField, value };
   };
 
-  const providerComparisonRows = $derived(studio?.provider_comparison ?? []);
-  const artworkCards = $derived(studio?.artwork_cards ?? []);
+  const providerComparisonRows = $derived.by(() => {
+    const providers = studio?.providers ?? [];
+    const comparisonByProvider = new Map(
+      (studio?.provider_comparison ?? []).map((row) => [
+        normalizeProviderKey(row.provider),
+        row,
+      ]),
+    );
+    const canonicalProvider = normalizeProviderKey(studio?.canonical_provider);
+
+    return providers.map((provider) => {
+      const providerKey = normalizeProviderKey(provider.provider);
+      const existing = comparisonByProvider.get(providerKey);
+      const metadata =
+        existing?.metadata ?? providerStatusLabel(provider, "metadata");
+      const artwork = existing?.artwork ?? providerStatusLabel(provider, "artwork");
+      const identifiers =
+        existing?.identifiers ?? providerStatusLabel(provider, "identifiers");
+      return {
+        provider: provider.provider,
+        connection_status: provider.connection_status,
+        matched: existing?.matched ?? true,
+        identifiers,
+        metadata,
+        artwork,
+        health:
+          existing?.health ??
+          (provider.confidence >= 90
+            ? "Healthy"
+            : provider.confidence >= 75
+              ? "Review"
+              : "Attention"),
+        differences: existing?.differences ?? [],
+        is_canonical:
+          provider.is_canonical || providerKey === canonicalProvider,
+      };
+    });
+  });
+
+  const artworkCards = $derived.by(() => {
+    const providerKeys = new Set(
+      (studio?.providers ?? []).map((provider) =>
+        normalizeProviderKey(provider.provider),
+      ),
+    );
+
+    const explicitCards = (studio?.artwork_cards ?? []).map((card) => {
+      const providerOptions = (card.providers ?? []).filter((option) =>
+        providerKeys.has(normalizeProviderKey(option.provider)),
+      );
+      return {
+        ...card,
+        providers: providerOptions,
+      };
+    });
+
+    if (explicitCards.length > 0) {
+      return explicitCards;
+    }
+
+    const profileByField = new Map(
+      (studio?.canonical_artwork_profile ?? []).map((entry) => [
+        entry.key,
+        normalizeProviderKey(entry.provider),
+      ]),
+    );
+
+    return (studio?.artwork ?? []).map((row) => {
+      const options = (row.values ?? [])
+        .filter(
+          (value) =>
+            !["current", "canonical", "calculated"].includes(
+              normalizeProviderKey(value.provider),
+            ),
+        )
+        .filter((value) =>
+          providerKeys.has(normalizeProviderKey(value.provider)),
+        )
+        .map((value) => {
+          const imageUrl = resolveRenderableImageUrl(value.value);
+          if (!imageUrl) return null;
+          return {
+            provider: value.provider,
+            image_url: imageUrl,
+            resolution: null,
+            last_updated: null,
+            confidence: value.confidence,
+            selected: value.is_canonical,
+          };
+        })
+        .filter(
+          (option): option is NonNullable<typeof option> => option !== null,
+        );
+
+      if (options.length === 0) {
+        return {
+          key: row.key,
+          label: row.label,
+          state: "missing" as const,
+          selected_provider: null,
+          shared_across_providers: false,
+          providers: [],
+          message: `No ${row.label} Available`,
+        };
+      }
+
+      const preferredProvider = profileByField.get(row.key);
+      let selectedProvider = options.find((option) => option.selected)?.provider;
+      if (!selectedProvider && preferredProvider) {
+        selectedProvider =
+          options.find(
+            (option) => normalizeProviderKey(option.provider) === preferredProvider,
+          )?.provider ?? null;
+      }
+      if (!selectedProvider) {
+        selectedProvider = options[0]?.provider ?? null;
+      }
+
+      const hydratedOptions = options.map((option) => ({
+        ...option,
+        selected: option.provider === selectedProvider,
+      }));
+      const uniqueImages = new Set(hydratedOptions.map((option) => option.image_url));
+
+      return {
+        key: row.key,
+        label: row.label,
+        state: "present" as const,
+        selected_provider: selectedProvider,
+        shared_across_providers: hydratedOptions.length > 1 && uniqueImages.size === 1,
+        providers: hydratedOptions,
+        message: null,
+      };
+    });
+  });
   const canonicalArtworkProfileEntries = $derived(
     studio?.canonical_artwork_profile ?? [],
   );
@@ -1583,6 +1773,15 @@
                       {row.connection_status}
                     </div>
                   </div>
+                  {#if row.is_canonical}
+                    <div class="mt-1">
+                      <span
+                        class="rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                      >
+                        Canonical
+                      </span>
+                    </div>
+                  {/if}
                   <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <div
                       class="rounded-md border border-border/60 bg-muted/10 p-2 text-xs"
