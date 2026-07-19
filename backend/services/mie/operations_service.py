@@ -31,12 +31,20 @@ from backend.models.mie import (
     FilesystemAccessMode,
     FilesystemConfigResponse,
     FilesystemRootConfigResponse,
+    MieTimelineEvent,
     OperationAuditEntryResponse,
     OperationAuditListResponse,
     OperationsCard,
+    OperationsConfidenceSummary,
+    OperationsGraphSummary,
+    OperationsHealthCategory,
+    OperationsHealthSummary,
+    OperationsIssue,
+    OperationsIssueSummary,
     OperationsOverviewResponse,
     OperationsRecommendation,
     OperationsRecommendationsResponse,
+    OperationsTimelineSummary,
     OperationsWorkspaceResponse,
     OperationWorkflowExecution,
     OperationWorkflowPreview,
@@ -47,7 +55,10 @@ from backend.models.mie import (
 )
 from backend.services.correlation import CorrelatedArtwork, MediaCorrelationService
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
+from backend.services.mie.correlation_service import CorrelationService
+from backend.services.mie.downloads_intelligence import DownloadsIntelligenceService
 from backend.services.mie.identity_service import IdentityCenterService
+from backend.services.mie.operations_engine import OperationsEngine
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -169,6 +180,7 @@ class OperationsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self._correlation_service = MediaCorrelationService()
+        self._operations_engine = OperationsEngine()
 
     @staticmethod
     def _coerce_card_severity(value: str) -> Literal["info", "low", "medium", "high"]:
@@ -207,6 +219,154 @@ class OperationsService:
         cleaned = re.sub(r"[^a-z0-9]+", " ", (name or "").lower())
         parts = [p for p in cleaned.split() if p and p not in _NOISE_TOKENS]
         return " ".join(parts[:8])
+
+    async def _load_correlation_graphs(self) -> list[Any]:
+        rows = (
+            await self.db.execute(
+                select(MediaAsset.media_type, MediaAsset.movie_id, MediaAsset.series_id)
+                .order_by(MediaAsset.id.asc())
+                .limit(250)
+            )
+        ).all()
+
+        subjects: list[tuple[MediaType, int]] = []
+        for media_type, movie_id, series_id in rows:
+            if media_type is MediaType.MOVIE and movie_id is not None:
+                subjects.append((MediaType.MOVIE, int(movie_id)))
+            elif media_type is MediaType.SERIES and series_id is not None:
+                subjects.append((MediaType.SERIES, int(series_id)))
+
+        graphs: list[Any] = []
+        correlation = CorrelationService(self.db)
+        for media_type, media_id in subjects:
+            try:
+                graph = await correlation.media_graph(
+                    media_id=media_id,
+                    media_type=media_type,
+                )
+            except ValueError:
+                continue
+            graphs.append(graph)
+        return graphs
+
+    async def _graph_issue_recommendations(
+        self,
+        issues: list[Any],
+    ) -> list[OperationsRecommendation]:
+        mapped: list[OperationsRecommendation] = []
+        severity_to_safety: dict[str, SafetyLevel] = {
+            "critical": "high_risk",
+            "high": "medium_risk",
+            "medium": "low_risk",
+            "low": "safe",
+        }
+        issue_to_card = {
+            "missing_request": "import_pending",
+            "failed_import": "broken_imports",
+            "filesystem_inconsistency": "broken_imports",
+            "torrent_stalled": "downloading",
+            "duplicate_identity": "identity_issues",
+            "artwork_gap": "unknown_files",
+        }
+
+        for issue in issues:
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
+                context="operations.recommendations.graph_issue",
+                media_type=issue.media_type,
+                media_id=issue.media_id,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
+                fallback_reason=f"graph_issue_{issue.issue_type}",
+            )
+            mapped.append(
+                OperationsRecommendation(
+                    id=f"issue:{issue.key}",
+                    card_key=issue_to_card.get(issue.issue_type, "unknown_files"),
+                    title=issue.title,
+                    summary=issue.reason,
+                    explanation=issue.recommendation,
+                    reasons=[issue.reason, issue.remediation],
+                    action=issue.action,
+                    safety_level=severity_to_safety.get(issue.severity, "low_risk"),
+                    target_type=issue.media_type.value,
+                    target_id=str(issue.media_id),
+                    estimated_recovery_bytes=issue.estimated_recovery_bytes,
+                    poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
+                    issue_key=issue.key,
+                    confidence=issue.confidence,
+                    graph_references=issue.graph_references,
+                )
+            )
+        return mapped
+
+    @staticmethod
+    def _to_issue_summary(issues: list[Any]) -> OperationsIssueSummary:
+        summary = OperationsIssueSummary(total=len(issues))
+        for issue in issues:
+            if issue.severity == "critical":
+                summary.critical += 1
+            elif issue.severity == "high":
+                summary.high += 1
+            elif issue.severity == "medium":
+                summary.medium += 1
+            else:
+                summary.low += 1
+        return summary
+
+    async def _graph_intelligence(self) -> tuple[list[Any], Any]:
+        graphs = await self._load_correlation_graphs()
+        intelligence = self._operations_engine.run(graphs)
+        return graphs, intelligence
+
+    async def _graph_overview_counts(self) -> dict[str, int]:
+        graphs, intelligence = await self._graph_intelligence()
+        issue_counts = Counter(issue.issue_type for issue in intelligence.issues)
+
+        space_recovery = int(
+            (
+                await self.db.execute(
+                    select(
+                        func.coalesce(
+                            func.sum(ReclaimCandidate.estimated_space_bytes), 0
+                        )
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+
+        ready_to_detach = 0
+        detached_media = 0
+        downloading = 0
+        for graph in graphs:
+            states = [row.computed_state for row in graph.torrent_intelligence.torrents]
+            if any(state in {"downloading", "queued", "waiting"} for state in states):
+                downloading += 1
+            if any(state in {"completed", "seeding", "imported"} for state in states):
+                ready_to_detach += 1
+            if not states and graph.file_intelligence.missing_files == 0:
+                detached_media += 1
+
+        return {
+            "downloading": downloading,
+            "import_pending": issue_counts.get("missing_request", 0),
+            "ready_to_detach": ready_to_detach,
+            "protected_seeding": 0,
+            "detached_media": detached_media,
+            "orphaned_torrents": 0,
+            "orphaned_files": 0,
+            "broken_imports": issue_counts.get("failed_import", 0)
+            + issue_counts.get("filesystem_inconsistency", 0),
+            "unknown_files": issue_counts.get("artwork_gap", 0),
+            "duplicate_releases": 0,
+            "duplicate_torrents": 0,
+            "empty_folders": 0,
+            "leftover_files": 0,
+            "space_recovery": space_recovery,
+            "identity_issues": issue_counts.get("duplicate_identity", 0),
+        }
 
     async def _load_torrent_state(
         self,
@@ -569,7 +729,9 @@ class OperationsService:
         return counts
 
     async def overview(self) -> OperationsOverviewResponse:
-        counts = await self._overview_counts()
+        counts = await self._graph_overview_counts()
+        if not any(counts.values()):
+            counts = await self._overview_counts()
         cards = [
             OperationsCard(
                 key=key,
@@ -656,7 +818,9 @@ class OperationsService:
                 select(
                     ReclaimCandidate,
                     Movie.title.label("movie_title"),
+                    Movie.poster_url.label("movie_poster_url"),
                     Series.title.label("series_title"),
+                    Series.poster_url.label("series_poster_url"),
                 )
                 .outerjoin(Movie, Movie.id == ReclaimCandidate.movie_id)
                 .outerjoin(Series, Series.id == ReclaimCandidate.series_id)
@@ -689,7 +853,11 @@ class OperationsService:
                     else MediaType.SERIES
                 ),
                 media_id=media_id,
-                provider_poster_url=None,
+                provider_poster_url=(
+                    row.movie_poster_url
+                    if candidate.movie_id is not None
+                    else row.series_poster_url
+                ),
                 provider_backdrop_url=None,
                 fallback_reason="reclaim_candidate_missing_asset_artwork",
             )
@@ -969,8 +1137,22 @@ class OperationsService:
 
     async def recommendations(self) -> OperationsRecommendationsResponse:
         items = await self._cleanup_plan_recommendations()
-        if not items:
-            items = await self._fallback_recommendations()
+        legacy_items = await self._fallback_recommendations()
+        _, intelligence = await self._graph_intelligence()
+        downloads = await DownloadsIntelligenceService(self.db).run()
+        graph_items = await self._graph_issue_recommendations(intelligence.issues)
+        items.extend(legacy_items)
+        items.extend(graph_items)
+        items.extend(downloads.recommendations)
+
+        risk_rank = {"high_risk": 0, "medium_risk": 1, "low_risk": 2, "safe": 3}
+        items.sort(
+            key=lambda row: (
+                risk_rank.get(row.safety_level, 99),
+                -(row.estimated_recovery_bytes or 0),
+                row.title.lower(),
+            )
+        )
         return OperationsRecommendationsResponse(items=items, total=len(items))
 
     async def _find_recommendation(
@@ -1326,12 +1508,84 @@ class OperationsService:
         filesystem = await self.filesystem_config()
         cleanup_plans = await self.cleanup_plans()
         artwork_issues = await self.artwork_issues_summary()
+        _, intelligence = await self._graph_intelligence()
+        downloads = await DownloadsIntelligenceService(self.db).run()
+
+        health_categories = [
+            OperationsHealthCategory(
+                key=item.key,
+                score=item.score,
+                reasons=item.reasons,
+                warnings=item.warnings,
+                critical_failures=item.critical_failures,
+            )
+            for item in intelligence.health_categories
+        ]
+        issue_summary = self._to_issue_summary(intelligence.issues)
+        issues = [
+            OperationsIssue(
+                key=item.key,
+                issue_type=item.issue_type,
+                severity=item.severity,
+                confidence=item.confidence,
+                media_type=item.media_type,
+                media_id=item.media_id,
+                title=item.title,
+                reason=item.reason,
+                recommendation=item.recommendation,
+                suggested_remediation=item.remediation,
+                graph_references=item.graph_references,
+            )
+            for item in intelligence.issues
+        ]
+        timeline_events = [
+            MieTimelineEvent(
+                id=f"ops:{media_id}:{idx}",
+                happened_at=timestamp,
+                event_type="operations_highlight",
+                title=title,
+                summary=summary,
+                origin="operations",
+                severity="info",
+                media_type=None,
+                media_id=media_id,
+            )
+            for idx, (timestamp, title, summary, media_id) in enumerate(
+                intelligence.timeline_highlights
+            )
+        ]
+
         return OperationsWorkspaceResponse(
             overview=overview,
             recommendations=recommendations,
             filesystem=filesystem,
             cleanup_plans=cleanup_plans,
             artwork_issues=artwork_issues,
+            health=OperationsHealthSummary(
+                categories=health_categories,
+                overall_health=intelligence.overall_health,
+                reasons=[
+                    f"Detected {issue_summary.total} issue(s) across graph snapshots."
+                ],
+            ),
+            issues=issues,
+            issue_summary=issue_summary,
+            graph_summary=OperationsGraphSummary(
+                total_media=intelligence.graph_summary.total_media,
+                movies=intelligence.graph_summary.movies,
+                series=intelligence.graph_summary.series,
+                with_requests=intelligence.graph_summary.with_requests,
+                with_torrents=intelligence.graph_summary.with_torrents,
+                with_missing_files=intelligence.graph_summary.with_missing_files,
+                with_artwork_gaps=intelligence.graph_summary.with_artwork_gaps,
+            ),
+            timeline_summary=OperationsTimelineSummary(highlights=timeline_events),
+            confidence=OperationsConfidenceSummary(
+                score=intelligence.confidence.score,
+                factors=intelligence.confidence.factors,
+            ),
+            downloads_health=downloads.summary,
+            downloads=downloads.items,
         )
 
     async def artwork_issues_summary(self) -> ArtworkIssuesSummary:

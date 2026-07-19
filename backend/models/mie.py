@@ -39,6 +39,127 @@ class OperationsRecommendation(BaseModel):
     estimated_recovery_bytes: int = 0
     poster_url: str | None = None
     artwork: ArtworkSelection | None = None
+    issue_key: str | None = None
+    confidence: int | None = None
+    graph_references: list[str] = Field(default_factory=list)
+
+
+OperationsIssueSeverity = Literal["critical", "high", "medium", "low"]
+
+
+class OperationsIssue(BaseModel):
+    key: str
+    issue_type: str
+    severity: OperationsIssueSeverity
+    confidence: int = 0
+    media_type: MediaType
+    media_id: int
+    title: str
+    reason: str
+    recommendation: str
+    suggested_remediation: str
+    graph_references: list[str] = Field(default_factory=list)
+
+
+class OperationsHealthCategory(BaseModel):
+    key: str
+    score: int = 0
+    reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    critical_failures: list[str] = Field(default_factory=list)
+
+
+class OperationsHealthSummary(BaseModel):
+    categories: list[OperationsHealthCategory] = Field(default_factory=list)
+    overall_health: int = 0
+    reasons: list[str] = Field(default_factory=list)
+
+
+class OperationsIssueSummary(BaseModel):
+    total: int = 0
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+
+
+class OperationsGraphSummary(BaseModel):
+    total_media: int = 0
+    movies: int = 0
+    series: int = 0
+    with_requests: int = 0
+    with_torrents: int = 0
+    with_missing_files: int = 0
+    with_artwork_gaps: int = 0
+
+
+class OperationsTimelineSummary(BaseModel):
+    highlights: list[MieTimelineEvent] = Field(default_factory=list)
+
+
+class OperationsConfidenceSummary(BaseModel):
+    score: int = 0
+    factors: list[str] = Field(default_factory=list)
+
+
+DownloadLifecycleState = Literal[
+    "metadata_download",
+    "queued",
+    "downloading",
+    "checking",
+    "moving",
+    "seeding",
+    "imported",
+    "orphaned",
+    "stale",
+    "failed",
+    "unknown",
+]
+
+DownloadCleanupClassification = Literal[
+    "safe_to_delete",
+    "safe_to_archive",
+    "needs_investigation",
+    "failed_import",
+    "duplicate_download",
+    "abandoned_download",
+    "none",
+]
+
+
+class DownloadLifecycleObject(BaseModel):
+    path: str
+    entry_type: str
+    torrent: str | None = None
+    owner: str | None = None
+    media_identity: str | None = None
+    media_type: MediaType | None = None
+    media_id: int | None = None
+    lifecycle_state: DownloadLifecycleState = "unknown"
+    import_status: str = "unknown"
+    age_hours: int = 0
+    size_bytes: int = 0
+    last_activity_at: datetime | None = None
+    associated_request: str | None = None
+    associated_arr_record: str | None = None
+    associated_timeline: list[str] = Field(default_factory=list)
+    confidence_score: int = 0
+    cleanup_classification: DownloadCleanupClassification = "none"
+    cleanup_reason: str | None = None
+
+
+class DownloadsHealthSummary(BaseModel):
+    active_downloads: int = 0
+    completed_waiting_for_import: int = 0
+    completed_waiting_for_cleanup: int = 0
+    imported_but_still_present: int = 0
+    duplicate_downloads: int = 0
+    failed_downloads: int = 0
+    unknown_downloads: int = 0
+    orphaned_downloads: int = 0
+    safe_to_delete: int = 0
+    total_download_space: int = 0
+    recoverable_space: int = 0
 
 
 class ArtworkIssuesSummary(BaseModel):
@@ -150,6 +271,14 @@ class OperationsWorkspaceResponse(BaseModel):
     filesystem: FilesystemConfigResponse
     cleanup_plans: CleanupPlanListResponse
     artwork_issues: ArtworkIssuesSummary | None = None
+    health: OperationsHealthSummary = Field(default_factory=OperationsHealthSummary)
+    issues: list[OperationsIssue] = Field(default_factory=list)
+    issue_summary: OperationsIssueSummary = Field(default_factory=OperationsIssueSummary)
+    graph_summary: OperationsGraphSummary = Field(default_factory=OperationsGraphSummary)
+    timeline_summary: OperationsTimelineSummary = Field(default_factory=OperationsTimelineSummary)
+    confidence: OperationsConfidenceSummary = Field(default_factory=OperationsConfidenceSummary)
+    downloads_health: DownloadsHealthSummary = Field(default_factory=DownloadsHealthSummary)
+    downloads: list[DownloadLifecycleObject] = Field(default_factory=list)
 
 
 class MieHealthFactor(BaseModel):
@@ -501,3 +630,148 @@ class MediaIdentityDetailResponse(BaseModel):
     external_ids: list[MediaIdentityExternalIdResponse] = Field(default_factory=list)
     relationships: list[MediaIdentityRelationshipResponse] = Field(default_factory=list)
     timeline: list[MediaIdentityTimelineEventResponse] = Field(default_factory=list)
+
+
+CorrelationHealthStatus = Literal["good", "warn", "risk"]
+CorrelationTorrentState = Literal[
+    "waiting",
+    "queued",
+    "downloading",
+    "paused",
+    "import_pending",
+    "imported",
+    "completed",
+    "seeding",
+    "missing",
+    "failed",
+    "orphaned",
+    "blocked",
+]
+
+
+class MieCorrelationExternalIds(BaseModel):
+    tmdb: str | None = None
+    tvdb: str | None = None
+    imdb: str | None = None
+    anidb: str | None = None
+    tvmaze: str | None = None
+    trakt: str | None = None
+    additional: dict[str, str] = Field(default_factory=dict)
+
+
+class MieCorrelationIdentity(BaseModel):
+    media_identity_id: int | None = None
+    canonical_title: str
+    canonical_ids: MieCorrelationExternalIds
+    media_type: MediaType
+    release_year: int | None = None
+    canonical_provider: str | None = None
+
+
+class MieCorrelationRequestRecord(BaseModel):
+    request_id: str
+    request_status: str
+    request_user: str | None = None
+    request_date: datetime | None = None
+    approval_date: datetime | None = None
+    request_source: str
+
+
+class MieCorrelationRequestIntelligence(BaseModel):
+    request_state: str = "unknown"
+    requests: list[MieCorrelationRequestRecord] = Field(default_factory=list)
+
+
+class MieCorrelationArrOwnershipRecord(BaseModel):
+    provider: str
+    internal_arr_id: str
+    root_folder: str | None = None
+    quality_profile: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    monitored: bool | None = None
+    import_status: str = "unknown"
+
+
+class MieCorrelationArrIntelligence(BaseModel):
+    ownership: list[MieCorrelationArrOwnershipRecord] = Field(default_factory=list)
+
+
+class MieCorrelationTorrentRecord(BaseModel):
+    torrent_hash: str | None = None
+    torrent_name: str
+    category: str | None = None
+    download_client: str
+    progress: float = 0.0
+    download_speed: int = 0
+    upload_speed: int = 0
+    eta_seconds: int | None = None
+    raw_state: str | None = None
+    computed_state: CorrelationTorrentState
+
+
+class MieCorrelationTorrentIntelligence(BaseModel):
+    torrents: list[MieCorrelationTorrentRecord] = Field(default_factory=list)
+
+
+class MieCorrelationFileRecord(BaseModel):
+    path: str
+    file_type: str
+    size_bytes: int = 0
+    last_modified: datetime | None = None
+
+
+class MieCorrelationFileIntelligence(BaseModel):
+    media_files: list[MieCorrelationFileRecord] = Field(default_factory=list)
+    subtitles: list[MieCorrelationFileRecord] = Field(default_factory=list)
+    nfo: list[MieCorrelationFileRecord] = Field(default_factory=list)
+    artwork: list[MieCorrelationFileRecord] = Field(default_factory=list)
+    extras: list[MieCorrelationFileRecord] = Field(default_factory=list)
+    missing_files: int = 0
+    unexpected_files: int = 0
+    duplicate_files: int = 0
+    total_size_bytes: int = 0
+    last_modified: datetime | None = None
+
+
+class MieCorrelationArtworkRecord(BaseModel):
+    source: str
+    artwork_type: str
+    url: str
+
+
+class MieCorrelationArtworkIntelligence(BaseModel):
+    references: list[MieCorrelationArtworkRecord] = Field(default_factory=list)
+
+
+class MieCorrelationTimelineEvent(BaseModel):
+    timestamp: datetime
+    source: str
+    event: str
+    confidence: int = 0
+
+
+class MieCorrelationHealthCategory(BaseModel):
+    key: str
+    status: CorrelationHealthStatus
+    score: int = 0
+    reasons: list[str] = Field(default_factory=list)
+
+
+class MieCorrelationHealthSummary(BaseModel):
+    categories: list[MieCorrelationHealthCategory] = Field(default_factory=list)
+    overall_health_score: int = 0
+
+
+class MieMediaGraphResponse(BaseModel):
+    media_id: int
+    media_type: MediaType
+    title: str
+    graph_generated_at: datetime
+    identity: MieCorrelationIdentity
+    request_intelligence: MieCorrelationRequestIntelligence
+    arr_intelligence: MieCorrelationArrIntelligence
+    torrent_intelligence: MieCorrelationTorrentIntelligence
+    file_intelligence: MieCorrelationFileIntelligence
+    artwork_intelligence: MieCorrelationArtworkIntelligence
+    timeline: list[MieCorrelationTimelineEvent] = Field(default_factory=list)
+    health: MieCorrelationHealthSummary

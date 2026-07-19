@@ -39,6 +39,17 @@ Use those generated docs for the exact request and response models.
 - `GET /api/mie/identity/{identity_id}` (Phase 1 canonical identity detail)
 - `GET /api/mie/providers` (Phase 1 provider mappings)
 - `GET /api/mie/external-ids` (Phase 1 external IDs)
+- `GET /api/mie/media/{media_id}/graph` (Phase 1 correlation graph; optional `media_type` query for ID collisions)
+
+`GET /api/mie/operations` now includes Phase 2 operations intelligence sections:
+
+- `health` (category scores + overall health)
+- `issues` and `issue_summary` (severity, confidence, recommendation, evidence refs)
+- `graph_summary` (coverage and signal presence)
+- `timeline_summary` (recent highlights)
+- `confidence` (engine confidence + factors)
+- `downloads_health` (downloads lifecycle health counters and space metrics)
+- `downloads` (per-object download lifecycle intelligence records)
 
 ### Settings
 

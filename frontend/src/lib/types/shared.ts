@@ -142,6 +142,135 @@ export interface OperationsRecommendation {
   estimated_recovery_bytes: number;
   poster_url: string | null;
   artwork: ArtworkSelection | null;
+  issue_key?: string | null;
+  confidence?: number | null;
+  graph_references?: string[];
+}
+
+export type OperationsIssueSeverity = "critical" | "high" | "medium" | "low";
+
+export interface OperationsIssue {
+  key: string;
+  issue_type: string;
+  severity: OperationsIssueSeverity;
+  confidence: number;
+  media_type: MediaType;
+  media_id: number;
+  title: string;
+  reason: string;
+  recommendation: string;
+  suggested_remediation: string;
+  graph_references: string[];
+}
+
+export interface OperationsHealthCategory {
+  key: string;
+  score: number;
+  reasons: string[];
+  warnings: string[];
+  critical_failures: string[];
+}
+
+export interface OperationsHealthSummary {
+  categories: OperationsHealthCategory[];
+  overall_health: number;
+  reasons: string[];
+}
+
+export interface OperationsIssueSummary {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface OperationsGraphSummary {
+  total_media: number;
+  movies: number;
+  series: number;
+  with_requests: number;
+  with_torrents: number;
+  with_missing_files: number;
+  with_artwork_gaps: number;
+}
+
+export interface MieTimelineEvent {
+  id: string;
+  happened_at: string;
+  event_type: string;
+  title: string;
+  summary: string;
+  origin: string;
+  severity: "info" | "low" | "medium" | "high";
+  media_type: MediaType | null;
+  media_id: number | null;
+}
+
+export interface OperationsTimelineSummary {
+  highlights: MieTimelineEvent[];
+}
+
+export interface OperationsConfidenceSummary {
+  score: number;
+  factors: string[];
+}
+
+export type DownloadLifecycleState =
+  | "metadata_download"
+  | "queued"
+  | "downloading"
+  | "checking"
+  | "moving"
+  | "seeding"
+  | "imported"
+  | "orphaned"
+  | "stale"
+  | "failed"
+  | "unknown";
+
+export type DownloadCleanupClassification =
+  | "safe_to_delete"
+  | "safe_to_archive"
+  | "needs_investigation"
+  | "failed_import"
+  | "duplicate_download"
+  | "abandoned_download"
+  | "none";
+
+export interface DownloadLifecycleObject {
+  path: string;
+  entry_type: string;
+  torrent: string | null;
+  owner: string | null;
+  media_identity: string | null;
+  media_type: MediaType | null;
+  media_id: number | null;
+  lifecycle_state: DownloadLifecycleState;
+  import_status: string;
+  age_hours: number;
+  size_bytes: number;
+  last_activity_at: string | null;
+  associated_request: string | null;
+  associated_arr_record: string | null;
+  associated_timeline: string[];
+  confidence_score: number;
+  cleanup_classification: DownloadCleanupClassification;
+  cleanup_reason: string | null;
+}
+
+export interface DownloadsHealthSummary {
+  active_downloads: number;
+  completed_waiting_for_import: number;
+  completed_waiting_for_cleanup: number;
+  imported_but_still_present: number;
+  duplicate_downloads: number;
+  failed_downloads: number;
+  unknown_downloads: number;
+  orphaned_downloads: number;
+  safe_to_delete: number;
+  total_download_space: number;
+  recoverable_space: number;
 }
 
 export interface ArtworkIssuesSummary {
@@ -241,6 +370,14 @@ export interface MieOperationsResponse {
   filesystem: FilesystemConfigResponse;
   cleanup_plans: CleanupPlanListResponse;
   artwork_issues: ArtworkIssuesSummary | null;
+  health: OperationsHealthSummary;
+  issues: OperationsIssue[];
+  issue_summary: OperationsIssueSummary;
+  graph_summary: OperationsGraphSummary;
+  timeline_summary: OperationsTimelineSummary;
+  confidence: OperationsConfidenceSummary;
+  downloads_health: DownloadsHealthSummary;
+  downloads: DownloadLifecycleObject[];
 }
 
 export type IdentityConflictLevel = "none" | "low" | "medium" | "high";

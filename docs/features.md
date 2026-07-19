@@ -71,6 +71,65 @@ flowchart TD
 The Operations page is recommendation-first and grouped by actionable cards,
 including import backlog, duplicates, orphan detection, and space recovery.
 
+### Operations Intelligence Engine (Phase 2)
+
+Operations now consumes the MIE correlation graph as its single intelligence
+input. The Operations engine evaluates graph snapshots and produces:
+
+- issue detections with severity, confidence, explainability reason, and graph evidence
+- health categories and overall health score
+- graph and timeline summaries for UI consumption
+- recommendation payloads linked back to issue keys and graph references
+
+This keeps Operations aligned with correlation logic and avoids rebuilding
+provider-specific intelligence in multiple layers.
+
+### Download Lifecycle Intelligence
+
+Downloads are treated as transient working storage. Operations continuously
+classifies indexed download objects and assigns one lifecycle state per object:
+
+- active (`metadata_download`, `queued`, `downloading`, `checking`, `moving`, `seeding`)
+- imported
+- orphaned
+- stale
+- failed
+- unknown
+
+Each object is correlated with qBittorrent, ARR ownership, request lineage,
+identity graph signals, and timeline evidence where available.
+
+Operations exposes a Downloads Health section with:
+
+- active downloads
+- completed waiting for import
+- completed waiting for cleanup
+- imported but still present
+- duplicate downloads
+- failed downloads
+- unknown downloads
+- orphaned downloads
+- safe-to-delete count
+- total download space and recoverable space
+
+### Correlation Engine (Phase 1)
+
+MIE now provides a unified media-correlation graph per media item via
+`GET /api/mie/media/{media_id}/graph`.
+
+The graph correlates:
+
+- canonical identity and external IDs
+- request intelligence (Overseerr)
+- ARR ownership (Radarr/Sonarr)
+- torrent intelligence (computed MIE state)
+- file intelligence (media/subtitle/nfo/artwork/extras)
+- artwork references across providers
+- timeline events and health categories
+
+Provider contributions are modular. Each provider contributes independently, and
+the correlation engine merges contributions into one stable API contract.
+
 ### Filesystem Access Modes
 
 - Discovery: read-only visibility, no cleanup execution

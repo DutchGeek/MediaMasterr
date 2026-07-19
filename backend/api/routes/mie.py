@@ -25,12 +25,14 @@ from backend.models.mie import (
     MediaIdentityExternalIdListResponse,
     MediaIdentityListResponse,
     MediaIdentityProviderMappingListResponse,
+    MieMediaGraphResponse,
     MieOverviewResponse,
     MieRelationshipGraphResponse,
     MieTimelineResponse,
     OperationsRecommendationsResponse,
     OperationsWorkspaceResponse,
 )
+from backend.services.mie.correlation_service import CorrelationService
 from backend.services.mie.identity_service import IdentityCenterService
 from backend.services.mie.intelligence_service import MediaIntelligenceService
 from backend.services.mie.operations_service import OperationsService
@@ -93,6 +95,23 @@ async def get_mie_relationship_graph(
         media_type=media_type,
         media_id=media_id,
     )
+
+
+@router.get("/media/{media_id}/graph", response_model=MieMediaGraphResponse)
+async def get_mie_media_graph(
+    media_id: int,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+    media_type: MediaType | None = None,
+) -> MieMediaGraphResponse:
+    try:
+        return await CorrelationService(db).media_graph(
+            media_id=media_id,
+            media_type=media_type,
+        )
+    except ValueError as exc:
+        status_code = 409 if "Ambiguous media id" in str(exc) else 404
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/identity", response_model=IdentityWorkspaceResponse)

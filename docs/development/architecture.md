@@ -69,6 +69,64 @@ scanning, deletion routing, and UI indicators.
 - `backend/core/worker.py` for queue processing behavior
 - `backend/scheduler.py` for scheduled task behavior
 
+## MIE Correlation Pipeline
+
+The Media Intelligence Engine correlation pipeline is implemented in:
+
+- `backend/services/mie/correlation_service.py`
+- `backend/services/mie/correlation_engine.py`
+- `backend/services/mie/correlation_models.py`
+
+Request flow:
+
+1. Resolve one local media subject (`movie` or `series`).
+2. Build a per-request correlation context.
+3. Run provider modules in sequence.
+4. Merge provider contributions into one graph response.
+
+Current provider modules:
+
+- identity provider
+- request provider (Overseerr)
+- ARR provider (Radarr/Sonarr refs)
+- torrent provider (qBittorrent + computed state)
+- filesystem provider
+- artwork provider
+- timeline provider
+- health provider
+
+The public contract is exposed at `GET /api/mie/media/{media_id}/graph` and is
+designed to remain stable for UI and automation consumers.
+
+## Operations Graph Consumer Pipeline
+
+Operations intelligence is now layered on top of correlation graphs:
+
+- `backend/services/mie/operations_engine.py`
+- `backend/services/mie/issue_detector.py`
+- `backend/services/mie/issue_rules.py`
+
+Request flow:
+
+1. Load media assets and request graph snapshots through correlation service.
+2. Evaluate issue rules from graph-only signals.
+3. Aggregate health, confidence, graph summary, and timeline highlights.
+4. Expose enriched operations workspace payloads without duplicating provider logic.
+
+Downloads lifecycle intelligence is implemented in:
+
+- `backend/services/mie/downloads_intelligence.py`
+
+This service:
+
+1. Scans configured downloads roots from filesystem index entries.
+2. Correlates objects to active torrents and identity graph evidence.
+3. Assigns exactly one lifecycle classification per object.
+4. Emits explainable cleanup classifications and recommendations.
+
+No automatic deletion is performed in this phase; the service classifies and
+recommends only.
+
 ## Design Constraints
 
 - Safety defaults matter more than automation.

@@ -196,3 +196,26 @@ async def test_operations_workflow_validate_execute_and_audit() -> None:
         assert audit.items[0].id == executed.execution.operation_history_id
 
     await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_operations_workspace_includes_issue_health_and_confidence_sections() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        workspace = await OperationsService(db).workspace()
+
+    await engine.dispose()
+
+    assert workspace.health.overall_health >= 0
+    assert workspace.issue_summary.total == len(workspace.issues)
+    assert workspace.graph_summary.total_media >= 0
+    assert workspace.confidence.score >= 0
+    assert workspace.downloads_health.total_download_space >= 0
+    assert isinstance(workspace.downloads, list)

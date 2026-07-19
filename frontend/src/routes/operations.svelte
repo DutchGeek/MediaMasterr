@@ -107,6 +107,9 @@
   };
 
   const recommendationConfidence = (item: OperationsRecommendation): number => {
+    if (typeof item.confidence === "number") {
+      return Math.max(0.5, Math.min(0.99, item.confidence / 100));
+    }
     if (item.safety_level === "safe") return 0.99;
     if (item.safety_level === "low_risk") return 0.94;
     if (item.safety_level === "medium_risk") return 0.86;
@@ -526,6 +529,153 @@
         {error}
       </div>
     {:else}
+      <section class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Overall Health
+          </p>
+          <p class="mt-2 text-3xl font-black text-foreground">
+            {workspace?.health.overall_health ?? 0}
+          </p>
+          <p class="mt-1 text-xs text-muted-foreground">Score out of 100</p>
+        </div>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Issue Summary
+          </p>
+          <p class="mt-2 text-sm text-foreground">
+            Critical {workspace?.issue_summary.critical ?? 0} • High
+            {workspace?.issue_summary.high ?? 0} • Medium
+            {workspace?.issue_summary.medium ?? 0} • Low
+            {workspace?.issue_summary.low ?? 0}
+          </p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Total {workspace?.issue_summary.total ?? 0}
+          </p>
+        </div>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Graph Coverage
+          </p>
+          <p class="mt-2 text-sm text-foreground">
+            {workspace?.graph_summary.total_media ?? 0} assets •
+            {workspace?.graph_summary.with_torrents ?? 0} with torrents
+          </p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Missing files {workspace?.graph_summary.with_missing_files ?? 0}
+          </p>
+        </div>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Explainability
+          </p>
+          <p class="mt-2 text-sm text-foreground">
+            Confidence {workspace?.confidence.score ?? 0}%
+          </p>
+          <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+            {(workspace?.confidence.factors ?? []).slice(0, 3).join(" • ")}
+          </p>
+        </div>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="text-lg font-semibold text-foreground">Downloads Health</h2>
+        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Active Downloads
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.active_downloads ?? 0}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Waiting For Import
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.completed_waiting_for_import ?? 0}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Waiting For Cleanup
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.completed_waiting_for_cleanup ?? 0}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Failed / Unknown
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {(workspace?.downloads_health.failed_downloads ?? 0) +
+                (workspace?.downloads_health.unknown_downloads ?? 0)}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Safe To Delete
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.safe_to_delete ?? 0}
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Recoverable
+              {formatFileSize(
+                workspace?.downloads_health.recoverable_space ?? 0,
+              )}
+            </p>
+          </div>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Imported But Still Present
+            </p>
+            <p class="mt-2 text-sm text-foreground">
+              {workspace?.downloads_health.imported_but_still_present ?? 0}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Total Download Space
+            </p>
+            <p class="mt-2 text-sm text-foreground">
+              {formatFileSize(workspace?.downloads_health.total_download_space ?? 0)}
+            </p>
+          </div>
+        </div>
+        <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          <p class="mb-2 text-sm font-semibold text-foreground">
+            Needs Attention (Top 8)
+          </p>
+          {#if (workspace?.downloads.length ?? 0) > 0}
+            <div class="space-y-2 text-xs">
+              {#each (workspace?.downloads ?? [])
+                .filter((row) => row.cleanup_classification !== "none")
+                .slice(0, 8) as row}
+                <div class="rounded-lg border border-border/50 bg-background/70 p-2">
+                  <p class="font-medium text-foreground">{row.path}</p>
+                  <p class="text-muted-foreground">
+                    State {row.lifecycle_state} • {row.cleanup_classification}
+                    • Confidence {row.confidence_score}%
+                  </p>
+                  {#if row.cleanup_reason}
+                    <p class="text-muted-foreground">{row.cleanup_reason}</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="text-sm text-muted-foreground">
+              No indexed downloads were detected in configured downloads roots.
+            </p>
+          {/if}
+        </div>
+      </section>
+
       <section class="space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-lg font-semibold text-foreground">
