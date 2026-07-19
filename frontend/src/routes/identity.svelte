@@ -566,7 +566,8 @@
       const existing = comparisonByProvider.get(providerKey);
       const metadata =
         existing?.metadata ?? providerStatusLabel(provider, "metadata");
-      const artwork = existing?.artwork ?? providerStatusLabel(provider, "artwork");
+      const artwork =
+        existing?.artwork ?? providerStatusLabel(provider, "artwork");
       const identifiers =
         existing?.identifiers ?? providerStatusLabel(provider, "identifiers");
       return {
@@ -658,11 +659,14 @@
       }
 
       const preferredProvider = profileByField.get(row.key);
-      let selectedProvider = options.find((option) => option.selected)?.provider;
+      let selectedProvider = options.find(
+        (option) => option.selected,
+      )?.provider;
       if (!selectedProvider && preferredProvider) {
         selectedProvider =
           options.find(
-            (option) => normalizeProviderKey(option.provider) === preferredProvider,
+            (option) =>
+              normalizeProviderKey(option.provider) === preferredProvider,
           )?.provider ?? null;
       }
       if (!selectedProvider) {
@@ -673,14 +677,17 @@
         ...option,
         selected: option.provider === selectedProvider,
       }));
-      const uniqueImages = new Set(hydratedOptions.map((option) => option.image_url));
+      const uniqueImages = new Set(
+        hydratedOptions.map((option) => option.image_url),
+      );
 
       return {
         key: row.key,
         label: row.label,
         state: "present" as const,
         selected_provider: selectedProvider,
-        shared_across_providers: hydratedOptions.length > 1 && uniqueImages.size === 1,
+        shared_across_providers:
+          hydratedOptions.length > 1 && uniqueImages.size === 1,
         providers: hydratedOptions,
         message: null,
       };
