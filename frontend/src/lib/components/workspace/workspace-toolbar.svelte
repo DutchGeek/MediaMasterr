@@ -109,10 +109,20 @@
   } = $props();
 
   let selectDisplayedRef = $state<HTMLInputElement | null>(null);
+  let sortByValue = $state(sortBy);
+  let sortOrderValue = $state(sortOrder);
 
   $effect(() => {
     if (!selectDisplayedRef) return;
     selectDisplayedRef.indeterminate = selectDisplayedIndeterminate;
+  });
+
+  $effect(() => {
+    sortByValue = sortBy;
+  });
+
+  $effect(() => {
+    sortOrderValue = sortOrder;
   });
 </script>
 
@@ -149,10 +159,12 @@
         <div class="flex gap-2">
           <Select.Root
             type="single"
-            value={sortBy}
+            bind:value={sortByValue}
             onValueChange={onSortByChange}
           >
-            <Select.Trigger class="min-w-40 bg-background text-card-foreground">
+            <Select.Trigger
+              class="min-w-40 cursor-pointer bg-background text-card-foreground"
+            >
               {sortByOptions.find((opt) => opt.value === sortBy)?.label}
             </Select.Trigger>
             <Select.Content class="bg-card">
@@ -170,11 +182,13 @@
 
           <Select.Root
             type="single"
-            value={sortOrder}
+            bind:value={sortOrderValue}
             onValueChange={(value) =>
               onSortOrderChange(value as "asc" | "desc")}
           >
-            <Select.Trigger class="min-w-32 bg-background text-card-foreground">
+            <Select.Trigger
+              class="min-w-32 cursor-pointer bg-background text-card-foreground"
+            >
               {sortOrder === "asc" ? "Ascending" : "Descending"}
             </Select.Trigger>
             <Select.Content class="bg-card">
