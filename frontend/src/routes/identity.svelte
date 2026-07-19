@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { get_api, post_api } from "$lib/api";
+  import ArtworkImage from "$lib/design-system/media/artwork-image.svelte";
   import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import {
     type MediaFilterCatalogResponse,
@@ -14,6 +15,7 @@
     type IdentityWorkspaceItem,
     type IdentityWorkspaceResponse,
   } from "$lib/types/shared";
+  import { PER_PAGE_OPTIONS } from "$lib/utils/pagination";
 
   type StudioTab =
     | "overview"
@@ -352,8 +354,9 @@
     if (typeof prefs.page === "number" && prefs.page >= 1) {
       page = Math.floor(prefs.page);
     }
-    if (typeof prefs.perPage === "number" && prefs.perPage >= 1) {
-      perPage = Math.floor(prefs.perPage);
+    if (typeof prefs.perPage === "number") {
+      const nextPerPage = Math.floor(prefs.perPage);
+      perPage = PER_PAGE_OPTIONS.includes(nextPerPage) ? nextPerPage : 24;
     }
     if (typeof prefs.posterSize === "number" && prefs.posterSize >= 100) {
       posterSize = Math.floor(prefs.posterSize);
@@ -393,10 +396,33 @@
     localStorage.setItem(studioTabStorageKey, tab);
   };
 
-  const metadataValue = (
+  const metadataProviders = (
     row: IdentityStudioResponse["metadata"][number],
-    provider: string,
-  ) => row.values.find((value) => value.provider === provider)?.value;
+  ) =>
+    row.values.filter(
+      (value) => value.provider !== "current" && value.provider !== "canonical",
+    );
+
+  const metadataDifference = (
+    key: string,
+    currentValue: string | null,
+    providerValue: string | null,
+  ): string => {
+    if (providerValue === null) return "Not supplied";
+    if ((currentValue ?? "") === (providerValue ?? "")) return "None";
+    if (["runtime", "year", "tmdb_id", "tvdb_id"].includes(key)) {
+      const currentNumber = Number(currentValue);
+      const providerNumber = Number(providerValue);
+      if (!Number.isNaN(currentNumber) && !Number.isNaN(providerNumber)) {
+        const delta = providerNumber - currentNumber;
+        if (delta === 0) return "None";
+        const sign = delta > 0 ? "+" : "";
+        if (key === "runtime") return `${sign}${delta} minutes`;
+        return `${sign}${delta}`;
+      }
+    }
+    return "Different";
+  };
 
   const canonicalValue = (row: {
     values: { is_canonical: boolean; value: string | null }[];
@@ -470,125 +496,12 @@
     return { field: externalField, value };
   };
 
-  const fallbackOverrideFieldOptions = [
-    "title",
-    "original_title",
-    "sort_title",
-    "year",
-    "runtime",
-    "overview",
-    "tagline",
-    "language",
-    "tmdb_id",
-    "imdb_id",
-    "tvdb_id",
-    "canonical_provider",
-    "metadata_profile",
-    "artwork_profile",
-    "poster_provider",
-    "backdrop_provider",
-  ];
-
-  const providerComparisonRows = $derived.by(() => {
-    if (!studio) return [];
-    const currentStudio = studio;
-    if ((currentStudio.provider_comparison ?? []).length > 0) {
-      return currentStudio.provider_comparison;
-    }
-    return trustedProviders.map((provider) => {
-      const metadataHasDiff = (currentStudio.metadata ?? []).some((row) => {
-        const providerValue =
-          row.values.find((value) => value.provider === provider.provider)
-            ?.value ?? null;
-        return (providerValue ?? "") !== (canonicalValue(row) ?? "");
-      });
-      return {
-        provider: provider.provider,
-        connection_status: provider.connection_status,
-        matched: true,
-        identifiers:
-          provider.external_ids_count > 0 ? "IDs available" : "IDs unavailable",
-        metadata: metadataHasDiff ? "Metadata differs" : "Metadata identical",
-        artwork: provider.is_canonical ? "Poster selected" : "Poster differs",
-        health: confidenceStatus(provider.confidence),
-        differences: metadataHasDiff
-          ? ["Metadata differs"]
-          : ["Metadata identical"],
-      };
-    });
-  });
-
-  const artworkCards = $derived.by(() => {
-    if (!studio) return [];
-    if ((studio.artwork_cards ?? []).length > 0) {
-      return studio.artwork_cards;
-    }
-    return (studio.artwork ?? [])
-      .filter((row) =>
-        ["poster", "backdrop", "logo", "banner"].includes(row.key),
-      )
-      .map((row) => {
-        const options = row.values
-          .filter(
-            (value) =>
-              value.provider !== "current" &&
-              value.provider !== "canonical" &&
-              !!resolveRenderableImageUrl(value.value),
-          )
-          .map((value) => ({
-            provider: value.provider,
-            image_url: resolveRenderableImageUrl(value.value) ?? "",
-            resolution: null,
-            last_updated: null,
-            confidence: value.confidence,
-            selected: value.is_canonical,
-          }));
-        const selectedOption =
-          options.find((option) => option.selected) ?? options[0] ?? null;
-        return {
-          key: row.key,
-          label: row.label,
-          state: (options.length > 0 ? "present" : "missing") as
-            | "present"
-            | "missing"
-            | "pending"
-            | "error",
-          selected_provider: selectedOption?.provider ?? null,
-          shared_across_providers:
-            options.length > 1 &&
-            new Set(options.map((option) => option.image_url)).size === 1,
-          providers:
-            options.length > 1 &&
-            new Set(options.map((option) => option.image_url)).size === 1
-              ? [options[0]]
-              : options,
-          message: options.length > 0 ? null : `No ${row.label} Available`,
-        };
-      })
-      .filter(
-        (card) =>
-          card.key === "poster" ||
-          card.key === "backdrop" ||
-          card.providers.length > 0,
-      );
-  });
-
-  const canonicalArtworkProfileEntries = $derived.by(() => {
-    if (!studio) return [];
-    if ((studio.canonical_artwork_profile ?? []).length > 0) {
-      return studio.canonical_artwork_profile;
-    }
-    return artworkCards.map((card) => ({
-      key: card.key,
-      label: card.label,
-      provider: card.selected_provider,
-    }));
-  });
-
-  const overrideFieldOptions = $derived.by(() => {
-    const fromStudio = studio?.override_field_options ?? [];
-    return fromStudio.length > 0 ? fromStudio : fallbackOverrideFieldOptions;
-  });
+  const providerComparisonRows = $derived(studio?.provider_comparison ?? []);
+  const artworkCards = $derived(studio?.artwork_cards ?? []);
+  const canonicalArtworkProfileEntries = $derived(
+    studio?.canonical_artwork_profile ?? [],
+  );
+  const overrideFieldOptions = $derived(studio?.override_field_options ?? []);
 
   async function loadFilterCatalog() {
     try {
@@ -1469,14 +1382,12 @@
                     checked={selectedKeys.has(itemKey(item))}
                     onchange={() => toggleSelection(item)}
                   />
-                  {#if item.poster_url}
-                    <img
-                      src={item.poster_url}
-                      alt={item.title}
-                      class="rounded object-cover"
-                      style={`height:${Math.round((posterSize * 2) / 25)}px;width:${Math.round((posterSize * 1.35) / 25)}px;`}
-                    />
-                  {/if}
+                  <ArtworkImage
+                    src={item.poster_url}
+                    alt={item.title}
+                    class="w-[92px] shrink-0 rounded-md border border-border/50 bg-muted/20"
+                    imageClass="h-[138px] w-[92px] object-cover"
+                  />
                   <button
                     class="min-w-0 flex-1 text-left"
                     onclick={() => void loadStudio(item)}
@@ -1926,11 +1837,8 @@
                       </tr>
                     </thead>
                     <tbody>
-                      {#each trustedProviders as provider}
-                        {@const providerValue = metadataValue(
-                          row,
-                          provider.provider,
-                        )}
+                      {#each metadataProviders(row) as provider}
+                        {@const providerValue = provider.value}
                         <tr class="border-t border-border/50">
                           <td class="py-1 pr-2">{canonicalValue(row) ?? "-"}</td
                           >
@@ -1944,9 +1852,11 @@
                               "Not supplied"}</td
                           >
                           <td class="py-1">
-                            {providerValue !== (canonicalValue(row) ?? null)
-                              ? "Different"
-                              : "Identical"}
+                            {metadataDifference(
+                              row.key,
+                              canonicalValue(row) ?? null,
+                              providerValue,
+                            )}
                           </td>
                         </tr>
                       {/each}
@@ -2050,20 +1960,15 @@
                 Preview Changes
               </div>
               <div class="mt-2 grid gap-2 md:grid-cols-2">
-                {#each ["plex", "sonarr", "radarr", "overseerr", "local_database"] as system}
+                {#each studio.synchronization as row}
                   <div
                     class="rounded-md border border-border/60 bg-background/80 px-2 py-2 text-xs"
                   >
                     <div class="font-medium text-foreground">
-                      Will update {system.replaceAll("_", " ")}
+                      {row.label}
                     </div>
                     <div class="mt-1 text-muted-foreground">
-                      {trustedProviders.some(
-                        (provider) =>
-                          provider.provider.toLowerCase() === system,
-                      ) || system === "local_database"
-                        ? "Pending changes in preview"
-                        : "No mapped provider for this title"}
+                      {row.values[0]?.value ?? "-"}
                     </div>
                   </div>
                 {/each}
@@ -2124,8 +2029,12 @@
                 />
               </label>
             </div>
+          </div>
+        {/if}
 
-            {#each studio.synchronization as row}
+        {#if activeTab === "diagnostics"}
+          <div class="space-y-2 text-sm">
+            {#each studio.diagnostics as row}
               <div class="rounded-xl border border-border/70 p-3">
                 <div class="text-xs text-muted-foreground">{row.label}</div>
                 {#each row.values as value}
@@ -2135,21 +2044,17 @@
                 {/each}
               </div>
             {/each}
-          </div>
-        {/if}
 
-        {#if activeTab === "diagnostics"}
-          <div class="space-y-2 text-sm">
             <div class="rounded-xl border border-border/70 bg-muted/20 p-3">
               <div class="flex items-center justify-between gap-2">
                 <div>
                   <div
                     class="text-xs uppercase tracking-wide text-muted-foreground"
                   >
-                    Provider Trust
+                    Provider Trust Configuration
                   </div>
                   <div class="text-sm text-foreground">
-                    Future decisions honor this order.
+                    Adjust ordering when canonical decisions should prioritize a different provider.
                   </div>
                 </div>
                 <button
@@ -2180,17 +2085,6 @@
                 {/each}
               </div>
             </div>
-
-            {#each studio.diagnostics as row}
-              <div class="rounded-xl border border-border/70 p-3">
-                <div class="text-xs text-muted-foreground">{row.label}</div>
-                {#each row.values as value}
-                  <div class="mt-1 text-sm text-foreground">
-                    {value.provider}: {value.value ?? "-"}
-                  </div>
-                {/each}
-              </div>
-            {/each}
           </div>
         {/if}
 

@@ -105,6 +105,37 @@ class IdentityCenterService:
         return f"{field_label} differs"
 
     @staticmethod
+    def _stringify(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return str(value)
+
+    @staticmethod
+    def _difference_summary(current: str | None, provider: str | None, key: str) -> str:
+        if provider is None:
+            return "Not supplied"
+        if (current or "") == (provider or ""):
+            return "None"
+        if key in {"runtime", "year", "tmdb_id", "tvdb_id"}:
+            try:
+                current_number = int(current or "")
+                provider_number = int(provider or "")
+                delta = provider_number - current_number
+                if delta == 0:
+                    return "None"
+                if key == "runtime":
+                    sign = "+" if delta > 0 else ""
+                    return f"{sign}{delta} minutes"
+                sign = "+" if delta > 0 else ""
+                return f"{sign}{delta}"
+            except ValueError:
+                pass
+        return "Different"
+
+    @staticmethod
     def _preferred_provider(media_type: MediaType) -> str:
         return "radarr" if media_type == MediaType.MOVIE else "sonarr"
 
@@ -370,6 +401,13 @@ class IdentityCenterService:
                 matches = match_index.get((MediaType.MOVIE, movie.id), [])
                 providers = {str(row.source_service) for row in matches}
                 canonical = self._choose_canonical_provider(MediaType.MOVIE, matches)
+                asset_source = self._normalize_provider_key(
+                    asset.artwork_source if asset else None
+                )
+                if not providers and asset_source:
+                    providers.add(asset_source)
+                if not matches and asset_source:
+                    canonical = asset_source
                 match_confidence = max(
                     (int(row.confidence or 0) for row in matches), default=0
                 )
@@ -455,6 +493,13 @@ class IdentityCenterService:
                 matches = match_index.get((MediaType.SERIES, series.id), [])
                 providers = {str(row.source_service) for row in matches}
                 canonical = self._choose_canonical_provider(MediaType.SERIES, matches)
+                asset_source = self._normalize_provider_key(
+                    asset.artwork_source if asset else None
+                )
+                if not providers and asset_source:
+                    providers.add(asset_source)
+                if not matches and asset_source:
+                    canonical = asset_source
                 match_confidence = max(
                     (int(row.confidence or 0) for row in matches), default=0
                 )
@@ -735,6 +780,42 @@ class IdentityCenterService:
                 )
             )
 
+        asset_source = self._normalize_provider_key(asset.artwork_source if asset else None)
+        if not provider_matches and asset_source:
+            canonical_provider = asset_source
+            fallback_signals: dict[str, str] = {}
+            if canonical_poster:
+                fallback_signals["poster_url"] = canonical_poster
+            if canonical_backdrop:
+                fallback_signals["backdrop_url"] = canonical_backdrop
+            if canonical_logo:
+                fallback_signals["logo_url"] = canonical_logo
+            if canonical_banner:
+                fallback_signals["banner_url"] = canonical_banner
+            provider_matches.append(
+                IdentityProviderMatch(
+                    provider=asset_source,
+                    provider_item_id=f"asset-{media_id}",
+                    confidence=int((asset.artwork_confidence if asset else 1.0) * 100),
+                    path_tail=None,
+                    artwork_preview_url=canonical_poster,
+                    metadata_quality=self._status_from_confidence(
+                        int((asset.artwork_confidence if asset else 1.0) * 100)
+                    ),
+                    external_ids_count=0,
+                    collection_count=0,
+                    connection_status="connected",
+                    signals=fallback_signals,
+                    updated_at=asset.updated_at if asset else None,
+                    is_canonical=True,
+                )
+            )
+
+        if provider_matches and all(
+            provider.provider != canonical_provider for provider in provider_matches
+        ):
+            provider_matches[0].is_canonical = True
+
         artwork_preferences = await self._artwork_provider_preferences(
             media_type=media_type,
             media_id=media_id,
@@ -759,6 +840,12 @@ class IdentityCenterService:
             "anilist_id": str(getattr(target, "anilist_id", "") or "") or None,
         }
 
+        provider_count = len(provider_matches)
+        conflict_level = self._conflict_level(
+            max(1, provider_count),
+            max((provider.confidence for provider in provider_matches), default=0),
+        )
+
         overview: list[IdentityComparisonField] = [
             IdentityComparisonField(
                 key="canonical_provider",
@@ -778,7 +865,19 @@ class IdentityCenterService:
                 values=[
                     IdentityFieldValue(
                         provider="calculated",
-                        value=str(len(provider_matches)),
+                        value=str(provider_count),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="conflict_state",
+                label="Conflict State",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=conflict_level,
                         confidence=100,
                         is_canonical=True,
                     )
@@ -800,10 +899,13 @@ class IdentityCenterService:
                 candidate = provider.signals.get(key)
                 if candidate is None:
                     candidate = provider.signals.get(f"metadata_{key}")
+                candidate_value = self._stringify(candidate)
+                if candidate_value is None and provider.provider == canonical_provider:
+                    candidate_value = value
                 field_values.append(
                     IdentityFieldValue(
                         provider=provider.provider,
-                        value=(str(candidate) if candidate is not None else None),
+                        value=candidate_value,
                         confidence=provider.confidence,
                         is_canonical=provider.provider == canonical_provider,
                     )
@@ -830,10 +932,13 @@ class IdentityCenterService:
                 candidate = provider.signals.get(key)
                 if candidate is None:
                     candidate = provider.signals.get(f"identifier_{key}")
+                candidate_value = self._stringify(candidate)
+                if candidate_value is None and provider.provider == canonical_provider:
+                    candidate_value = value
                 external_field_values.append(
                     IdentityFieldValue(
                         provider=provider.provider,
-                        value=(str(candidate) if candidate is not None else None),
+                        value=candidate_value,
                         confidence=provider.confidence,
                         is_canonical=provider.provider == canonical_provider,
                     )
@@ -872,6 +977,8 @@ class IdentityCenterService:
                 candidate = provider.signals.get(f"{field_key}_url")
                 if candidate is None:
                     candidate = provider.signals.get(f"artwork_{field_key}")
+                if candidate is None and provider.provider == canonical_provider:
+                    candidate = canonical_value
                 if not isinstance(candidate, str) or not candidate.strip():
                     continue
                 normalized_candidate = self._normalize_artwork_value(
@@ -985,6 +1092,7 @@ class IdentityCenterService:
             )
 
         provider_comparison: list[IdentityProviderComparisonRow] = []
+        providers_with_differences = 0
         for provider in provider_matches:
             poster_diff = self._provider_difference_text(
                 canonical_value=canonical_poster,
@@ -1021,6 +1129,8 @@ class IdentityCenterService:
                 differences.append("Metadata differs")
             if external_has_diff:
                 differences.append("Identifiers differ")
+            if any(diff not in {"Poster identical", "Backdrop identical"} for diff in differences):
+                providers_with_differences += 1
 
             provider_comparison.append(
                 IdentityProviderComparisonRow(
@@ -1051,6 +1161,128 @@ class IdentityCenterService:
                     differences=differences,
                 )
             )
+
+        synchronization_rows: list[IdentityComparisonField] = [
+            IdentityComparisonField(
+                key="mapped_providers",
+                label="Mapped Providers",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=(
+                            ", ".join(provider.provider for provider in provider_matches)
+                            if provider_matches
+                            else canonical_provider
+                        ),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="providers_to_update",
+                label="Providers To Update",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=str(max(0, provider_count - 1)),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="expected_changes",
+                label="Expected Changes",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=str(providers_with_differences),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="pending_actions",
+                label="Pending Actions",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=(
+                            "Queue synchronization"
+                            if providers_with_differences > 0
+                            else "No pending changes"
+                        ),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="conflicts",
+                label="Conflicts",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=conflict_level,
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+        ]
+
+        diagnostics_rows: list[IdentityComparisonField] = [
+            IdentityComparisonField(
+                key="canonical_reason",
+                label="Canonical Decision",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=(
+                            f"{canonical_provider} is canonical because it is preferred"
+                            if canonical_provider == self._preferred_provider(media_type)
+                            else f"{canonical_provider} is canonical because it has the strongest match"
+                        ),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="difference_reason",
+                label="Provider Differences",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=(
+                            f"{providers_with_differences} provider(s) differ from canonical values"
+                            if providers_with_differences > 0
+                            else "All provider values align with canonical values"
+                        ),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+            IdentityComparisonField(
+                key="sync_reason",
+                label="Synchronization Need",
+                values=[
+                    IdentityFieldValue(
+                        provider="calculated",
+                        value=(
+                            "Synchronization required due to provider differences"
+                            if providers_with_differences > 0
+                            else "No synchronization required"
+                        ),
+                        confidence=100,
+                        is_canonical=True,
+                    )
+                ],
+            ),
+        ]
 
         history_rows = (
             (
@@ -1126,43 +1358,8 @@ class IdentityCenterService:
             external_ids=external_ids,
             overrides=overrides,
             history=history,
-            synchronization=[
-                IdentityComparisonField(
-                    key="sync_preview",
-                    label="Synchronization Preview",
-                    values=[
-                        IdentityFieldValue(
-                            provider="current",
-                            value="Current values will be compared against provider values before apply.",
-                            confidence=100,
-                            is_canonical=True,
-                        )
-                    ],
-                )
-            ],
-            diagnostics=[
-                IdentityComparisonField(
-                    key="identity_conflict",
-                    label="Conflict Level",
-                    values=[
-                        IdentityFieldValue(
-                            provider="calculated",
-                            value=self._conflict_level(
-                                max(1, len(provider_matches)),
-                                max(
-                                    (
-                                        provider.confidence
-                                        for provider in provider_matches
-                                    ),
-                                    default=0,
-                                ),
-                            ),
-                            confidence=100,
-                            is_canonical=True,
-                        )
-                    ],
-                )
-            ],
+            synchronization=synchronization_rows,
+            diagnostics=diagnostics_rows,
             override_field_options=list(self.OVERRIDE_FIELD_OPTIONS),
             generated_at=datetime.now(UTC),
         )

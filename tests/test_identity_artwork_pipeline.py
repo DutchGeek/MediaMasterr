@@ -168,11 +168,63 @@ async def test_identity_workspace_confidence_falls_back_to_health_signals() -> N
 
     assert response.items
     item = response.items[0]
-    assert item.provider_count == 0
+    assert item.provider_count == 1
     assert item.provider_confidence == 100
     assert item.identifier_status == "healthy"
     assert item.metadata_status == "healthy"
     assert item.artwork_status == "valid"
+
+
+@pytest.mark.anyio
+async def test_identity_studio_falls_back_to_asset_artwork_when_match_rows_missing() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(
+            title="Fallback Artwork Movie",
+            tmdb_id=7000,
+            poster_url="/movie-poster.jpg",
+        )
+        movie.backdrop_url = "/movie-backdrop.jpg"
+        db.add(movie)
+        await db.flush()
+        db.add(
+            MediaAsset(
+                media_type=MediaType.MOVIE,
+                movie_id=movie.id,
+                poster_url="/asset-poster.jpg",
+                backdrop_url="/asset-backdrop.jpg",
+                artwork_status="VALID",
+                artwork_source="radarr",
+                artwork_confidence=0.91,
+            )
+        )
+        await db.commit()
+
+        studio = await IdentityCenterService(db).studio(
+            media_type=MediaType.MOVIE,
+            media_id=movie.id,
+        )
+
+    await engine.dispose()
+
+    poster_card = next(card for card in studio.artwork_cards if card.key == "poster")
+    backdrop_card = next(
+        card for card in studio.artwork_cards if card.key == "backdrop"
+    )
+
+    assert poster_card.state == "present"
+    assert len(poster_card.providers) == 1
+    assert backdrop_card.state == "present"
+    assert len(studio.provider_comparison) == 1
 
 
 @pytest.mark.anyio
