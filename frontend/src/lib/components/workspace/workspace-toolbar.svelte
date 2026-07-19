@@ -120,7 +120,9 @@
   <div class="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
     <div class="space-y-3">
       <div class="flex flex-col gap-2 lg:flex-row lg:items-center">
-        <div class="relative w-full min-w-[280px] lg:w-[320px] lg:max-w-[320px] lg:flex-none">
+        <div
+          class="relative w-full min-w-[280px] lg:w-[320px] lg:max-w-[320px] lg:flex-none"
+        >
           <Search
             class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           />
@@ -374,7 +376,9 @@
         value={perPage.toString()}
         onValueChange={(v) => onPerPageChange(parseInt(v, 10))}
       >
-        <Select.Trigger class="w-32 justify-between bg-background text-card-foreground">
+        <Select.Trigger
+          class="w-32 justify-between bg-background text-card-foreground"
+        >
           {perPage} / page
         </Select.Trigger>
         <Select.Content class="bg-card">
