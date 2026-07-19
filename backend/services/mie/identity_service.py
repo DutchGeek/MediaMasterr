@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.artwork import resolve_backdrop_url, resolve_poster_url
 from backend.database.models import (
     MediaAsset,
+    MediaIdentity,
+    MediaIdentityExternalId,
+    MediaIdentityProviderMapping,
+    MediaIdentityRelationship,
+    MediaIdentityTimelineEvent,
     Movie,
     OperationHistory,
     QueryFilter,
@@ -38,6 +43,15 @@ from backend.models.mie import (
     IdentitySyncPreviewResponse,
     IdentityWorkspaceItem,
     IdentityWorkspaceResponse,
+    MediaIdentityDetailResponse,
+    MediaIdentityExternalIdListResponse,
+    MediaIdentityExternalIdResponse,
+    MediaIdentityListResponse,
+    MediaIdentityProviderMappingListResponse,
+    MediaIdentityProviderMappingResponse,
+    MediaIdentityRelationshipResponse,
+    MediaIdentitySummaryResponse,
+    MediaIdentityTimelineEventResponse,
 )
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
 from backend.services.query_engine import QueryEngineSpec, apply_spec
@@ -113,7 +127,9 @@ class IdentityCenterService:
             return cleaned or None
         return str(value)
 
-    def _matches_workspace_search(self, *, search_value: str, target: Movie | Series) -> bool:
+    def _matches_workspace_search(
+        self, *, search_value: str, target: Movie | Series
+    ) -> bool:
         if not search_value:
             return True
 
@@ -1632,3 +1648,313 @@ class IdentityCenterService:
                 for row in history_rows
             ]
         )
+
+    async def canonical_identities(
+        self,
+        *,
+        page: int = 1,
+        per_page: int = 50,
+        media_type: MediaType | None = None,
+        search: str | None = None,
+    ) -> MediaIdentityListResponse:
+        bounded_page = max(1, page)
+        bounded_per_page = min(max(1, per_page), 200)
+        search_value = (search or "").strip().lower()
+
+        stmt = select(MediaIdentity)
+        if media_type is not None:
+            stmt = stmt.where(MediaIdentity.media_type == media_type)
+        if search_value:
+            stmt = stmt.where(
+                func.lower(func.coalesce(MediaIdentity.canonical_title, "")).contains(
+                    search_value
+                )
+            )
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = int((await self.db.execute(count_stmt)).scalar_one())
+
+        rows = (
+            (
+                await self.db.execute(
+                    stmt.order_by(MediaIdentity.updated_at.desc())
+                    .offset((bounded_page - 1) * bounded_per_page)
+                    .limit(bounded_per_page)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        items: list[MediaIdentitySummaryResponse] = []
+        for row in rows:
+            media_id = int(row.movie_id or row.series_id or 0)
+            items.append(
+                MediaIdentitySummaryResponse(
+                    id=row.id,
+                    media_type=row.media_type,
+                    media_id=media_id,
+                    title=row.canonical_title or "Unknown",
+                    year=row.canonical_year,
+                    canonical_provider=row.canonical_provider,
+                    provider_confidence=int(row.provider_confidence or 0),
+                    identity_confidence=int(row.identity_confidence or 0),
+                    conflict_level=row.conflict_level,
+                    needs_review=bool(row.needs_review),
+                    health_state=row.health_state,
+                    lifecycle_state=row.lifecycle_state,
+                    last_synced_at=row.last_synced_at,
+                    updated_at=row.updated_at,
+                )
+            )
+
+        return MediaIdentityListResponse(
+            items=items,
+            total=total,
+            page=bounded_page,
+            per_page=bounded_per_page,
+        )
+
+    async def canonical_identity_detail(
+        self,
+        *,
+        identity_id: int,
+    ) -> MediaIdentityDetailResponse:
+        row = await self.db.get(MediaIdentity, identity_id)
+        if row is None:
+            raise ValueError("Identity not found")
+
+        media_id = int(row.movie_id or row.series_id or 0)
+        identity = MediaIdentitySummaryResponse(
+            id=row.id,
+            media_type=row.media_type,
+            media_id=media_id,
+            title=row.canonical_title or "Unknown",
+            year=row.canonical_year,
+            canonical_provider=row.canonical_provider,
+            provider_confidence=int(row.provider_confidence or 0),
+            identity_confidence=int(row.identity_confidence or 0),
+            conflict_level=row.conflict_level,
+            needs_review=bool(row.needs_review),
+            health_state=row.health_state,
+            lifecycle_state=row.lifecycle_state,
+            last_synced_at=row.last_synced_at,
+            updated_at=row.updated_at,
+        )
+
+        provider_rows = (
+            (
+                await self.db.execute(
+                    select(MediaIdentityProviderMapping)
+                    .where(
+                        MediaIdentityProviderMapping.media_identity_id == identity_id
+                    )
+                    .order_by(
+                        MediaIdentityProviderMapping.is_canonical.desc(),
+                        MediaIdentityProviderMapping.confidence.desc(),
+                        MediaIdentityProviderMapping.provider.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        external_rows = (
+            (
+                await self.db.execute(
+                    select(MediaIdentityExternalId)
+                    .where(MediaIdentityExternalId.media_identity_id == identity_id)
+                    .order_by(
+                        MediaIdentityExternalId.is_canonical.desc(),
+                        MediaIdentityExternalId.provider.asc(),
+                        MediaIdentityExternalId.id_type.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        relationship_rows = (
+            (
+                await self.db.execute(
+                    select(MediaIdentityRelationship)
+                    .where(
+                        or_(
+                            MediaIdentityRelationship.source_identity_id == identity_id,
+                            MediaIdentityRelationship.target_identity_id == identity_id,
+                        )
+                    )
+                    .order_by(MediaIdentityRelationship.updated_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        timeline_rows = (
+            (
+                await self.db.execute(
+                    select(MediaIdentityTimelineEvent)
+                    .where(MediaIdentityTimelineEvent.media_identity_id == identity_id)
+                    .order_by(MediaIdentityTimelineEvent.happened_at.desc())
+                    .limit(200)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        return MediaIdentityDetailResponse(
+            identity=identity,
+            providers=[
+                MediaIdentityProviderMappingResponse(
+                    id=item.id,
+                    media_identity_id=item.media_identity_id,
+                    provider=item.provider,
+                    provider_item_id=item.provider_item_id,
+                    confidence=int(item.confidence or 0),
+                    is_canonical=bool(item.is_canonical),
+                    path_tail=item.path_tail,
+                    connection_status=item.connection_status,
+                    metadata=item.metadata_json or {},
+                    updated_at=item.updated_at,
+                )
+                for item in provider_rows
+            ],
+            external_ids=[
+                MediaIdentityExternalIdResponse(
+                    id=item.id,
+                    media_identity_id=item.media_identity_id,
+                    provider=item.provider,
+                    id_type=item.id_type,
+                    id_value=item.id_value,
+                    confidence=int(item.confidence or 0),
+                    is_canonical=bool(item.is_canonical),
+                    metadata=item.metadata_json or {},
+                    updated_at=item.updated_at,
+                )
+                for item in external_rows
+            ],
+            relationships=[
+                MediaIdentityRelationshipResponse(
+                    id=item.id,
+                    source_identity_id=item.source_identity_id,
+                    target_identity_id=item.target_identity_id,
+                    relationship_type=item.relationship_type,
+                    provider=item.provider,
+                    confidence=int(item.confidence or 0),
+                    metadata=item.metadata_json or {},
+                    updated_at=item.updated_at,
+                )
+                for item in relationship_rows
+            ],
+            timeline=[
+                MediaIdentityTimelineEventResponse(
+                    id=item.id,
+                    media_identity_id=item.media_identity_id,
+                    event_type=item.event_type,
+                    summary=item.summary,
+                    severity=item.severity,
+                    source=item.source,
+                    details=item.details_json or {},
+                    happened_at=item.happened_at,
+                )
+                for item in timeline_rows
+            ],
+        )
+
+    async def canonical_providers(
+        self,
+        *,
+        identity_id: int | None = None,
+        provider: str | None = None,
+    ) -> MediaIdentityProviderMappingListResponse:
+        stmt = select(MediaIdentityProviderMapping)
+        if identity_id is not None:
+            stmt = stmt.where(
+                MediaIdentityProviderMapping.media_identity_id == identity_id
+            )
+        if provider:
+            stmt = stmt.where(
+                func.lower(MediaIdentityProviderMapping.provider)
+                == provider.strip().lower()
+            )
+
+        rows = (
+            (
+                await self.db.execute(
+                    stmt.order_by(
+                        MediaIdentityProviderMapping.media_identity_id.asc(),
+                        MediaIdentityProviderMapping.is_canonical.desc(),
+                        MediaIdentityProviderMapping.confidence.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        items = [
+            MediaIdentityProviderMappingResponse(
+                id=item.id,
+                media_identity_id=item.media_identity_id,
+                provider=item.provider,
+                provider_item_id=item.provider_item_id,
+                confidence=int(item.confidence or 0),
+                is_canonical=bool(item.is_canonical),
+                path_tail=item.path_tail,
+                connection_status=item.connection_status,
+                metadata=item.metadata_json or {},
+                updated_at=item.updated_at,
+            )
+            for item in rows
+        ]
+        return MediaIdentityProviderMappingListResponse(items=items, total=len(items))
+
+    async def canonical_external_ids(
+        self,
+        *,
+        identity_id: int | None = None,
+        provider: str | None = None,
+        id_type: str | None = None,
+    ) -> MediaIdentityExternalIdListResponse:
+        stmt = select(MediaIdentityExternalId)
+        if identity_id is not None:
+            stmt = stmt.where(MediaIdentityExternalId.media_identity_id == identity_id)
+        if provider:
+            stmt = stmt.where(
+                func.lower(MediaIdentityExternalId.provider) == provider.strip().lower()
+            )
+        if id_type:
+            stmt = stmt.where(
+                func.lower(MediaIdentityExternalId.id_type) == id_type.strip().lower()
+            )
+
+        rows = (
+            (
+                await self.db.execute(
+                    stmt.order_by(
+                        MediaIdentityExternalId.media_identity_id.asc(),
+                        MediaIdentityExternalId.is_canonical.desc(),
+                        MediaIdentityExternalId.provider.asc(),
+                        MediaIdentityExternalId.id_type.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        items = [
+            MediaIdentityExternalIdResponse(
+                id=item.id,
+                media_identity_id=item.media_identity_id,
+                provider=item.provider,
+                id_type=item.id_type,
+                id_value=item.id_value,
+                confidence=int(item.confidence or 0),
+                is_canonical=bool(item.is_canonical),
+                metadata=item.metadata_json or {},
+                updated_at=item.updated_at,
+            )
+            for item in rows
+        ]
+        return MediaIdentityExternalIdListResponse(items=items, total=len(items))

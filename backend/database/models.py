@@ -473,9 +473,7 @@ class MieSettings(Base):
     id: Mapped[int] = mapped_column(
         Integer, primary_key=True, init=False, autoincrement=True
     )
-    filesystem_access_mode: Mapped[str] = mapped_column(
-        String(32), default="assisted"
-    )
+    filesystem_access_mode: Mapped[str] = mapped_column(String(32), default="assisted")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), init=False
     )
@@ -503,7 +501,9 @@ class MediaAsset(Base):
     series_id: Mapped[int | None] = mapped_column(
         ForeignKey("series.id", ondelete="CASCADE"), default=None, index=True
     )
-    lifecycle_state: Mapped[str] = mapped_column(String(64), default="imported", index=True)
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(64), default="imported", index=True
+    )
     health_state: Mapped[str] = mapped_column(String(32), default="healthy")
     has_torrent: Mapped[bool] = mapped_column(Boolean, default=False)
     has_filesystem_objects: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -513,16 +513,195 @@ class MediaAsset(Base):
     banner_url: Mapped[str | None] = mapped_column(String(500), default=None)
     logo_url: Mapped[str | None] = mapped_column(String(500), default=None)
     artwork_source: Mapped[str | None] = mapped_column(String(64), default=None)
-    artwork_status: Mapped[str] = mapped_column(String(32), default="MISSING", index=True)
+    artwork_status: Mapped[str] = mapped_column(
+        String(32), default="MISSING", index=True
+    )
     artwork_confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    artwork_validated_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    artwork_last_refresh_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    artwork_hash: Mapped[str | None] = mapped_column(String(128), default=None, index=True)
-    artwork_diagnostics: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    artwork_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    artwork_last_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )
+    artwork_hash: Mapped[str | None] = mapped_column(
+        String(128), default=None, index=True
+    )
+    artwork_diagnostics: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default_factory=dict
+    )
     recommendation: Mapped[str | None] = mapped_column(String(255), default=None)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class MediaIdentity(Base):
+    """Canonical identity record for a movie/series across providers."""
+
+    __tablename__ = "media_identities"
+    __table_args__ = (
+        UniqueConstraint("media_type", "movie_id", name="uq_media_identities_movie"),
+        UniqueConstraint("media_type", "series_id", name="uq_media_identities_series"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    media_type: Mapped[MediaType] = mapped_column(Enum(MediaType), index=True)
+    movie_id: Mapped[int | None] = mapped_column(
+        ForeignKey("movies.id", ondelete="CASCADE"), default=None, index=True
+    )
+    series_id: Mapped[int | None] = mapped_column(
+        ForeignKey("series.id", ondelete="CASCADE"), default=None, index=True
+    )
+    canonical_provider: Mapped[str] = mapped_column(
+        String(64), default="unknown", index=True
+    )
+    canonical_title: Mapped[str | None] = mapped_column(String(255), default=None)
+    canonical_year: Mapped[int | None] = mapped_column(Integer, default=None)
+    provider_confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
+    identity_confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
+    conflict_level: Mapped[str] = mapped_column(String(16), default="none")
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    health_state: Mapped[str] = mapped_column(String(32), default="healthy", index=True)
+    lifecycle_state: Mapped[str] = mapped_column(
+        String(64), default="resolved", index=True
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class MediaIdentityProviderMapping(Base):
+    """Provider-level identity mappings linked to a canonical identity."""
+
+    __tablename__ = "media_identity_provider_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "media_identity_id",
+            "provider",
+            "provider_item_id",
+            name="uq_media_identity_provider_mapping",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    media_identity_id: Mapped[int] = mapped_column(
+        ForeignKey("media_identities.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    provider_item_id: Mapped[str] = mapped_column(String(128))
+    confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
+    is_canonical: Mapped[bool] = mapped_column(Boolean, default=False)
+    path_tail: Mapped[str | None] = mapped_column(String(1024), default=None)
+    connection_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class MediaIdentityExternalId(Base):
+    """External IDs observed for canonical identities by provider/type."""
+
+    __tablename__ = "media_identity_external_ids"
+    __table_args__ = (
+        UniqueConstraint(
+            "media_identity_id",
+            "provider",
+            "id_type",
+            "id_value",
+            name="uq_media_identity_external_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    media_identity_id: Mapped[int] = mapped_column(
+        ForeignKey("media_identities.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    id_type: Mapped[str] = mapped_column(String(64), index=True)
+    id_value: Mapped[str] = mapped_column(String(255), index=True)
+    confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
+    is_canonical: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class MediaIdentityRelationship(Base):
+    """Relationships between canonical identities (franchise, remaster, etc)."""
+
+    __tablename__ = "media_identity_relationships"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_identity_id",
+            "target_identity_id",
+            "relationship_type",
+            "provider",
+            name="uq_media_identity_relationship",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    source_identity_id: Mapped[int] = mapped_column(
+        ForeignKey("media_identities.id", ondelete="CASCADE"), index=True
+    )
+    target_identity_id: Mapped[int] = mapped_column(
+        ForeignKey("media_identities.id", ondelete="CASCADE"), index=True
+    )
+    relationship_type: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="system", index=True)
+    confidence: Mapped[int] = mapped_column(SmallInteger, default=0)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), init=False
+    )
+
+
+class MediaIdentityTimelineEvent(Base):
+    """Timeline events for canonical identity sync/audit/decisions."""
+
+    __tablename__ = "media_identity_timeline_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, init=False, autoincrement=True
+    )
+    media_identity_id: Mapped[int] = mapped_column(
+        ForeignKey("media_identities.id", ondelete="CASCADE"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    summary: Mapped[str] = mapped_column(String(1024), default="")
+    severity: Mapped[str] = mapped_column(String(16), default="info")
+    source: Mapped[str] = mapped_column(String(64), default="system")
+    details_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
+    happened_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), init=False
     )
 
 
@@ -541,7 +720,9 @@ class FilesystemIndexEntry(Base):
     entry_type: Mapped[str] = mapped_column(String(64), index=True)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     modified_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    fingerprint: Mapped[str | None] = mapped_column(String(128), default=None, index=True)
+    fingerprint: Mapped[str | None] = mapped_column(
+        String(128), default=None, index=True
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default_factory=dict)
     indexed_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), init=False

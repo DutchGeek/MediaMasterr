@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- MIE Phase 1 canonical identity persistence foundation tables:
+  - `media_identities`
+  - `media_identity_provider_mappings`
+  - `media_identity_external_ids`
+  - `media_identity_relationships`
+  - `media_identity_timeline_events`
+- Read-only Phase 1 API endpoints for canonical identity data:
+  - `GET /api/mie/identity-canonical`
+  - `GET /api/mie/identity/{identity_id}`
+  - `GET /api/mie/providers`
+  - `GET /api/mie/external-ids`
+- Additive migration with initial canonical identity backfill for existing movies and series
+
 ## [0.1.11] - 2026-07-10
 
 ### Added

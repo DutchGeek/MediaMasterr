@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.routes.dashboard import build_dashboard_response
@@ -21,6 +21,10 @@ from backend.models.mie import (
     IdentitySyncJobResponse,
     IdentitySyncPreviewResponse,
     IdentityWorkspaceResponse,
+    MediaIdentityDetailResponse,
+    MediaIdentityExternalIdListResponse,
+    MediaIdentityListResponse,
+    MediaIdentityProviderMappingListResponse,
     MieOverviewResponse,
     MieRelationshipGraphResponse,
     MieTimelineResponse,
@@ -137,6 +141,65 @@ async def get_identity_workspace(
         override_status=override_status,
         conflict_level=conflict_level,
         needs_review=needs_review,
+    )
+
+
+@router.get("/identity-canonical", response_model=MediaIdentityListResponse)
+async def get_canonical_identity_rows(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+    page: int = 1,
+    per_page: int = 50,
+    media_type: MediaType | None = None,
+    search: str | None = None,
+) -> MediaIdentityListResponse:
+    return await IdentityCenterService(db).canonical_identities(
+        page=page,
+        per_page=per_page,
+        media_type=media_type,
+        search=search,
+    )
+
+
+@router.get("/identity/{identity_id}", response_model=MediaIdentityDetailResponse)
+async def get_canonical_identity_detail(
+    identity_id: int,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+) -> MediaIdentityDetailResponse:
+    try:
+        return await IdentityCenterService(db).canonical_identity_detail(
+            identity_id=identity_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/providers", response_model=MediaIdentityProviderMappingListResponse)
+async def get_canonical_identity_providers(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+    identity_id: int | None = None,
+    provider: str | None = None,
+) -> MediaIdentityProviderMappingListResponse:
+    return await IdentityCenterService(db).canonical_providers(
+        identity_id=identity_id,
+        provider=provider,
+    )
+
+
+@router.get("/external-ids", response_model=MediaIdentityExternalIdListResponse)
+async def get_canonical_identity_external_ids(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
+    db: AsyncSession = Depends(get_db),
+    identity_id: int | None = None,
+    provider: str | None = None,
+    id_type: str | None = None,
+) -> MediaIdentityExternalIdListResponse:
+    return await IdentityCenterService(db).canonical_external_ids(
+        identity_id=identity_id,
+        provider=provider,
+        id_type=id_type,
     )
 
 

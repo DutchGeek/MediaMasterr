@@ -27,6 +27,19 @@ Use those generated docs for the exact request and response models.
 - `GET /api/alerts`
 - `GET /api/notices`
 
+### Media Intelligence Engine (MIE)
+
+- `GET /api/mie/dashboard`
+- `GET /api/mie/operations`
+- `GET /api/mie/intelligence`
+- `GET /api/mie/timeline`
+- `GET /api/mie/relationships/{media_type}/{media_id}`
+- `GET /api/mie/identity` (workspace view)
+- `GET /api/mie/identity-canonical` (Phase 1 canonical identity list)
+- `GET /api/mie/identity/{identity_id}` (Phase 1 canonical identity detail)
+- `GET /api/mie/providers` (Phase 1 provider mappings)
+- `GET /api/mie/external-ids` (Phase 1 external IDs)
+
 ### Settings
 
 - `GET /api/settings/general`

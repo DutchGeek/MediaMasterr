@@ -412,3 +412,92 @@ class IdentitySyncJobResponse(BaseModel):
 
 class IdentitySyncHistoryResponse(BaseModel):
     items: list[IdentityHistoryEntry] = Field(default_factory=list)
+
+
+class MediaIdentitySummaryResponse(BaseModel):
+    id: int
+    media_type: MediaType
+    media_id: int
+    title: str
+    year: int | None = None
+    canonical_provider: str
+    provider_confidence: int = 0
+    identity_confidence: int = 0
+    conflict_level: str = "none"
+    needs_review: bool = False
+    health_state: str = "healthy"
+    lifecycle_state: str = "resolved"
+    last_synced_at: datetime | None = None
+    updated_at: datetime
+
+
+class MediaIdentityListResponse(BaseModel):
+    items: list[MediaIdentitySummaryResponse] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    per_page: int = 50
+
+
+class MediaIdentityProviderMappingResponse(BaseModel):
+    id: int
+    media_identity_id: int
+    provider: str
+    provider_item_id: str
+    confidence: int = 0
+    is_canonical: bool = False
+    path_tail: str | None = None
+    connection_status: str = "unknown"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime
+
+
+class MediaIdentityProviderMappingListResponse(BaseModel):
+    items: list[MediaIdentityProviderMappingResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class MediaIdentityExternalIdResponse(BaseModel):
+    id: int
+    media_identity_id: int
+    provider: str
+    id_type: str
+    id_value: str
+    confidence: int = 0
+    is_canonical: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime
+
+
+class MediaIdentityExternalIdListResponse(BaseModel):
+    items: list[MediaIdentityExternalIdResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class MediaIdentityRelationshipResponse(BaseModel):
+    id: int
+    source_identity_id: int
+    target_identity_id: int
+    relationship_type: str
+    provider: str
+    confidence: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime
+
+
+class MediaIdentityTimelineEventResponse(BaseModel):
+    id: int
+    media_identity_id: int
+    event_type: str
+    summary: str
+    severity: str
+    source: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    happened_at: datetime
+
+
+class MediaIdentityDetailResponse(BaseModel):
+    identity: MediaIdentitySummaryResponse
+    providers: list[MediaIdentityProviderMappingResponse] = Field(default_factory=list)
+    external_ids: list[MediaIdentityExternalIdResponse] = Field(default_factory=list)
+    relationships: list[MediaIdentityRelationshipResponse] = Field(default_factory=list)
+    timeline: list[MediaIdentityTimelineEventResponse] = Field(default_factory=list)
