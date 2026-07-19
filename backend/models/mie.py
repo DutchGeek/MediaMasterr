@@ -137,6 +137,11 @@ class DownloadLifecycleObject(BaseModel):
     media_id: int | None = None
     lifecycle_state: DownloadLifecycleState = "unknown"
     import_status: str = "unknown"
+    library_path: str | None = None
+    torrent_state: str | None = None
+    import_state: str = "unknown"
+    retention_policy: str = "none"
+    retention_remaining_hours: int | None = None
     age_hours: int = 0
     size_bytes: int = 0
     last_activity_at: datetime | None = None
@@ -146,10 +151,15 @@ class DownloadLifecycleObject(BaseModel):
     confidence_score: int = 0
     cleanup_classification: DownloadCleanupClassification = "none"
     cleanup_reason: str | None = None
+    recommendation: str = "none"
+    recoverable_space_bytes: int = 0
 
 
 class DownloadsHealthSummary(BaseModel):
     active_downloads: int = 0
+    waiting_for_import: int = 0
+    retention_active: int = 0
+    retention_expired: int = 0
     completed_waiting_for_import: int = 0
     completed_waiting_for_cleanup: int = 0
     imported_but_still_present: int = 0

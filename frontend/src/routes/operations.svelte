@@ -37,6 +37,7 @@
   let workflowPreview = $state<OperationWorkflowResponse | null>(null);
   let auditTrail = $state<OperationAuditListResponse | null>(null);
   let selectedRecommendationId = $state<string | null>(null);
+  let selectedDownloadCategory = $state<string | null>(null);
 
   const load = async () => {
     loading = true;
@@ -368,6 +369,27 @@
     });
   });
 
+  const downloadsByCategory = $derived.by(() => {
+    const rows = workspace?.downloads ?? [];
+    const filterMap: Record<string, (row: (typeof rows)[number]) => boolean> = {
+      active: (row) =>
+        ["metadata_download", "queued", "downloading", "checking", "moving"].includes(
+          row.lifecycle_state,
+        ),
+      waiting_import: (row) => row.import_state === "in_progress",
+      retention_active: (row) =>
+        row.retention_policy === "seeding_retention" ||
+        row.retention_policy === "grace_period",
+      retention_expired: (row) => row.retention_policy === "expired",
+      unknown: (row) => row.lifecycle_state === "unknown",
+      orphaned: (row) => row.lifecycle_state === "orphaned",
+    };
+    if (!selectedDownloadCategory || !filterMap[selectedDownloadCategory]) {
+      return rows;
+    }
+    return rows.filter(filterMap[selectedDownloadCategory]);
+  });
+
   const drawerSections = $derived.by((): DetailsDrawerSection[] => {
     if (!selectedAsset) return [];
     const recommendation = selectedAsset.recommendation;
@@ -580,41 +602,98 @@
 
       <section class="space-y-3">
         <h2 class="text-lg font-semibold text-foreground">Downloads Health</h2>
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "active" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "active" ? null : "active")}
+          >
             <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
               Active Downloads
             </p>
             <p class="mt-2 text-xl font-bold text-foreground">
               {workspace?.downloads_health.active_downloads ?? 0}
             </p>
-          </div>
-          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          </button>
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "waiting_import" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "waiting_import"
+                  ? null
+                  : "waiting_import")}
+          >
             <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
               Waiting For Import
             </p>
             <p class="mt-2 text-xl font-bold text-foreground">
-              {workspace?.downloads_health.completed_waiting_for_import ?? 0}
+              {workspace?.downloads_health.waiting_for_import ?? 0}
             </p>
-          </div>
-          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          </button>
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "retention_active" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "retention_active"
+                  ? null
+                  : "retention_active")}
+          >
             <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              Waiting For Cleanup
+              Retention Active
             </p>
             <p class="mt-2 text-xl font-bold text-foreground">
-              {workspace?.downloads_health.completed_waiting_for_cleanup ?? 0}
+              {workspace?.downloads_health.retention_active ?? 0}
             </p>
-          </div>
-          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          </button>
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "retention_expired" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "retention_expired"
+                  ? null
+                  : "retention_expired")}
+          >
             <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              Failed / Unknown
+              Retention Expired
             </p>
             <p class="mt-2 text-xl font-bold text-foreground">
-              {(workspace?.downloads_health.failed_downloads ?? 0) +
-                (workspace?.downloads_health.unknown_downloads ?? 0)}
+              {workspace?.downloads_health.retention_expired ?? 0}
             </p>
-          </div>
-          <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
+          </button>
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "unknown" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "unknown" ? null : "unknown")}
+          >
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Unknown Downloads
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.unknown_downloads ?? 0}
+            </p>
+          </button>
+          <button
+            type="button"
+            class={`rounded-2xl border bg-card/60 p-4 text-left ${selectedDownloadCategory === "orphaned" ? "border-primary" : "border-border/70"}`}
+            onclick={() =>
+              (selectedDownloadCategory =
+                selectedDownloadCategory === "orphaned" ? null : "orphaned")}
+          >
+            <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Orphaned Downloads
+            </p>
+            <p class="mt-2 text-xl font-bold text-foreground">
+              {workspace?.downloads_health.orphaned_downloads ?? 0}
+            </p>
+          </button>
+          <div class="rounded-2xl border border-border/70 bg-card/60 p-4 md:col-span-2 xl:col-span-2">
             <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
               Safe To Delete
             </p>
@@ -651,20 +730,20 @@
         </div>
         <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
           <p class="mb-2 text-sm font-semibold text-foreground">
-            Needs Attention (Top 8)
+            Download Assets {selectedDownloadCategory ? `(${selectedDownloadCategory.replaceAll("_", " ")})` : ""}
           </p>
-          {#if (workspace?.downloads.length ?? 0) > 0}
+          {#if downloadsByCategory.length > 0}
             <div class="space-y-2 text-xs">
-              {#each (workspace?.downloads ?? [])
-                .filter((row) => row.cleanup_classification !== "none")
-                .slice(0, 8) as row}
+              {#each downloadsByCategory.slice(0, 12) as row}
                 <div
                   class="rounded-lg border border-border/50 bg-background/70 p-2"
                 >
                   <p class="font-medium text-foreground">{row.path}</p>
                   <p class="text-muted-foreground">
-                    State {row.lifecycle_state} • {row.cleanup_classification}
-                    • Confidence {row.confidence_score}%
+                    Torrent {row.torrent_state ?? "none"} • Import {row.import_state} • Retention {row.retention_policy}
+                  </p>
+                  <p class="text-muted-foreground">
+                    Library {row.library_path ?? "unknown"} • Recoverable {formatFileSize(row.recoverable_space_bytes ?? 0)} • Confidence {row.confidence_score}%
                   </p>
                   {#if row.cleanup_reason}
                     <p class="text-muted-foreground">{row.cleanup_reason}</p>

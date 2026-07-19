@@ -136,10 +136,20 @@ async def test_downloads_classification_and_health_summary(
     assert result.summary.unknown_downloads >= 1
 
     by_path = {item.path: item for item in result.items}
+    imported_item = by_path[
+        "/media/downloads/Imported Movie (2023)/Imported Movie (2023).mkv"
+    ]
+    assert imported_item.library_path is not None
+    assert imported_item.import_state in {"completed", "completed_waiting_cleanup"}
+    assert imported_item.retention_policy in {
+        "grace_period",
+        "seeding_retention",
+        "expired",
+        "none",
+    }
+
     assert (
-        by_path[
-            "/media/downloads/Imported Movie (2023)/Imported Movie (2023).mkv"
-        ].cleanup_classification
+        imported_item.cleanup_classification
         in {"safe_to_delete", "duplicate_download", "safe_to_archive"}
     )
     assert (

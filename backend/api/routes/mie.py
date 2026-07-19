@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.routes.dashboard import build_dashboard_response
+from backend.api.utils.mie_request_context import get_mie_request_context
 from backend.core.auth import require_page_access
 from backend.database import get_db
 from backend.database.models import User
@@ -36,6 +37,7 @@ from backend.services.mie.correlation_service import CorrelationService
 from backend.services.mie.identity_service import IdentityCenterService
 from backend.services.mie.intelligence_service import MediaIntelligenceService
 from backend.services.mie.operations_service import OperationsService
+from backend.services.mie.request_context import MieRequestContext
 
 router = APIRouter(prefix="/api/mie", tags=["mie"])
 
@@ -44,41 +46,56 @@ router = APIRouter(prefix="/api/mie", tags=["mie"])
 async def get_mie_dashboard(
     current_user: Annotated[User, Depends(require_page_access(PageAccess.DASHBOARD))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> DashboardResponse:
-    return await build_dashboard_response(current_user, db)
+    return await build_dashboard_response(
+        current_user,
+        db,
+        request_context=request_context,
+    )
 
 
 @router.get("/operations", response_model=OperationsWorkspaceResponse)
 async def get_mie_operations(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> OperationsWorkspaceResponse:
-    return await OperationsService(db).workspace()
+    return await OperationsService(db, request_context=request_context).workspace()
 
 
 @router.get("/recommendations", response_model=OperationsRecommendationsResponse)
 async def get_mie_recommendations(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> OperationsRecommendationsResponse:
-    return await OperationsService(db).recommendations()
+    return await OperationsService(
+        db, request_context=request_context
+    ).recommendations()
 
 
 @router.get("/intelligence", response_model=MieOverviewResponse)
 async def get_mie_intelligence_overview(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> MieOverviewResponse:
-    return await MediaIntelligenceService(db).overview()
+    return await MediaIntelligenceService(
+        db, request_context=request_context
+    ).overview()
 
 
 @router.get("/timeline", response_model=MieTimelineResponse)
 async def get_mie_timeline(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     limit: int = 80,
 ) -> MieTimelineResponse:
-    return await MediaIntelligenceService(db).timeline(limit=limit)
+    return await MediaIntelligenceService(
+        db, request_context=request_context
+    ).timeline(limit=limit)
 
 
 @router.get(
@@ -90,8 +107,9 @@ async def get_mie_relationship_graph(
     media_id: int,
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> MieRelationshipGraphResponse:
-    return await MediaIntelligenceService(db).relationships(
+    return await MediaIntelligenceService(db, request_context=request_context).relationships(
         media_type=media_type,
         media_id=media_id,
     )
@@ -102,10 +120,13 @@ async def get_mie_media_graph(
     media_id: int,
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     media_type: MediaType | None = None,
 ) -> MieMediaGraphResponse:
     try:
-        return await CorrelationService(db).media_graph(
+        return await CorrelationService(
+            db, request_context=request_context
+        ).media_graph(
             media_id=media_id,
             media_type=media_type,
         )
@@ -118,6 +139,7 @@ async def get_mie_media_graph(
 async def get_identity_workspace(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     page: int = 1,
     per_page: int = 24,
     search: str | None = None,
@@ -139,7 +161,7 @@ async def get_identity_workspace(
     conflict_level: str | None = None,
     needs_review: bool | None = None,
 ) -> IdentityWorkspaceResponse:
-    return await IdentityCenterService(db).workspace(
+    return await IdentityCenterService(db, request_context=request_context).workspace(
         page=page,
         per_page=per_page,
         search=search,
@@ -167,12 +189,15 @@ async def get_identity_workspace(
 async def get_canonical_identity_rows(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     page: int = 1,
     per_page: int = 50,
     media_type: MediaType | None = None,
     search: str | None = None,
 ) -> MediaIdentityListResponse:
-    return await IdentityCenterService(db).canonical_identities(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).canonical_identities(
         page=page,
         per_page=per_page,
         media_type=media_type,
@@ -185,9 +210,12 @@ async def get_canonical_identity_detail(
     identity_id: int,
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> MediaIdentityDetailResponse:
     try:
-        return await IdentityCenterService(db).canonical_identity_detail(
+        return await IdentityCenterService(
+            db, request_context=request_context
+        ).canonical_identity_detail(
             identity_id=identity_id,
         )
     except ValueError as exc:
@@ -198,10 +226,13 @@ async def get_canonical_identity_detail(
 async def get_canonical_identity_providers(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     identity_id: int | None = None,
     provider: str | None = None,
 ) -> MediaIdentityProviderMappingListResponse:
-    return await IdentityCenterService(db).canonical_providers(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).canonical_providers(
         identity_id=identity_id,
         provider=provider,
     )
@@ -211,11 +242,14 @@ async def get_canonical_identity_providers(
 async def get_canonical_identity_external_ids(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     identity_id: int | None = None,
     provider: str | None = None,
     id_type: str | None = None,
 ) -> MediaIdentityExternalIdListResponse:
-    return await IdentityCenterService(db).canonical_external_ids(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).canonical_external_ids(
         identity_id=identity_id,
         provider=provider,
         id_type=id_type,
@@ -231,8 +265,9 @@ async def get_identity_studio(
     media_id: int,
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentityStudioResponse:
-    return await IdentityCenterService(db).studio(
+    return await IdentityCenterService(db, request_context=request_context).studio(
         media_type=media_type,
         media_id=media_id,
     )
@@ -248,8 +283,11 @@ async def set_identity_canonical_provider(
     payload: IdentityCanonicalSelectionRequest,
     current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentityActionResponse:
-    return await IdentityCenterService(db).set_canonical_provider(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).set_canonical_provider(
         media_type=media_type,
         media_id=media_id,
         payload=payload,
@@ -267,8 +305,11 @@ async def set_identity_artwork_provider(
     payload: IdentityArtworkProviderSelectionRequest,
     current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentityActionResponse:
-    return await IdentityCenterService(db).set_artwork_provider(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).set_artwork_provider(
         media_type=media_type,
         media_id=media_id,
         payload=payload,
@@ -286,8 +327,11 @@ async def upsert_identity_override(
     payload: IdentityOverrideUpsertRequest,
     current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentityActionResponse:
-    return await IdentityCenterService(db).upsert_override(
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).upsert_override(
         media_type=media_type,
         media_id=media_id,
         payload=payload,
@@ -299,22 +343,31 @@ async def upsert_identity_override(
 async def get_identity_sync_preview(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentitySyncPreviewResponse:
-    return await IdentityCenterService(db).sync_preview()
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).sync_preview()
 
 
 @router.post("/identity/sync", response_model=IdentitySyncJobResponse)
 async def start_identity_sync(
     current_user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentitySyncJobResponse:
-    return await IdentityCenterService(db).start_sync(user_id=current_user.id)
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).start_sync(user_id=current_user.id)
 
 
 @router.get("/identity/sync-history", response_model=IdentitySyncHistoryResponse)
 async def get_identity_sync_history(
     _user: Annotated[User, Depends(require_page_access(PageAccess.IDENTITY))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
     limit: int = 50,
 ) -> IdentitySyncHistoryResponse:
-    return await IdentityCenterService(db).sync_history(limit=limit)
+    return await IdentityCenterService(
+        db, request_context=request_context
+    ).sync_history(limit=limit)

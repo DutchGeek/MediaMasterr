@@ -28,13 +28,19 @@ from backend.models.mie import (
     MieTimelineResponse,
 )
 from backend.services.mie.operations_service import OperationsService
+from backend.services.mie.request_context import MieRequestContext
 
 
 class MediaIntelligenceService:
     """Authoritative MIE read model for overview, timeline, and relationships."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        request_context: MieRequestContext | None = None,
+    ) -> None:
         self.db = db
+        self._request_context = request_context
 
     @staticmethod
     def _health_state(score: int) -> str:
@@ -55,7 +61,9 @@ class MediaIntelligenceService:
         return dt.astimezone(UTC)
 
     async def _ensure_mie_snapshot(self) -> dict[str, int]:
-        overview = await OperationsService(self.db).overview()
+        overview = await OperationsService(
+            self.db, request_context=self._request_context
+        ).overview()
         return {card.key: int(card.count) for card in overview.cards}
 
     async def overview(self) -> MieOverviewResponse:

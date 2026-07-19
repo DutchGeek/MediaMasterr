@@ -248,6 +248,11 @@ export interface DownloadLifecycleObject {
   media_id: number | null;
   lifecycle_state: DownloadLifecycleState;
   import_status: string;
+  library_path: string | null;
+  torrent_state: string | null;
+  import_state: string;
+  retention_policy: string;
+  retention_remaining_hours: number | null;
   age_hours: number;
   size_bytes: number;
   last_activity_at: string | null;
@@ -257,10 +262,15 @@ export interface DownloadLifecycleObject {
   confidence_score: number;
   cleanup_classification: DownloadCleanupClassification;
   cleanup_reason: string | null;
+  recommendation: string;
+  recoverable_space_bytes: number;
 }
 
 export interface DownloadsHealthSummary {
   active_downloads: number;
+  waiting_for_import: number;
+  retention_active: number;
+  retention_expired: number;
   completed_waiting_for_import: number;
   completed_waiting_for_cleanup: number;
   imported_but_still_present: number;

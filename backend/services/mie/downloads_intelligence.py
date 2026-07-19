@@ -23,6 +23,7 @@ from backend.models.mie import (
     SafetyLevel,
 )
 from backend.services.mie.correlation_service import CorrelationService
+from backend.services.mie.request_context import MieRequestContext
 
 _ACTIVE_STATES = {
     "metadata_download",
@@ -44,9 +45,14 @@ class DownloadsIntelligenceResult:
 class DownloadsIntelligenceService:
     """Classifies indexed download objects and emits cleanup intelligence."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        request_context: MieRequestContext | None = None,
+    ) -> None:
         self.db = db
-        self._correlation = CorrelationService(db)
+        self._request_context = request_context
+        self._correlation = CorrelationService(db, request_context=request_context)
         self._graph_cache: dict[
             tuple[MediaType, int], MieMediaGraphResponse | None
         ] = {}
@@ -238,6 +244,7 @@ class DownloadsIntelligenceService:
         torrent_name = str(torrent.get("name") or "") if torrent else None
         torrent_hash = str(torrent.get("hash") or "") if torrent else None
         torrent_progress = float(torrent.get("progress") or 0.0) if torrent else 0.0
+        torrent_ratio = float(torrent.get("ratio") or 0.0) if torrent else 0.0
         torrent_state = (
             self._torrent_state(str(torrent.get("state") or ""), torrent_progress)
             if torrent
@@ -345,6 +352,28 @@ class DownloadsIntelligenceService:
                 f"No activity for {age_hours}h (threshold {self._abandoned_hours}h)."
             )
 
+        library_path = None
+        if graph is not None and graph.file_intelligence.media_files:
+            library_path = graph.file_intelligence.media_files[0].path
+
+        retention_policy = "none"
+        retention_remaining_hours: int | None = None
+        if torrent_state == "seeding":
+            retention_policy = "seeding_retention"
+            if torrent_ratio < 1.0:
+                retention_remaining_hours = max(0, int((1.0 - torrent_ratio) * 72))
+        elif lifecycle_state == "imported" and not torrent:
+            retention_policy = "grace_period"
+            retention_remaining_hours = max(0, self._abandoned_hours - age_hours)
+        if retention_policy == "grace_period" and retention_remaining_hours == 0:
+            retention_policy = "expired"
+
+        recoverable_space = (
+            max(0, int(entry.size_bytes or 0))
+            if cleanup in {"safe_to_delete", "duplicate_download", "abandoned_download"}
+            else 0
+        )
+
         media_identity = (
             f"{graph.identity.canonical_title} ({graph.identity.media_type.value})"
             if graph is not None
@@ -390,6 +419,11 @@ class DownloadsIntelligenceService:
             media_id=media_id,
             lifecycle_state=lifecycle_state,
             import_status=import_status,
+            library_path=library_path,
+            torrent_state=torrent_state,
+            import_state=import_status,
+            retention_policy=retention_policy,
+            retention_remaining_hours=retention_remaining_hours,
             age_hours=age_hours,
             size_bytes=max(0, int(entry.size_bytes or 0)),
             last_activity_at=last_activity,
@@ -399,6 +433,8 @@ class DownloadsIntelligenceService:
             confidence_score=confidence,
             cleanup_classification=cleanup,
             cleanup_reason=cleanup_reason,
+            recommendation=cleanup,
+            recoverable_space_bytes=recoverable_space,
         )
 
     @staticmethod
@@ -501,6 +537,9 @@ class DownloadsIntelligenceService:
                     else 0
                 )
 
+            if item.import_status == "in_progress":
+                summary.waiting_for_import += 1
+
             if item.import_status == "completed_waiting_cleanup":
                 summary.completed_waiting_for_cleanup += 1
 
@@ -516,6 +555,11 @@ class DownloadsIntelligenceService:
             if item.lifecycle_state == "orphaned":
                 summary.orphaned_downloads += 1
 
+            if item.retention_policy in {"seeding_retention", "grace_period"}:
+                summary.retention_active += 1
+            elif item.retention_policy == "expired":
+                summary.retention_expired += 1
+
             if item.cleanup_classification == "safe_to_delete":
                 summary.safe_to_delete += 1
                 summary.recoverable_space += item.size_bytes
@@ -525,13 +569,24 @@ class DownloadsIntelligenceService:
         return summary
 
     async def run(self) -> DownloadsIntelligenceResult:
+        if self._request_context is not None:
+            cached = self._request_context.downloads_intelligence
+            if isinstance(cached, DownloadsIntelligenceResult):
+                return cached
+
         roots = await self._downloads_roots()
         if not roots:
-            return DownloadsIntelligenceResult(
+            result = DownloadsIntelligenceResult(
                 summary=DownloadsHealthSummary(),
                 items=[],
                 recommendations=[],
             )
+            if self._request_context is not None:
+                self._request_context.downloads_intelligence = result
+            return result
+
+        if self._request_context is not None:
+            self._request_context.increment("downloads_intelligence_runs")
 
         root_paths = {root.id: self._norm(root.path) for root in roots}
         root_ids = tuple(root_paths.keys())
@@ -549,6 +604,8 @@ class DownloadsIntelligenceService:
         )
 
         filtered_rows: list[FilesystemIndexEntry] = []
+        if self._request_context is not None:
+            self._request_context.increment("filesystem_scan_count")
         for row in rows:
             root_path = root_paths.get(row.root_id)
             if not root_path:
@@ -578,8 +635,11 @@ class DownloadsIntelligenceService:
             )
         )
 
-        return DownloadsIntelligenceResult(
+        result = DownloadsIntelligenceResult(
             summary=summary,
             items=items[:500],
             recommendations=recommendations[:250],
         )
+        if self._request_context is not None:
+            self._request_context.downloads_intelligence = result
+        return result

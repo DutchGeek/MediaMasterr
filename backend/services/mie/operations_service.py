@@ -59,6 +59,7 @@ from backend.services.mie.correlation_service import CorrelationService
 from backend.services.mie.downloads_intelligence import DownloadsIntelligenceService
 from backend.services.mie.identity_service import IdentityCenterService
 from backend.services.mie.operations_engine import OperationsEngine
+from backend.services.mie.request_context import MieRequestContext
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -177,8 +178,13 @@ _NOISE_TOKENS = {
 class OperationsService:
     """Facade for Operations page data sourced from MIE state and provider correlation."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        request_context: MieRequestContext | None = None,
+    ) -> None:
         self.db = db
+        self._request_context = request_context
         self._correlation_service = MediaCorrelationService()
         self._operations_engine = OperationsEngine()
         self._graph_intelligence_cache: tuple[list[Any], Any] | None = None
@@ -223,23 +229,30 @@ class OperationsService:
         return " ".join(parts[:8])
 
     async def _load_correlation_graphs(self) -> list[Any]:
-        rows = (
-            await self.db.execute(
-                select(MediaAsset.media_type, MediaAsset.movie_id, MediaAsset.series_id)
-                .order_by(MediaAsset.id.asc())
-                .limit(250)
-            )
-        ).all()
+        if self._request_context is not None and self._request_context.graph_subjects:
+            subjects = list(self._request_context.graph_subjects)
+        else:
+            rows = (
+                await self.db.execute(
+                    select(MediaAsset.media_type, MediaAsset.movie_id, MediaAsset.series_id)
+                    .order_by(MediaAsset.id.asc())
+                    .limit(250)
+                )
+            ).all()
 
-        subjects: list[tuple[MediaType, int]] = []
-        for media_type, movie_id, series_id in rows:
-            if media_type is MediaType.MOVIE and movie_id is not None:
-                subjects.append((MediaType.MOVIE, int(movie_id)))
-            elif media_type is MediaType.SERIES and series_id is not None:
-                subjects.append((MediaType.SERIES, int(series_id)))
+            subjects = []
+            for media_type, movie_id, series_id in rows:
+                if media_type is MediaType.MOVIE and movie_id is not None:
+                    subjects.append((MediaType.MOVIE, int(movie_id)))
+                elif media_type is MediaType.SERIES and series_id is not None:
+                    subjects.append((MediaType.SERIES, int(series_id)))
+            if self._request_context is not None:
+                self._request_context.graph_subjects = list(subjects)
 
         graphs: list[Any] = []
-        correlation = CorrelationService(self.db)
+        correlation = CorrelationService(
+            self.db, request_context=self._request_context
+        )
         for media_type, media_id in subjects:
             try:
                 graph = await correlation.media_graph(
@@ -318,20 +331,136 @@ class OperationsService:
         return summary
 
     async def _graph_intelligence(self) -> tuple[list[Any], Any]:
+        if self._request_context is not None and self._request_context.graph_intelligence:
+            return self._request_context.graph_intelligence
         if self._graph_intelligence_cache is not None:
             return self._graph_intelligence_cache
         graphs = await self._load_correlation_graphs()
         intelligence = self._operations_engine.run(graphs)
         self._graph_intelligence_cache = (graphs, intelligence)
+        if self._request_context is not None:
+            self._request_context.graph_intelligence = self._graph_intelligence_cache
         return self._graph_intelligence_cache
 
     async def _downloads_intelligence(self) -> Any:
+        if (
+            self._request_context is not None
+            and self._request_context.downloads_intelligence is not None
+        ):
+            return self._request_context.downloads_intelligence
         if self._downloads_intelligence_cache is not None:
             return self._downloads_intelligence_cache
         self._downloads_intelligence_cache = await DownloadsIntelligenceService(
-            self.db
+            self.db,
+            request_context=self._request_context,
         ).run()
         return self._downloads_intelligence_cache
+
+    async def _detached_media_recommendations(
+        self, graphs: list[Any]
+    ) -> list[OperationsRecommendation]:
+        items: list[OperationsRecommendation] = []
+        for graph in graphs:
+            states = [row.computed_state for row in graph.torrent_intelligence.torrents]
+            has_active_torrent = any(
+                state in {"downloading", "queued", "waiting", "seeding"}
+                for state in states
+            )
+            if has_active_torrent:
+                continue
+            if graph.file_intelligence.missing_files > 0:
+                continue
+            if graph.file_intelligence.total_size_bytes <= 0:
+                continue
+
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
+                context="operations.recommendations.detached_media",
+                media_type=graph.media_type,
+                media_id=graph.media_id,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
+                fallback_reason="detached_media",
+            )
+            items.append(
+                OperationsRecommendation(
+                    id=f"detached_media:{graph.media_type.value}:{graph.media_id}",
+                    card_key="detached_media",
+                    title=graph.title,
+                    summary="Media is imported and detached from active torrents.",
+                    explanation="This asset has library files and no active transfer ownership.",
+                    reasons=[
+                        "No active torrent correlation found.",
+                        "Library files are present and healthy.",
+                    ],
+                    action="monitor_detached_media",
+                    safety_level="safe",
+                    target_type=graph.media_type.value,
+                    target_id=str(graph.media_id),
+                    estimated_recovery_bytes=0,
+                    poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
+                    issue_key=f"detached-media-{graph.media_type.value}-{graph.media_id}",
+                    confidence=max(70, graph.health.overall_health_score),
+                    graph_references=[
+                        "torrent_intelligence.torrents",
+                        "file_intelligence.total_size_bytes",
+                        "file_intelligence.missing_files",
+                    ],
+                )
+            )
+        return items
+
+    async def _ready_to_detach_graph_recommendations(
+        self, graphs: list[Any]
+    ) -> list[OperationsRecommendation]:
+        items: list[OperationsRecommendation] = []
+        for graph in graphs:
+            states = [row.computed_state for row in graph.torrent_intelligence.torrents]
+            if not states:
+                continue
+            if not any(state in {"completed", "seeding", "imported"} for state in states):
+                continue
+            if graph.file_intelligence.missing_files > 0:
+                continue
+
+            resolved_artwork = await media_asset_artwork_resolver.resolve(
+                self.db,
+                context="operations.recommendations.ready_to_detach_graph",
+                media_type=graph.media_type,
+                media_id=graph.media_id,
+                provider_poster_url=None,
+                provider_backdrop_url=None,
+                fallback_reason="ready_to_detach_graph",
+            )
+            items.append(
+                OperationsRecommendation(
+                    id=f"ready_to_detach:{graph.media_type.value}:{graph.media_id}",
+                    card_key="ready_to_detach",
+                    title=graph.title,
+                    summary="Transfer appears complete and import is healthy.",
+                    explanation="Graph state indicates this asset can be reviewed for torrent detachment.",
+                    reasons=[
+                        "Torrent state is completed/seeding/imported.",
+                        "No missing files detected.",
+                    ],
+                    action="detach_torrent",
+                    safety_level="low_risk",
+                    target_type=graph.media_type.value,
+                    target_id=str(graph.media_id),
+                    estimated_recovery_bytes=0,
+                    poster_url=resolved_artwork.poster_url,
+                    artwork=resolved_artwork.artwork,
+                    issue_key=f"ready-to-detach-{graph.media_type.value}-{graph.media_id}",
+                    confidence=max(75, graph.health.overall_health_score),
+                    graph_references=[
+                        "torrent_intelligence.torrents[].computed_state",
+                        "file_intelligence.missing_files",
+                        "file_intelligence.total_size_bytes",
+                    ],
+                )
+            )
+        return items
 
     async def _graph_overview_counts(self) -> dict[str, int]:
         graphs, intelligence = await self._graph_intelligence()
@@ -662,7 +791,9 @@ class OperationsService:
 
         torrents_raw, correlated = await self._load_torrent_state()
         await self._refresh_media_assets_snapshot(correlated)
-        identity_health = await IdentityCenterService(self.db).identity_health_summary()
+        identity_health = await IdentityCenterService(
+            self.db, request_context=self._request_context
+        ).identity_health_summary()
 
         protected_movies, protected_series = await self._active_protection_sets()
 
@@ -1019,6 +1150,12 @@ class OperationsService:
                         estimated_recovery_bytes=0,
                         poster_url=resolved_artwork.poster_url,
                         artwork=resolved_artwork.artwork,
+                        confidence=91,
+                        graph_references=[
+                            "torrent_intelligence.torrents[].computed_state",
+                            "torrent_intelligence.torrents[].progress",
+                            "arr_intelligence.ownership",
+                        ],
                     )
                 )
 
@@ -1151,12 +1288,21 @@ class OperationsService:
     async def recommendations(self) -> OperationsRecommendationsResponse:
         items = await self._cleanup_plan_recommendations()
         legacy_items = await self._fallback_recommendations()
-        _, intelligence = await self._graph_intelligence()
+        graphs, intelligence = await self._graph_intelligence()
         downloads = await self._downloads_intelligence()
         graph_items = await self._graph_issue_recommendations(intelligence.issues)
+        detached_items = await self._detached_media_recommendations(graphs)
+        ready_items = await self._ready_to_detach_graph_recommendations(graphs)
         items.extend(legacy_items)
         items.extend(graph_items)
+        items.extend(detached_items)
+        items.extend(ready_items)
         items.extend(downloads.recommendations)
+
+        unique_by_id: dict[str, OperationsRecommendation] = {}
+        for row in items:
+            unique_by_id[row.id] = row
+        items = list(unique_by_id.values())
 
         risk_rank = {"high_risk": 0, "medium_risk": 1, "low_risk": 2, "safe": 3}
         items.sort(
@@ -1602,7 +1748,9 @@ class OperationsService:
         )
 
     async def artwork_issues_summary(self) -> ArtworkIssuesSummary:
-        identity_health = await IdentityCenterService(self.db).identity_health_summary()
+        identity_health = await IdentityCenterService(
+            self.db, request_context=self._request_context
+        ).identity_health_summary()
         valid = int(identity_health.get("healthy_count", 0))
         missing = int(identity_health.get("missing_count", 0))
         review = int(identity_health.get("review_count", 0))

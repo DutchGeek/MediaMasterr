@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
+from backend.api.utils.mie_request_context import get_mie_request_context
 from backend.core.auth import require_page_access
 from backend.core.service_manager import service_manager
 from backend.core.utils.datetime_utils import to_utc_isoformat
@@ -49,6 +50,7 @@ from backend.models.dashboard import (
 from backend.services.event_engine import EventEngine
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
 from backend.services.mie.operations_service import OperationsService
+from backend.services.mie.request_context import MieRequestContext
 from backend.user_types import MEDIA_SERVERS
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -75,6 +77,7 @@ def _empty_library_entry(label: str) -> _LibraryStateEntry:
 async def build_dashboard_response(
     current_user: Annotated[User, Depends(require_page_access(PageAccess.DASHBOARD))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext | None = None,
 ) -> DashboardResponse:
     """Role aware dashboard summary."""
     now = datetime.now(UTC)
@@ -213,7 +216,9 @@ async def build_dashboard_response(
     reclaimed_total_size = summary_row.reclaimed_total_size or 0
     failed_task_runs_7d = summary_row.failed_task_runs_7d or 0
 
-    operations_workspace = await OperationsService(db).workspace()
+    operations_workspace = await OperationsService(
+        db, request_context=request_context
+    ).workspace()
     operations_cards = operations_workspace.overview.cards
     operations_recommendations = operations_workspace.recommendations.items
     card_by_key = {card.key: card for card in operations_cards}
@@ -684,5 +689,11 @@ async def build_dashboard_response(
 async def get_dashboard(
     current_user: Annotated[User, Depends(require_page_access(PageAccess.DASHBOARD))],
     db: AsyncSession = Depends(get_db),
+    request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> DashboardResponse:
-    return await build_dashboard_response(current_user, db)
+    ctx = request_context if isinstance(request_context, MieRequestContext) else None
+    return await build_dashboard_response(
+        current_user,
+        db,
+        request_context=ctx,
+    )

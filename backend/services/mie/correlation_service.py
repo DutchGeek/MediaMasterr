@@ -14,12 +14,14 @@ from backend.services.mie.correlation_models import (
     CorrelationBuildContext,
     CorrelationSubject,
 )
+from backend.services.mie.request_context import MieRequestContext
 
 
 @dataclass(slots=True)
 class CorrelationService:
     db: AsyncSession
     engine: CorrelationEngine = field(default_factory=CorrelationEngine)
+    request_context: MieRequestContext | None = None
 
     async def _resolve_subject(
         self,
@@ -113,9 +115,20 @@ class CorrelationService:
         media_type: MediaType | None = None,
     ) -> MieMediaGraphResponse:
         subject = await self._resolve_subject(media_id=media_id, media_type=media_type)
+        cache_key = (subject.media_type, subject.media_id)
+        if self.request_context is not None:
+            cached = self.request_context.graph_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         media_asset = await self._load_media_asset(subject=subject)
 
         ctx = CorrelationBuildContext(subject=subject, media_asset=media_asset)
+        if self.request_context is not None:
+            self.request_context.increment("graph_build_count")
+            self.request_context.increment(
+                "provider_execution_count", len(self.engine.providers)
+            )
         ctx = await self.engine.run(self.db, ctx)
 
         identity = ctx.identity if ctx.identity is not None else ctx.fallback_identity()
@@ -123,7 +136,7 @@ class CorrelationService:
         if health is None:
             raise ValueError("Correlation health summary was not produced")
 
-        return MieMediaGraphResponse(
+        graph = MieMediaGraphResponse(
             media_id=subject.media_id,
             media_type=subject.media_type,
             title=subject.title,
@@ -137,3 +150,6 @@ class CorrelationService:
             timeline=ctx.timeline,
             health=health,
         )
+        if self.request_context is not None:
+            self.request_context.graph_cache[cache_key] = graph
+        return graph

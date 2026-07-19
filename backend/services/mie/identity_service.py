@@ -54,6 +54,7 @@ from backend.models.mie import (
     MediaIdentityTimelineEventResponse,
 )
 from backend.services.media_asset_artwork import media_asset_artwork_resolver
+from backend.services.mie.request_context import MieRequestContext
 from backend.services.query_engine import QueryEngineSpec, apply_spec
 
 
@@ -79,8 +80,13 @@ class IdentityCenterService:
         "backdrop_provider",
     )
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        request_context: MieRequestContext | None = None,
+    ) -> None:
         self.db = db
+        self._request_context = request_context
 
     @staticmethod
     def _normalize_provider_key(value: str | None) -> str:
@@ -1413,6 +1419,12 @@ class IdentityCenterService:
         )
 
     async def identity_health_summary(self) -> dict[str, int | float]:
+        if (
+            self._request_context is not None
+            and self._request_context.identity_health_summary is not None
+        ):
+            return self._request_context.identity_health_summary
+
         assets = (await self.db.execute(select(MediaAsset))).scalars().all()
         total_assets = len(assets)
         valid_statuses = {"valid"}
@@ -1435,13 +1447,16 @@ class IdentityCenterService:
         coverage_percent = (
             (healthy_count / total_assets) * 100 if total_assets > 0 else 0.0
         )
-        return {
+        summary = {
             "total_assets": total_assets,
             "healthy_count": healthy_count,
             "missing_count": missing_count,
             "review_count": review_count,
             "coverage_percent": coverage_percent,
         }
+        if self._request_context is not None:
+            self._request_context.identity_health_summary = summary
+        return summary
 
     async def set_canonical_provider(
         self,
