@@ -175,3 +175,29 @@ async def test_download_recommendation_contains_explainability(
     assert rec.reasons
     assert rec.confidence is not None
     assert rec.graph_references
+
+
+@pytest.mark.anyio
+async def test_downloads_handles_malformed_metadata_media_ids(
+    db: AsyncSession,
+) -> None:
+    root = FilesystemRoot(name="downloads-root", path="/media/downloads", enabled=True)
+    db.add(root)
+    await db.flush()
+
+    db.add(
+        FilesystemIndexEntry(
+            root_id=root.id,
+            path="/media/downloads/bad/item.mkv",
+            entry_type="file",
+            size_bytes=512,
+            metadata_json={"movie_id": "", "series_id": "not-a-number"},
+        )
+    )
+    await db.commit()
+
+    result = await DownloadsIntelligenceService(db).run()
+
+    assert len(result.items) == 1
+    assert result.items[0].media_id is None
+    assert result.items[0].media_type is None

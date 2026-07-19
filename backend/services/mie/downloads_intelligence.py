@@ -66,6 +66,18 @@ class DownloadsIntelligenceService:
         return (value or "").strip().replace("\\", "/").lower().rstrip("/")
 
     @staticmethod
+    def _parse_optional_int(value: object) -> int | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _torrent_state(raw_state: str | None, progress: float) -> str:
         state = (raw_state or "").lower()
         if "meta" in state:
@@ -200,21 +212,26 @@ class DownloadsIntelligenceService:
 
         media_type: MediaType | None = None
         media_id: int | None = None
-        if metadata.get("movie_id") is not None:
+        movie_id = self._parse_optional_int(metadata.get("movie_id"))
+        series_id = self._parse_optional_int(metadata.get("series_id"))
+        fallback_media_id = self._parse_optional_int(metadata.get("media_id"))
+
+        if movie_id is not None:
             media_type = MediaType.MOVIE
-            media_id = int(metadata["movie_id"])
-        elif metadata.get("series_id") is not None:
+            media_id = movie_id
+        elif series_id is not None:
             media_type = MediaType.SERIES
-            media_id = int(metadata["series_id"])
-        elif metadata.get("media_type") in {"movie", "series"} and metadata.get(
-            "media_id"
+            media_id = series_id
+        elif (
+            metadata.get("media_type") in {"movie", "series"}
+            and fallback_media_id is not None
         ):
             media_type = (
                 MediaType.MOVIE
                 if metadata.get("media_type") == "movie"
                 else MediaType.SERIES
             )
-            media_id = int(metadata["media_id"])
+            media_id = fallback_media_id
 
         graph = await self._graph_for(media_type, media_id)
         torrent = self._torrent_for_entry(entry, torrents)
