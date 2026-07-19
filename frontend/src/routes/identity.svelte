@@ -4,6 +4,7 @@
   import ArtworkImage from "$lib/design-system/media/artwork-image.svelte";
   import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import {
+    type IdentityComparisonField,
     type MediaFilterCatalogResponse,
     type MediaFilterOptionResponse,
     MediaType,
@@ -659,9 +660,8 @@
       }
 
       const preferredProvider = profileByField.get(row.key);
-      let selectedProvider = options.find(
-        (option) => option.selected,
-      )?.provider;
+      let selectedProvider: string | null =
+        options.find((option) => option.selected)?.provider ?? null;
       if (!selectedProvider && preferredProvider) {
         selectedProvider =
           options.find(
