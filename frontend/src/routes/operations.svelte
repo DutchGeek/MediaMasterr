@@ -643,7 +643,9 @@
               Total Download Space
             </p>
             <p class="mt-2 text-sm text-foreground">
-              {formatFileSize(workspace?.downloads_health.total_download_space ?? 0)}
+              {formatFileSize(
+                workspace?.downloads_health.total_download_space ?? 0,
+              )}
             </p>
           </div>
         </div>
@@ -656,7 +658,9 @@
               {#each (workspace?.downloads ?? [])
                 .filter((row) => row.cleanup_classification !== "none")
                 .slice(0, 8) as row}
-                <div class="rounded-lg border border-border/50 bg-background/70 p-2">
+                <div
+                  class="rounded-lg border border-border/50 bg-background/70 p-2"
+                >
                   <p class="font-medium text-foreground">{row.path}</p>
                   <p class="text-muted-foreground">
                     State {row.lifecycle_state} • {row.cleanup_classification}
