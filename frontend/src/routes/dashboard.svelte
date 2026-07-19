@@ -16,7 +16,7 @@
   import type {
     DashboardActivityItem,
     DashboardResponse,
-    MieOperationsResponse,
+    OperationsOverviewResponse,
   } from "$lib/types/shared";
   import { capitalizeFirstLetter } from "$lib/utils/strings";
   import JellyfinSVG from "$lib/components/svgs/jellyfin-svg.svelte";
@@ -31,7 +31,7 @@
   let dashboard = $state<DashboardResponse | null>(null);
   let loading = $state(true);
   let error = $state("");
-  let operationsWorkspace = $state<MieOperationsResponse | null>(null);
+  let operationsOverview = $state<OperationsOverviewResponse | null>(null);
   let lastUpdatedAt = $state<string | null>(null);
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -67,7 +67,7 @@
   const showSyncNotice = $derived(
     (dashboard?.media_server_configured ?? false) && libraryTotal === 0,
   );
-  const operationsCards = $derived(operationsWorkspace?.overview.cards ?? []);
+  const operationsCards = $derived(operationsOverview?.cards ?? []);
   const highSeverityCards = $derived(
     operationsCards.filter((card) => card.severity === "high"),
   );
@@ -304,10 +304,10 @@
       }
       const [dashboardResponse, operationsResponse] = await Promise.all([
         get_api<DashboardResponse>("/api/mie/dashboard"),
-        get_api<MieOperationsResponse>("/api/mie/operations"),
+        get_api<OperationsOverviewResponse>("/api/operations/overview"),
       ]);
       dashboard = dashboardResponse;
-      operationsWorkspace = operationsResponse;
+      operationsOverview = operationsResponse;
       lastUpdatedAt = new Date().toISOString();
       error = "";
     } catch (err: any) {

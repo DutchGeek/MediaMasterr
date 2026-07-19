@@ -181,6 +181,8 @@ class OperationsService:
         self.db = db
         self._correlation_service = MediaCorrelationService()
         self._operations_engine = OperationsEngine()
+        self._graph_intelligence_cache: tuple[list[Any], Any] | None = None
+        self._downloads_intelligence_cache: Any | None = None
 
     @staticmethod
     def _coerce_card_severity(value: str) -> Literal["info", "low", "medium", "high"]:
@@ -316,9 +318,20 @@ class OperationsService:
         return summary
 
     async def _graph_intelligence(self) -> tuple[list[Any], Any]:
+        if self._graph_intelligence_cache is not None:
+            return self._graph_intelligence_cache
         graphs = await self._load_correlation_graphs()
         intelligence = self._operations_engine.run(graphs)
-        return graphs, intelligence
+        self._graph_intelligence_cache = (graphs, intelligence)
+        return self._graph_intelligence_cache
+
+    async def _downloads_intelligence(self) -> Any:
+        if self._downloads_intelligence_cache is not None:
+            return self._downloads_intelligence_cache
+        self._downloads_intelligence_cache = await DownloadsIntelligenceService(
+            self.db
+        ).run()
+        return self._downloads_intelligence_cache
 
     async def _graph_overview_counts(self) -> dict[str, int]:
         graphs, intelligence = await self._graph_intelligence()
@@ -1139,7 +1152,7 @@ class OperationsService:
         items = await self._cleanup_plan_recommendations()
         legacy_items = await self._fallback_recommendations()
         _, intelligence = await self._graph_intelligence()
-        downloads = await DownloadsIntelligenceService(self.db).run()
+        downloads = await self._downloads_intelligence()
         graph_items = await self._graph_issue_recommendations(intelligence.issues)
         items.extend(legacy_items)
         items.extend(graph_items)
@@ -1509,7 +1522,7 @@ class OperationsService:
         cleanup_plans = await self.cleanup_plans()
         artwork_issues = await self.artwork_issues_summary()
         _, intelligence = await self._graph_intelligence()
-        downloads = await DownloadsIntelligenceService(self.db).run()
+        downloads = await self._downloads_intelligence()
 
         health_categories = [
             OperationsHealthCategory(
