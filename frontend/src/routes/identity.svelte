@@ -1308,7 +1308,7 @@
     <section class="space-y-3 rounded-2xl border border-border bg-card p-4">
       <WorkspaceToolbar
         searchQuery={search}
-        searchPlaceholder="Search titles, providers, identifiers"
+        searchPlaceholder="Search titles, IDs, metadata..."
         {sortBy}
         {sortByOptions}
         {sortOrder}

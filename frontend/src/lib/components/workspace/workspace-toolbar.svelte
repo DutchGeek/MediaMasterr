@@ -4,6 +4,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import type {
@@ -118,10 +119,10 @@
 <div class="space-y-3 rounded-2xl border border-border bg-card/70 p-3 md:p-4">
   <div class="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
     <div class="space-y-3">
-      <div class="flex flex-col gap-2 lg:flex-row">
-        <div class="relative flex-1">
+      <div class="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div class="relative w-full min-w-[280px] lg:w-[320px] lg:max-w-[320px] lg:flex-none">
           <Search
-            class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           />
           <Input
             type="text"
@@ -129,8 +130,18 @@
             value={searchQuery}
             oninput={(event) =>
               onSearchInput((event.target as HTMLInputElement).value)}
-            class="pl-10 bg-background text-card-foreground placeholder:text-muted-foreground"
+            class="h-9 w-full bg-background pl-10 pr-10 text-card-foreground placeholder:text-muted-foreground"
           />
+          {#if searchQuery.trim().length > 0}
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="Clear search"
+              onclick={() => onSearchInput("")}
+            >
+              <X class="size-4" />
+            </button>
+          {/if}
         </div>
 
         <div class="flex gap-2">
@@ -357,13 +368,13 @@
       {/if}
     </div>
 
-    <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+    <div class="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-center">
       <Select.Root
         type="single"
         value={perPage.toString()}
         onValueChange={(v) => onPerPageChange(parseInt(v, 10))}
       >
-        <Select.Trigger class="bg-background text-card-foreground">
+        <Select.Trigger class="w-32 justify-between bg-background text-card-foreground">
           {perPage} / page
         </Select.Trigger>
         <Select.Content class="bg-card">
@@ -379,7 +390,7 @@
         </Select.Content>
       </Select.Root>
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 sm:justify-end">
         <label
           class="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2"
         >
