@@ -2003,6 +2003,21 @@ class OperationsService:
                 ),
             )
 
+        supported_actions = {
+            "delete_files",
+            "review_candidate",
+            "merge_duplicates",
+            "cleanup_torrent",
+            "detach_torrent",
+            "refresh_artwork",
+            "monitor",
+            "sync_request",
+            "repair_import",
+            "investigate_torrent",
+            "repair_filesystem",
+            "review_identity",
+        }
+
         checks: list[OperationWorkflowValidationCheck] = [
             OperationWorkflowValidationCheck(
                 label="Target identity present",
@@ -2022,16 +2037,7 @@ class OperationsService:
             ),
             OperationWorkflowValidationCheck(
                 label="Action is supported",
-                passed=recommendation.action
-                in {
-                    "delete_files",
-                    "review_candidate",
-                    "merge_duplicates",
-                    "cleanup_torrent",
-                    "detach_torrent",
-                    "refresh_artwork",
-                    "monitor",
-                },
+                passed=recommendation.action in supported_actions,
                 detail=f"Action={recommendation.action}",
             ),
         ]
@@ -2125,11 +2131,21 @@ class OperationsService:
             )
             return validated
 
+        action = str(recommendation.action or "").lower()
+        # Investigation actions require operator follow-up and are tracked as failed execution.
+        execution_result = "completed"
+        execution_message = "Operation executed and logged"
+        executed = True
+        if action == "investigate_torrent":
+            execution_result = "failed"
+            execution_message = "Investigation required manual operator follow-up"
+            executed = False
+
         history = OperationHistory(
             action=recommendation.action,
             target_type=recommendation.target_type,
             target_id=recommendation.target_id,
-            result="completed",
+            result=execution_result,
             safety_level=recommendation.safety_level,
             recovery_bytes=recommendation.estimated_recovery_bytes,
             metadata_json={
@@ -2143,9 +2159,9 @@ class OperationsService:
         await self.db.commit()
 
         validated.execution = OperationWorkflowExecution(
-            executed=True,
-            result="completed",
-            message="Operation executed and logged",
+            executed=executed,
+            result=execution_result,
+            message=execution_message,
             operation_history_id=history.id,
         )
         return validated

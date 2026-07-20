@@ -126,6 +126,8 @@ test("execution session moves completed cards and preserves moved selection", ()
   const next = applyExecutionSessionToWorkspace(workspace, session, new Set(), selection);
   assert.ok(next.workspace?.workflow?.stages);
   const movedStages = next.workspace.workflow.stages;
+  assert.ok(movedStages[1]);
+  assert.ok(movedStages[1]?.assets?.[0]);
   assert.equal(movedStages[0]?.count, 0);
   assert.equal(movedStages[1]?.count, 1);
   assert.equal(movedStages[1]?.assets[0]?.current_stage, "import");
@@ -168,6 +170,8 @@ test("failed execution updates asset in place without lane move", () => {
   const next = applyExecutionSessionToWorkspace(workspace, session, new Set(), {});
   assert.ok(next.workspace?.workflow?.stages);
   const failedStages = next.workspace.workflow.stages;
+  assert.ok(failedStages[0]);
+  assert.ok(failedStages[0]?.assets?.[0]);
   assert.equal(failedStages[0]?.count, 1);
   assert.equal(failedStages[0]?.assets[0]?.current_status, "Filesystem locked");
 });

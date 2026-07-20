@@ -221,6 +221,7 @@ export function filterAndSortAssets(assets, opts = {}) {
 
 /** @param {string | null | undefined} stage */
 export function stageTitle(stage) {
+  /** @type {Record<string, string>} */
   const titles = {
     download: "Download",
     import: "Import",
@@ -301,6 +302,7 @@ export function applyExecutionSessionToWorkspace(
     );
     if (assetIndex < 0) continue;
     const asset = sourceStage.assets[assetIndex];
+    if (!asset?.id) continue;
 
     if (item.status === "completed") {
       const destinationKey = predictNextWorkflowStage(asset);

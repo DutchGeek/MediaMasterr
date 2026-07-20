@@ -111,6 +111,8 @@
   let executionSession = $state<OperationExecutionSessionResponse | null>(null);
   let executionError = $state("");
   let executionPollHandle = $state<ReturnType<typeof setInterval> | null>(null);
+  let executionPollInFlight = $state(false);
+  let executionStarting = $state(false);
   let appliedExecutionIds = $state<Set<string>>(new Set());
 
   const selectedFilterOptions = $derived.by(() => {
@@ -209,9 +211,13 @@
   });
 
   const selectedRecommendationIds = $derived.by(() => {
-    return allSelectedAssets
-      .map((asset) => asset.id)
-      .filter((id) => selectableRecommendationIds.has(id));
+    return Array.from(
+      new Set(
+        allSelectedAssets
+          .map((asset) => asset.id)
+          .filter((id) => selectableRecommendationIds.has(id)),
+      ),
+    );
   });
 
   const selectedAsset = $derived.by(() => {
@@ -508,7 +514,8 @@
   }
 
   async function pollExecutionSession() {
-    if (!executionSession?.session_id) return;
+    if (!executionSession?.session_id || executionPollInFlight) return;
+    executionPollInFlight = true;
     try {
       const next = await get_api<OperationExecutionSessionResponse>(
         `/api/operations/executions/${executionSession.session_id}`,
@@ -530,6 +537,8 @@
     } catch (e: any) {
       executionError = e?.message ?? "Failed to update execution progress";
       stopExecutionPolling();
+    } finally {
+      executionPollInFlight = false;
     }
   }
 
@@ -552,15 +561,28 @@
       executionError = "Select at least one recommendation-backed asset first.";
       return;
     }
+    if (executionStarting || executionActive) {
+      executionError = "Execution is already in progress.";
+      return;
+    }
+    executionStarting = true;
     executionError = "";
     workflowError = "";
     appliedExecutionIds = new Set<string>();
-    executionSession = await post_api<OperationExecutionSessionResponse>(
-      "/api/operations/executions",
-      { recommendation_ids: selectedRecommendationIds },
-    );
-    startExecutionPolling();
-    void pollExecutionSession();
+    try {
+      executionSession = await post_api<OperationExecutionSessionResponse>(
+        "/api/operations/executions",
+        { recommendation_ids: selectedRecommendationIds },
+      );
+      startExecutionPolling();
+      void pollExecutionSession();
+    } catch (e: any) {
+      executionError = e?.message ?? "Failed to start execution session";
+      executionSession = null;
+      stopExecutionPolling();
+    } finally {
+      executionStarting = false;
+    }
   }
 
   function handleToolbarBulkAction(key: string) {
@@ -952,7 +974,7 @@
             </p>
           {:else}
             <div class={displayMode === "list" ? "space-y-3" : "grid gap-3 md:grid-cols-2 2xl:grid-cols-3"}>
-              {#each displayedAssets as asset (asset.id)}
+              {#each displayedAssets as asset, index (`${asset.id}:${asset.current_stage ?? ""}:${index}`)}
                 {@const hasPoster = !!asset.poster_url}
                 {@const executionItem = itemExecution(asset.id)}
                 <article
