@@ -31,6 +31,7 @@ from backend.models.mie import (
     FilesystemAccessMode,
     FilesystemConfigResponse,
     FilesystemRootConfigResponse,
+    MediaPolicyDefinition,
     MieTimelineEvent,
     OperationAuditEntryResponse,
     OperationAuditListResponse,
@@ -45,6 +46,10 @@ from backend.models.mie import (
     OperationsRecommendation,
     OperationsRecommendationsResponse,
     OperationsTimelineSummary,
+    OperationsWorkflowAsset,
+    OperationsWorkflowBoard,
+    OperationsWorkflowFilter,
+    OperationsWorkflowStage,
     OperationsWorkspaceResponse,
     OperationWorkflowExecution,
     OperationWorkflowPreview,
@@ -172,6 +177,54 @@ _NOISE_TOKENS = {
     "aac",
     "ac3",
     "yify",
+}
+
+_WORKFLOW_STAGE_META: list[tuple[str, str, str]] = [
+    (
+        "download",
+        "Download",
+        "Assets currently transferring, queued, or being checked.",
+    ),
+    (
+        "import",
+        "Import",
+        "Assets downloaded but not yet imported cleanly into the library.",
+    ),
+    (
+        "organize",
+        "Organize",
+        "Imported assets requiring identity, artwork, or filesystem correction.",
+    ),
+    (
+        "retention",
+        "Retention",
+        "Imported assets under active retention or seeding policy.",
+    ),
+    (
+        "cleanup",
+        "Cleanup",
+        "Assets ready for torrent/download cleanup and space recovery.",
+    ),
+    (
+        "completed",
+        "Completed",
+        "No active work remains; asset is detached/protected/healthy.",
+    ),
+]
+
+_FILTER_TITLES: dict[str, str] = {
+    "identity_issues": "Identity Issues",
+    "broken_imports": "Broken Imports",
+    "artwork_issues": "Artwork Issues",
+    "filesystem_issues": "Filesystem Issues",
+    "unknown_files": "Unknown Files",
+    "missing_requests": "Missing Requests",
+    "duplicate_identity": "Duplicate Identity",
+    "missing_artwork": "Missing Artwork",
+    "provider_conflicts": "Provider Conflicts",
+    "downloads": "Downloads",
+    "retention": "Retention",
+    "cleanup": "Cleanup",
 }
 
 
@@ -1323,6 +1376,427 @@ class OperationsService:
                 return item
         return None
 
+    @staticmethod
+    def _policy_name_for_asset(
+        media_type: MediaType | None,
+        title: str,
+    ) -> str:
+        lowered = (title or "").lower()
+        if media_type is MediaType.MOVIE:
+            if any(token in lowered for token in ["anime", "animated"]):
+                return "Animated Movies"
+            if "kids" in lowered:
+                return "Kids Movies"
+            if any(token in lowered for token in ["asian", "korean", "japanese"]):
+                return "Asian Movies"
+            return "American Movies"
+        if any(token in lowered for token in ["anime", "animated"]):
+            return "Anime"
+        if any(token in lowered for token in ["korean", "k-drama"]):
+            return "Korean TV"
+        if "filipino" in lowered:
+            return "Filipino TV"
+        return "American TV"
+
+    @staticmethod
+    def _build_media_policies() -> list[MediaPolicyDefinition]:
+        return [
+            MediaPolicyDefinition(
+                key="american_movies",
+                name="American Movies",
+                classification="movie",
+                destination_library="/media/movies/american",
+                retention_period_days=30,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites", "recently_watched"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+            MediaPolicyDefinition(
+                key="asian_movies",
+                name="Asian Movies",
+                classification="movie",
+                destination_library="/media/movies/asian",
+                retention_period_days=30,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+            MediaPolicyDefinition(
+                key="kids_movies",
+                name="Kids Movies",
+                classification="movie",
+                destination_library="/media/movies/kids",
+                retention_period_days=14,
+                cleanup_behavior="remove_download_folder_keep_torrent_until_ratio",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["family_safe", "favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=48,
+            ),
+            MediaPolicyDefinition(
+                key="animated_movies",
+                name="Animated Movies",
+                classification="movie",
+                destination_library="/media/movies/animated",
+                retention_period_days=21,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=48,
+            ),
+            MediaPolicyDefinition(
+                key="american_tv",
+                name="American TV",
+                classification="series",
+                destination_library="/media/tv/american",
+                retention_period_days=21,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["in_progress_series"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+            MediaPolicyDefinition(
+                key="korean_tv",
+                name="Korean TV",
+                classification="series",
+                destination_library="/media/tv/korean",
+                retention_period_days=21,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+            MediaPolicyDefinition(
+                key="anime",
+                name="Anime",
+                classification="series",
+                destination_library="/media/tv/anime",
+                retention_period_days=21,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+            MediaPolicyDefinition(
+                key="filipino_tv",
+                name="Filipino TV",
+                classification="series",
+                destination_library="/media/tv/filipino",
+                retention_period_days=21,
+                cleanup_behavior="remove_torrent_and_download_folder_after_retention",
+                remove_torrent=True,
+                remove_download_folder=True,
+                protection_rules=["favorites"],
+                minimum_ratio=1.0,
+                minimum_seed_time_hours=72,
+            ),
+        ]
+
+    @staticmethod
+    def _stage_for_download(item: Any) -> str:
+        state = str(getattr(item, "lifecycle_state", "") or "")
+        cleanup = str(getattr(item, "cleanup_classification", "") or "")
+        retention = str(getattr(item, "retention_policy", "") or "")
+
+        if state in {"metadata_download", "queued", "downloading", "checking", "moving"}:
+            return "download"
+        if state == "failed" or cleanup == "failed_import":
+            return "import"
+        if retention in {"seeding_retention", "grace_period"}:
+            return "retention"
+        if retention == "expired" or cleanup in {
+            "safe_to_delete",
+            "duplicate_download",
+            "abandoned_download",
+        }:
+            return "cleanup"
+        if state in {"unknown", "orphaned", "stale"}:
+            return "organize"
+        if state == "imported":
+            return "completed"
+        return "organize"
+
+    @staticmethod
+    def _stage_for_recommendation(item: OperationsRecommendation) -> str:
+        card = item.card_key
+        action = item.action.lower()
+
+        if item.target_type == "download_object":
+            if card in {"failed_downloads"}:
+                return "import"
+            if card in {"safe_to_delete", "duplicate_downloads", "orphaned_downloads"}:
+                return "cleanup"
+            if card in {"safe_to_archive"}:
+                return "retention"
+            return "download"
+
+        if card in {"downloading"}:
+            return "download"
+        if card in {"import_pending", "broken_imports"}:
+            return "import"
+        if card in {
+            "identity_issues",
+            "unknown_files",
+            "duplicate_releases",
+            "duplicate_torrents",
+            "orphaned_files",
+            "artwork_missing",
+            "artwork_placeholder",
+            "artwork_invalid",
+            "artwork_stale",
+        }:
+            return "organize"
+        if card in {"ready_to_detach", "protected_seeding"}:
+            return "retention"
+        if card in {"space_recovery", "orphaned_torrents", "leftover_files", "empty_folders"}:
+            return "cleanup"
+        if card in {"detached_media"}:
+            return "completed"
+
+        if any(token in action for token in ["detach", "remove", "delete", "cleanup"]):
+            return "cleanup"
+        if "protect" in action or "seed" in action:
+            return "retention"
+        if "import" in action:
+            return "import"
+        if item.safety_level == "safe":
+            return "completed"
+        return "organize"
+
+    @staticmethod
+    def _filters_for_recommendation(item: OperationsRecommendation) -> list[str]:
+        filters: set[str] = set()
+        card = item.card_key
+
+        if card in {"identity_issues"}:
+            filters.add("identity_issues")
+            filters.add("duplicate_identity")
+        if card in {"broken_imports", "import_pending"}:
+            filters.add("broken_imports")
+        if card.startswith("artwork_"):
+            filters.add("artwork_issues")
+            filters.add("missing_artwork")
+        if card in {"unknown_files", "orphaned_files", "leftover_files", "empty_folders"}:
+            filters.add("filesystem_issues")
+            filters.add("unknown_files")
+        if card in {"orphaned_torrents", "space_recovery"}:
+            filters.add("cleanup")
+        if card in {"ready_to_detach", "protected_seeding"}:
+            filters.add("retention")
+        if item.target_type == "download_object":
+            filters.add("downloads")
+        if not filters:
+            filters.add("filesystem_issues")
+        return sorted(filters)
+
+    @staticmethod
+    def _filters_for_issue(issue: OperationsIssue) -> list[str]:
+        mapping = {
+            "missing_request": ["missing_requests"],
+            "failed_import": ["broken_imports"],
+            "filesystem_inconsistency": ["filesystem_issues"],
+            "duplicate_identity": ["identity_issues", "duplicate_identity"],
+            "artwork_gap": ["artwork_issues", "missing_artwork"],
+            "provider_conflict": ["provider_conflicts"],
+        }
+        return sorted(mapping.get(issue.issue_type, ["filesystem_issues"]))
+
+    async def _build_workflow_board(
+        self,
+        recommendations: OperationsRecommendationsResponse,
+        issues: list[OperationsIssue],
+        downloads: Any,
+    ) -> OperationsWorkflowBoard:
+        stage_assets: dict[str, list[OperationsWorkflowAsset]] = {
+            key: [] for key, _, _ in _WORKFLOW_STAGE_META
+        }
+
+        download_by_path = {
+            row.path: row for row in list(getattr(downloads, "items", []))
+        }
+
+        for row in list(getattr(downloads, "items", [])):
+            stage_key = self._stage_for_download(row)
+            retention_remaining = (
+                f"{row.retention_remaining_hours}h"
+                if row.retention_remaining_hours is not None
+                else None
+            )
+            stage_assets[stage_key].append(
+                OperationsWorkflowAsset(
+                    id=f"download:{row.path}",
+                    title=row.media_identity or row.path,
+                    media_type=row.media_type,
+                    target_type="download_object",
+                    target_id=row.path,
+                    current_stage=cast(Any, stage_key),
+                    current_status=row.lifecycle_state,
+                    library_location=row.library_path,
+                    download_location=row.path,
+                    torrent_state=row.torrent_state,
+                    import_state=row.import_state,
+                    retention_policy=row.retention_policy,
+                    retention_remaining=retention_remaining,
+                    next_action=row.recommendation,
+                    recommendation=row.cleanup_reason or row.recommendation,
+                    confidence=row.confidence_score,
+                    estimated_space_recovery=row.recoverable_space_bytes,
+                    reason=row.cleanup_reason or "Download lifecycle classification",
+                    after_action="Asset progresses to next lifecycle stage after successful operation.",
+                    graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
+                    policy_name=self._policy_name_for_asset(row.media_type, row.media_identity or row.path),
+                    filters=["downloads"],
+                )
+            )
+
+        for item in recommendations.items:
+            if item.target_type == "download_object" and item.target_id in download_by_path:
+                continue
+            stage_key = self._stage_for_recommendation(item)
+            matched_download = (
+                download_by_path.get(item.target_id or "")
+                if item.target_type == "download_object"
+                else None
+            )
+            media_type = None
+            if item.target_type == "movie":
+                media_type = MediaType.MOVIE
+            elif item.target_type in {"series", "season", "episode"}:
+                media_type = MediaType.SERIES
+            stage_assets[stage_key].append(
+                OperationsWorkflowAsset(
+                    id=item.id,
+                    title=item.title,
+                    media_type=media_type,
+                    target_type=item.target_type,
+                    target_id=item.target_id,
+                    current_stage=cast(Any, stage_key),
+                    current_status=item.summary,
+                    library_location=(
+                        matched_download.library_path if matched_download is not None else None
+                    ),
+                    download_location=(
+                        matched_download.path if matched_download is not None else None
+                    ),
+                    torrent_state=(
+                        matched_download.torrent_state
+                        if matched_download is not None
+                        else None
+                    ),
+                    import_state=(
+                        matched_download.import_state
+                        if matched_download is not None
+                        else None
+                    ),
+                    retention_policy=(
+                        matched_download.retention_policy
+                        if matched_download is not None
+                        else None
+                    ),
+                    retention_remaining=(
+                        f"{matched_download.retention_remaining_hours}h"
+                        if matched_download is not None
+                        and matched_download.retention_remaining_hours is not None
+                        else None
+                    ),
+                    next_action=item.action,
+                    recommendation=item.explanation or item.summary,
+                    confidence=item.confidence,
+                    estimated_space_recovery=item.estimated_recovery_bytes,
+                    reason=(item.reasons[0] if item.reasons else item.summary),
+                    after_action="Operation result is audited and lifecycle advances when checks pass.",
+                    graph_references=item.graph_references,
+                    policy_name=self._policy_name_for_asset(media_type, item.title),
+                    filters=self._filters_for_recommendation(item),
+                )
+            )
+
+        for issue in issues:
+            issue_stage = (
+                "import"
+                if issue.issue_type in {"missing_request", "failed_import"}
+                else "organize"
+            )
+            stage_assets[issue_stage].append(
+                OperationsWorkflowAsset(
+                    id=f"issue:{issue.key}",
+                    title=issue.title,
+                    media_type=issue.media_type,
+                    target_type=issue.media_type.value,
+                    target_id=str(issue.media_id),
+                    current_stage=cast(Any, issue_stage),
+                    current_status=issue.issue_type,
+                    library_location=None,
+                    download_location=None,
+                    torrent_state=None,
+                    import_state=None,
+                    retention_policy=None,
+                    retention_remaining=None,
+                    next_action=issue.suggested_remediation,
+                    recommendation=issue.recommendation,
+                    confidence=issue.confidence,
+                    estimated_space_recovery=0,
+                    reason=issue.reason,
+                    after_action="Issue resolution updates graph health and removes the blocker.",
+                    graph_references=issue.graph_references,
+                    policy_name=self._policy_name_for_asset(issue.media_type, issue.title),
+                    filters=self._filters_for_issue(issue),
+                )
+            )
+
+        stages: list[OperationsWorkflowStage] = []
+        filter_counts: dict[str, int] = {key: 0 for key in _FILTER_TITLES}
+
+        for key, title, description in _WORKFLOW_STAGE_META:
+            assets = stage_assets[key]
+            assets.sort(
+                key=lambda row: (
+                    0 if row.current_stage in {"cleanup", "retention"} else 1,
+                    -(row.estimated_space_recovery or 0),
+                    row.title.lower(),
+                )
+            )
+            for asset in assets:
+                for filter_key in asset.filters:
+                    if filter_key in filter_counts:
+                        filter_counts[filter_key] += 1
+            stages.append(
+                OperationsWorkflowStage(
+                    key=cast(Any, key),
+                    title=title,
+                    description=description,
+                    count=len(assets),
+                    assets=assets,
+                )
+            )
+
+        filters = [
+            OperationsWorkflowFilter(
+                key=key,
+                title=title,
+                count=filter_counts.get(key, 0),
+            )
+            for key, title in _FILTER_TITLES.items()
+        ]
+        filters.sort(key=lambda row: (-row.count, row.title.lower()))
+
+        return OperationsWorkflowBoard(stages=stages, filters=filters)
+
     async def _duplicate_release_preview_details(
         self, recommendation: OperationsRecommendation
     ) -> tuple[list[str], int]:
@@ -1713,12 +2187,19 @@ class OperationsService:
                 intelligence.timeline_highlights
             )
         ]
+        workflow = await self._build_workflow_board(
+            recommendations=recommendations,
+            issues=issues,
+            downloads=downloads,
+        )
 
         return OperationsWorkspaceResponse(
             overview=overview,
             recommendations=recommendations,
             filesystem=filesystem,
             cleanup_plans=cleanup_plans,
+            workflow=workflow,
+            media_policies=self._build_media_policies(),
             artwork_issues=artwork_issues,
             health=OperationsHealthSummary(
                 categories=health_categories,

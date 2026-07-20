@@ -275,11 +275,81 @@ class CleanupPlanListResponse(BaseModel):
     plans: list[CleanupPlanSummaryResponse] = Field(default_factory=list)
 
 
+WorkflowStageKey = Literal[
+    "download",
+    "import",
+    "organize",
+    "retention",
+    "cleanup",
+    "completed",
+]
+
+
+class OperationsWorkflowFilter(BaseModel):
+    key: str
+    title: str
+    count: int = 0
+
+
+class OperationsWorkflowAsset(BaseModel):
+    id: str
+    title: str
+    media_type: MediaType | None = None
+    target_type: str
+    target_id: str | None = None
+    current_stage: WorkflowStageKey
+    current_status: str
+    library_location: str | None = None
+    download_location: str | None = None
+    torrent_state: str | None = None
+    import_state: str | None = None
+    retention_policy: str | None = None
+    retention_remaining: str | None = None
+    next_action: str
+    recommendation: str
+    confidence: int | None = None
+    estimated_space_recovery: int = 0
+    reason: str
+    after_action: str | None = None
+    graph_references: list[str] = Field(default_factory=list)
+    policy_name: str | None = None
+    filters: list[str] = Field(default_factory=list)
+
+
+class OperationsWorkflowStage(BaseModel):
+    key: WorkflowStageKey
+    title: str
+    description: str
+    count: int = 0
+    assets: list[OperationsWorkflowAsset] = Field(default_factory=list)
+
+
+class OperationsWorkflowBoard(BaseModel):
+    stages: list[OperationsWorkflowStage] = Field(default_factory=list)
+    filters: list[OperationsWorkflowFilter] = Field(default_factory=list)
+
+
+class MediaPolicyDefinition(BaseModel):
+    key: str
+    name: str
+    classification: str
+    destination_library: str
+    retention_period_days: int
+    cleanup_behavior: str
+    remove_torrent: bool = True
+    remove_download_folder: bool = True
+    protection_rules: list[str] = Field(default_factory=list)
+    minimum_ratio: float = 1.0
+    minimum_seed_time_hours: int = 0
+
+
 class OperationsWorkspaceResponse(BaseModel):
     overview: OperationsOverviewResponse
     recommendations: OperationsRecommendationsResponse
     filesystem: FilesystemConfigResponse
     cleanup_plans: CleanupPlanListResponse
+    workflow: OperationsWorkflowBoard = Field(default_factory=OperationsWorkflowBoard)
+    media_policies: list[MediaPolicyDefinition] = Field(default_factory=list)
     artwork_issues: ArtworkIssuesSummary | None = None
     health: OperationsHealthSummary = Field(default_factory=OperationsHealthSummary)
     issues: list[OperationsIssue] = Field(default_factory=list)

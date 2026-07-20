@@ -219,3 +219,13 @@ async def test_operations_workspace_includes_issue_health_and_confidence_section
     assert workspace.confidence.score >= 0
     assert workspace.downloads_health.total_download_space >= 0
     assert isinstance(workspace.downloads, list)
+    assert len(workspace.workflow.stages) == 6
+    assert {stage.key for stage in workspace.workflow.stages} == {
+        "download",
+        "import",
+        "organize",
+        "retention",
+        "cleanup",
+        "completed",
+    }
+    assert workspace.media_policies

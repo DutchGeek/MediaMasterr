@@ -51,6 +51,8 @@ def test_mie_operations_and_graph_openapi_contracts() -> None:
         "confidence",
         "downloads_health",
         "downloads",
+        "workflow",
+        "media_policies",
     } <= operations_props
 
     graph_get = schema["paths"]["/api/mie/media/{media_id}/graph"]["get"]

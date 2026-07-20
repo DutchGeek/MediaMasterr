@@ -374,11 +374,79 @@ export interface CleanupPlanListResponse {
   plans: CleanupPlanSummary[];
 }
 
+export type WorkflowStageKey =
+  | "download"
+  | "import"
+  | "organize"
+  | "retention"
+  | "cleanup"
+  | "completed";
+
+export interface OperationsWorkflowFilter {
+  key: string;
+  title: string;
+  count: number;
+}
+
+export interface OperationsWorkflowAsset {
+  id: string;
+  title: string;
+  media_type: MediaType | null;
+  target_type: string;
+  target_id: string | null;
+  current_stage: WorkflowStageKey;
+  current_status: string;
+  library_location: string | null;
+  download_location: string | null;
+  torrent_state: string | null;
+  import_state: string | null;
+  retention_policy: string | null;
+  retention_remaining: string | null;
+  next_action: string;
+  recommendation: string;
+  confidence: number | null;
+  estimated_space_recovery: number;
+  reason: string;
+  after_action: string | null;
+  graph_references: string[];
+  policy_name: string | null;
+  filters: string[];
+}
+
+export interface OperationsWorkflowStage {
+  key: WorkflowStageKey;
+  title: string;
+  description: string;
+  count: number;
+  assets: OperationsWorkflowAsset[];
+}
+
+export interface OperationsWorkflowBoard {
+  stages: OperationsWorkflowStage[];
+  filters: OperationsWorkflowFilter[];
+}
+
+export interface MediaPolicyDefinition {
+  key: string;
+  name: string;
+  classification: string;
+  destination_library: string;
+  retention_period_days: number;
+  cleanup_behavior: string;
+  remove_torrent: boolean;
+  remove_download_folder: boolean;
+  protection_rules: string[];
+  minimum_ratio: number;
+  minimum_seed_time_hours: number;
+}
+
 export interface MieOperationsResponse {
   overview: OperationsOverviewResponse;
   recommendations: OperationsRecommendationsResponse;
   filesystem: FilesystemConfigResponse;
   cleanup_plans: CleanupPlanListResponse;
+  workflow: OperationsWorkflowBoard;
+  media_policies: MediaPolicyDefinition[];
   artwork_issues: ArtworkIssuesSummary | null;
   health: OperationsHealthSummary;
   issues: OperationsIssue[];
