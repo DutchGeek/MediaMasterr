@@ -33,6 +33,8 @@ from backend.models.mie import (
     FilesystemRootConfigResponse,
     MediaPolicyDefinition,
     MieTimelineEvent,
+    OperationActionManifest,
+    OperationActionManifestAction,
     OperationAuditEntryResponse,
     OperationAuditListResponse,
     OperationsCard,
@@ -178,6 +180,218 @@ _NOISE_TOKENS = {
     "aac",
     "ac3",
     "yify",
+}
+
+_ACTION_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "retry_download": {
+        "label": "Retry Download",
+        "category": "recovery",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "operations",
+        "description": "Retry stalled or failed download acquisition.",
+    },
+    "force_recheck": {
+        "label": "Force Recheck",
+        "category": "maintenance",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Request a full torrent hash recheck in the download client.",
+    },
+    "resume_download": {
+        "label": "Resume Download",
+        "category": "recovery",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Resume a paused torrent or queue item.",
+    },
+    "pause_torrent": {
+        "label": "Pause Torrent",
+        "category": "maintenance",
+        "risk": "medium",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Pause torrent activity for this asset.",
+    },
+    "delete_torrent": {
+        "label": "Delete Torrent",
+        "category": "destructive",
+        "risk": "high",
+        "confirmation": True,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Remove torrent from the download client.",
+    },
+    "delete_torrent_and_files": {
+        "label": "Delete Torrent + Files",
+        "category": "destructive",
+        "risk": "high",
+        "confirmation": True,
+        "automation": "manual",
+        "kind": "filesystem",
+        "description": "Remove torrent and all linked payload files.",
+    },
+    "retry_import": {
+        "label": "Retry Import",
+        "category": "recovery",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "operations",
+        "description": "Re-run import reconciliation and ownership checks.",
+    },
+    "move_files": {
+        "label": "Move Files",
+        "category": "maintenance",
+        "risk": "medium",
+        "confirmation": True,
+        "automation": "manual",
+        "kind": "filesystem",
+        "description": "Move files between known media roots.",
+    },
+    "rename_files": {
+        "label": "Rename Files",
+        "category": "maintenance",
+        "risk": "medium",
+        "confirmation": True,
+        "automation": "manual",
+        "kind": "filesystem",
+        "description": "Apply normalized naming rules to linked files.",
+    },
+    "repair_identity": {
+        "label": "Repair Identity",
+        "category": "recovery",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "identity",
+        "description": "Refresh identity graph and provider mappings.",
+    },
+    "refresh_metadata": {
+        "label": "Refresh Metadata",
+        "category": "maintenance",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "metadata",
+        "description": "Refresh metadata from connected providers.",
+    },
+    "refresh_artwork": {
+        "label": "Refresh Artwork",
+        "category": "maintenance",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "artwork",
+        "description": "Re-evaluate artwork candidates and apply profile rules.",
+    },
+    "sync_collections": {
+        "label": "Sync Collections",
+        "category": "maintenance",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "automated",
+        "kind": "collections",
+        "description": "Push collection consistency updates to downstream apps.",
+    },
+    "refresh_plex": {
+        "label": "Refresh Plex",
+        "category": "external",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Trigger a media refresh in Plex.",
+    },
+    "ignore_recommendation": {
+        "label": "Ignore Recommendation",
+        "category": "safe",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "operations",
+        "description": "Suppress this recommendation for manual follow-up.",
+    },
+    "mark_resolved": {
+        "label": "Mark Resolved",
+        "category": "safe",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "operations",
+        "description": "Mark the recommendation as resolved after manual verification.",
+    },
+    "archive": {
+        "label": "Archive",
+        "category": "maintenance",
+        "risk": "medium",
+        "confirmation": True,
+        "automation": "manual",
+        "kind": "filesystem",
+        "description": "Archive linked files into long-term storage.",
+    },
+    "manual_review": {
+        "label": "Move To Manual Review",
+        "category": "recovery",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "operations",
+        "description": "Escalate this recommendation for manual triage.",
+    },
+    "open_radarr": {
+        "label": "Open In Radarr",
+        "category": "external",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Open linked movie in Radarr.",
+    },
+    "open_sonarr": {
+        "label": "Open In Sonarr",
+        "category": "external",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Open linked series in Sonarr.",
+    },
+    "open_qbittorrent": {
+        "label": "Open In qBittorrent",
+        "category": "external",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Open linked torrent in qBittorrent.",
+    },
+    "open_plex": {
+        "label": "Open In Plex",
+        "category": "external",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "external",
+        "description": "Open linked media in Plex.",
+    },
+}
+
+_ACTION_ALIASES: dict[str, str] = {
+    "repair_import": "retry_import",
+    "review_identity": "repair_identity",
+    "cleanup_torrent": "delete_torrent",
+    "delete_files": "delete_torrent_and_files",
+    "monitor": "mark_resolved",
+    "monitor_detached_media": "mark_resolved",
+    "sync_request": "retry_download",
+    "detach_torrent": "delete_torrent",
 }
 
 _WORKFLOW_STAGE_META: list[tuple[str, str, str]] = [
@@ -1360,6 +1574,11 @@ class OperationsService:
 
         unique_by_id: dict[str, OperationsRecommendation] = {}
         for row in items:
+            row.action_manifest = self._build_action_manifest(
+                primary_action=row.action,
+                target_type=row.target_type,
+                media_type=row.media_type,
+            )
             unique_by_id[row.id] = row
         items = list(unique_by_id.values())
 
@@ -1632,6 +1851,86 @@ class OperationsService:
         }
         return sorted(mapping.get(issue.issue_type, ["filesystem_issues"]))
 
+    @staticmethod
+    def _normalize_action_id(action: str) -> str:
+        action_id = str(action or "").strip().lower()
+        return _ACTION_ALIASES.get(action_id, action_id)
+
+    @staticmethod
+    def _manifest_entry(action_id: str) -> OperationActionManifestAction:
+        definition = _ACTION_DEFINITIONS.get(action_id)
+        if definition is None:
+            return OperationActionManifestAction(
+                id=action_id,
+                label=action_id.replace("_", " ").title(),
+                category="maintenance",
+                risk="medium",
+                confirmation=False,
+                description="Action metadata unavailable.",
+                automation="manual",
+                kind="operations",
+            )
+        return OperationActionManifestAction(
+            id=action_id,
+            label=str(definition["label"]),
+            category=cast(Any, definition["category"]),
+            risk=cast(Any, definition["risk"]),
+            confirmation=bool(definition.get("confirmation", False)),
+            description=str(definition.get("description") or ""),
+            automation=cast(Any, definition.get("automation", "manual")),
+            kind=cast(Any, definition.get("kind", "operations")),
+        )
+
+    def _build_action_manifest(
+        self,
+        *,
+        primary_action: str,
+        target_type: str,
+        media_type: MediaType | None,
+    ) -> OperationActionManifest:
+        resolved_primary = self._normalize_action_id(primary_action)
+        actions: list[str] = [resolved_primary]
+
+        if target_type in {"movie", "series", "season", "episode", "reclaim_candidate"}:
+            actions.extend([
+                "refresh_metadata",
+                "refresh_artwork",
+                "sync_collections",
+                "repair_identity",
+                "refresh_plex",
+            ])
+            if media_type is MediaType.MOVIE:
+                actions.append("open_radarr")
+            if media_type is MediaType.SERIES:
+                actions.append("open_sonarr")
+
+        if target_type in {"torrent", "download_object"}:
+            actions.extend([
+                "force_recheck",
+                "resume_download",
+                "pause_torrent",
+                "open_qbittorrent",
+            ])
+
+        actions.extend(["ignore_recommendation", "manual_review", "mark_resolved", "archive"])
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for action in actions:
+            if action in seen:
+                continue
+            seen.add(action)
+            deduped.append(action)
+
+        return OperationActionManifest(
+            available_actions=[self._manifest_entry(action) for action in deduped]
+        )
+
+    def _supported_actions(self) -> set[str]:
+        supported = {str(key) for key in _ACTION_ALIASES}
+        supported.update({str(key) for key in _ACTION_DEFINITIONS})
+        return supported
+
     async def _build_workflow_board(
         self,
         recommendations: OperationsRecommendationsResponse,
@@ -1687,6 +1986,11 @@ class OperationsService:
                     graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
                     policy_name=self._policy_name_for_asset(row.media_type, row.media_identity or row.path),
                     filters=["downloads"],
+                    action_manifest=self._build_action_manifest(
+                        primary_action=row.recommendation,
+                        target_type="download_object",
+                        media_type=row.media_type,
+                    ),
                 )
             )
 
@@ -1764,6 +2068,7 @@ class OperationsService:
                     graph_references=item.graph_references,
                     policy_name=self._policy_name_for_asset(media_type, item.title),
                     filters=self._filters_for_recommendation(item),
+                    action_manifest=item.action_manifest,
                 )
             )
 
@@ -1806,6 +2111,11 @@ class OperationsService:
                     graph_references=issue.graph_references,
                     policy_name=self._policy_name_for_asset(issue.media_type, issue.title),
                     filters=self._filters_for_issue(issue),
+                    action_manifest=self._build_action_manifest(
+                        primary_action=issue.suggested_remediation,
+                        target_type=issue.media_type.value,
+                        media_type=issue.media_type,
+                    ),
                 )
             )
 
@@ -2010,20 +2320,7 @@ class OperationsService:
                 ),
             )
 
-        supported_actions = {
-            "delete_files",
-            "review_candidate",
-            "merge_duplicates",
-            "cleanup_torrent",
-            "detach_torrent",
-            "refresh_artwork",
-            "monitor",
-            "sync_request",
-            "repair_import",
-            "investigate_torrent",
-            "repair_filesystem",
-            "review_identity",
-        }
+        supported_actions = self._supported_actions()
 
         checks: list[OperationWorkflowValidationCheck] = [
             OperationWorkflowValidationCheck(
@@ -2044,7 +2341,8 @@ class OperationsService:
             ),
             OperationWorkflowValidationCheck(
                 label="Action is supported",
-                passed=recommendation.action in supported_actions,
+                passed=self._normalize_action_id(recommendation.action)
+                in supported_actions,
                 detail=f"Action={recommendation.action}",
             ),
         ]

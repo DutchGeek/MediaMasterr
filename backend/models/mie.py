@@ -10,6 +10,37 @@ from backend.models.artwork import ArtworkSelection
 
 FilesystemAccessMode = Literal["discovery", "assisted", "automated"]
 SafetyLevel = Literal["safe", "low_risk", "medium_risk", "high_risk"]
+ActionManifestCategory = Literal[
+    "safe",
+    "maintenance",
+    "recovery",
+    "external",
+    "destructive",
+]
+ActionManifestRisk = Literal["safe", "medium", "high"]
+
+
+class OperationActionManifestAction(BaseModel):
+    id: str
+    label: str
+    category: ActionManifestCategory
+    risk: ActionManifestRisk
+    confirmation: bool = False
+    description: str | None = None
+    automation: Literal["manual", "automated", "hybrid"] = "automated"
+    kind: Literal[
+        "filesystem",
+        "identity",
+        "metadata",
+        "artwork",
+        "collections",
+        "operations",
+        "external",
+    ] = "operations"
+
+
+class OperationActionManifest(BaseModel):
+    available_actions: list[OperationActionManifestAction] = Field(default_factory=list)
 
 
 class OperationsCard(BaseModel):
@@ -43,6 +74,7 @@ class OperationsRecommendation(BaseModel):
     confidence: int | None = None
     graph_references: list[str] = Field(default_factory=list)
     media_type: MediaType | None = None
+    action_manifest: OperationActionManifest = Field(default_factory=OperationActionManifest)
 
 
 OperationsIssueSeverity = Literal["critical", "high", "medium", "low"]
@@ -392,6 +424,7 @@ class OperationsWorkflowAsset(BaseModel):
     graph_references: list[str] = Field(default_factory=list)
     policy_name: str | None = None
     filters: list[str] = Field(default_factory=list)
+    action_manifest: OperationActionManifest = Field(default_factory=OperationActionManifest)
 
 
 class OperationsWorkflowStage(BaseModel):

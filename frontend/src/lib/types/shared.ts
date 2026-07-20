@@ -146,6 +146,38 @@ export interface OperationsRecommendation {
   confidence?: number | null;
   graph_references?: string[];
   media_type?: MediaType | null;
+  action_manifest: OperationActionManifest;
+}
+
+export type ActionManifestCategory =
+  | "safe"
+  | "maintenance"
+  | "recovery"
+  | "external"
+  | "destructive";
+
+export type ActionManifestRisk = "safe" | "medium" | "high";
+
+export interface OperationActionManifestAction {
+  id: string;
+  label: string;
+  category: ActionManifestCategory;
+  risk: ActionManifestRisk;
+  confirmation: boolean;
+  description: string | null;
+  automation: "manual" | "automated" | "hybrid";
+  kind:
+    | "filesystem"
+    | "identity"
+    | "metadata"
+    | "artwork"
+    | "collections"
+    | "operations"
+    | "external";
+}
+
+export interface OperationActionManifest {
+  available_actions: OperationActionManifestAction[];
 }
 
 export type OperationsIssueSeverity = "critical" | "high" | "medium" | "low";
@@ -485,6 +517,7 @@ export interface OperationsWorkflowAsset {
   graph_references: string[];
   policy_name: string | null;
   filters: string[];
+  action_manifest: OperationActionManifest;
 }
 
 export interface OperationsWorkflowStage {

@@ -153,6 +153,11 @@ async def test_operations_recommendations_resolve_posters() -> None:
     assert explainability["With Poster"]
     assert explainability["Without Poster"]
 
+    manifests = {item.title: item.action_manifest.available_actions for item in response.items}
+    assert manifests["With Poster"]
+    assert any(action.category for action in manifests["With Poster"])
+    assert any(action.risk for action in manifests["With Poster"])
+
 
 @pytest.mark.anyio
 async def test_operations_workflow_validate_execute_and_audit() -> None:
@@ -233,6 +238,9 @@ async def test_operations_workspace_includes_issue_health_and_confidence_section
         "completed",
     }
     assert workspace.media_policies
+    stage_assets = [asset for stage in workspace.workflow.stages for asset in stage.assets]
+    if stage_assets:
+        assert stage_assets[0].action_manifest.available_actions
 
 
 @pytest.mark.anyio

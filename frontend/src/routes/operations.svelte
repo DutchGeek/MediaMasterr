@@ -8,6 +8,7 @@
     MediaFilterCatalogResponse,
     MediaFilterOptionResponse,
     MieOperationsResponse,
+    OperationActionManifestAction,
     OperationAuditListResponse,
     OperationExecutionHistoryListResponse,
     OperationExecutionItemProgress,
@@ -42,6 +43,17 @@
     | "low_confidence";
   type SortBy = "recovery" | "title" | "confidence";
   type ViewMode = "grid" | "list";
+  type CockpitTab =
+    | "overview"
+    | "status"
+    | "locations"
+    | "applications"
+    | "relationships"
+    | "timeline"
+    | "actions"
+    | "execution"
+    | "history"
+    | "logs";
   type OperationsWorkspacePrefs = {
     search: string;
     sortBy: SortBy;
@@ -73,6 +85,18 @@
     { key: "execute", label: "Execute" },
     { key: "clear", label: "Clear Selection" },
   ];
+  const cockpitTabs: Array<{ key: CockpitTab; label: string }> = [
+    { key: "overview", label: "Overview" },
+    { key: "status", label: "Status" },
+    { key: "locations", label: "Locations" },
+    { key: "applications", label: "Applications" },
+    { key: "relationships", label: "Relationships" },
+    { key: "timeline", label: "Timeline" },
+    { key: "actions", label: "Actions" },
+    { key: "execution", label: "Execution" },
+    { key: "history", label: "History" },
+    { key: "logs", label: "Logs" },
+  ];
 
   let loading = $state(true);
   let error = $state("");
@@ -101,6 +125,13 @@
   let stageSelections = $state<Record<string, Set<string>>>({});
   let lastClickedByStage = $state<Record<string, string | null>>({});
   let selectedAssetId = $state<string | null>(null);
+  let cockpitTab = $state<CockpitTab>("overview");
+  let loadedCockpitKeys = $state<Set<string>>(new Set());
+  let inspectorPreview = $state<OperationWorkflowResponse | null>(null);
+  let inspectorValidation = $state<OperationWorkflowResponse | null>(null);
+  let inspectorTabBusy = $state(false);
+  let inspectorActionBusy = $state(false);
+  let inspectorActionMessage = $state("");
 
   let workflowBusy = $state(false);
   let workflowMode = $state<"preview" | "validate" | null>(null);
@@ -274,6 +305,200 @@
     return executionItemsByRecommendation.get(selectedAssetId) ?? null;
   });
 
+  const selectedRecommendation = $derived.by(() => {
+    if (!selectedAssetId) return null;
+    return (
+      workspace?.recommendations.items.find((item) => item.id === selectedAssetId) ?? null
+    );
+  });
+
+  const selectedManifestActions = $derived.by(() => {
+    return (
+      selectedRecommendation?.action_manifest?.available_actions ??
+      selectedAsset?.action_manifest?.available_actions ??
+      []
+    ) as OperationActionManifestAction[];
+  });
+
+  const groupedManifestActions = $derived.by(() => {
+    const groups = new Map<string, OperationActionManifestAction[]>();
+    for (const row of selectedManifestActions) {
+      const key = row.category || "maintenance";
+      const current = groups.get(key) ?? [];
+      current.push(row);
+      groups.set(key, current);
+    }
+    return Array.from(groups.entries()).map(([category, actions]) => ({
+      category,
+      actions,
+    }));
+  });
+
+  const selectedTimeline = $derived.by(() => {
+    if (!selectedAsset) return [];
+    const mediaType = selectedAsset.media_type ?? null;
+    const targetId = selectedAsset.target_id ? Number(selectedAsset.target_id) : null;
+    return (workspace?.timeline_summary?.highlights ?? []).filter((event) => {
+      if (event.media_type && mediaType && event.media_type !== mediaType) return false;
+      if (event.media_id !== null && targetId !== null && event.media_id !== targetId) return false;
+      return event.title.toLowerCase().includes(selectedAsset.title.toLowerCase()) ||
+        event.media_id === targetId;
+    });
+  });
+
+  const selectedHistoryRows = $derived.by(() => {
+    if (!selectedAsset) return [];
+    const targetId = selectedAsset.target_id;
+    return (executionHistory?.items ?? []).filter((row) =>
+      row.items.some((item) => item.recommendation_id === selectedAsset.id || item.target_id === targetId),
+    );
+  });
+
+  const selectedAuditRows = $derived.by(() => {
+    if (!selectedAsset) return [];
+    return (auditTrail?.items ?? []).filter((row) => {
+      if (selectedAsset.target_id && row.target_id === selectedAsset.target_id) return true;
+      return row.target_type === selectedAsset.target_type;
+    });
+  });
+
+  const selectedLocations = $derived.by(() => {
+    if (!selectedAsset) return [];
+    return [
+      { key: "downloads", label: "Downloads", path: selectedAsset.download_location },
+      { key: "library", label: "Library", path: selectedAsset.library_location },
+      { key: "temporary", label: "Temporary", path: "/app/transcode/" },
+      { key: "cache", label: "Cache", path: "/metadata/" },
+    ];
+  });
+
+  function normalizeActionId(action: string) {
+    const source = String(action || "").trim().toLowerCase();
+    const aliases: Record<string, string> = {
+      repair_import: "retry_import",
+      review_identity: "repair_identity",
+      cleanup_torrent: "delete_torrent",
+      delete_files: "delete_torrent_and_files",
+      monitor: "mark_resolved",
+      monitor_detached_media: "mark_resolved",
+      sync_request: "retry_download",
+      detach_torrent: "delete_torrent",
+    };
+    return aliases[source] ?? source;
+  }
+
+  function cockpitLoadKey(tab: CockpitTab) {
+    return `${selectedAssetId ?? "none"}:${tab}`;
+  }
+
+  async function ensureCockpitTabData(tab: CockpitTab) {
+    if (!selectedRecommendation || !selectedAssetId) return;
+    const key = cockpitLoadKey(tab);
+    if (loadedCockpitKeys.has(key)) return;
+    if (tab !== "execution" && tab !== "logs") {
+      loadedCockpitKeys = new Set([...loadedCockpitKeys, key]);
+      return;
+    }
+
+    inspectorTabBusy = true;
+    try {
+      if (tab === "execution") {
+        inspectorPreview = await get_api<OperationWorkflowResponse>(
+          `/api/operations/recommendations/${selectedAssetId}/preview`,
+        );
+        inspectorValidation = await get_api<OperationWorkflowResponse>(
+          `/api/operations/recommendations/${selectedAssetId}/validate`,
+        );
+      }
+      if (tab === "logs") {
+        await loadHistory();
+      }
+      loadedCockpitKeys = new Set([...loadedCockpitKeys, key]);
+    } catch (e: any) {
+      inspectorActionMessage = e?.message ?? "Failed to load inspector tab data";
+    } finally {
+      inspectorTabBusy = false;
+    }
+  }
+
+  async function selectCockpitTab(tab: CockpitTab) {
+    cockpitTab = tab;
+    await ensureCockpitTabData(tab);
+  }
+
+  async function copyPath(path: string | null | undefined) {
+    if (!path) return;
+    try {
+      await navigator.clipboard.writeText(path);
+      inspectorActionMessage = `Copied path: ${path}`;
+    } catch {
+      inspectorActionMessage = "Copy failed. Clipboard is unavailable.";
+    }
+  }
+
+  function openFilesystemPath(path: string | null | undefined) {
+    if (!path || typeof window === "undefined") return;
+    const fileUrl = `file://${path.replaceAll("\\", "/")}`;
+    window.open(fileUrl, "_blank", "noopener,noreferrer");
+    inspectorActionMessage = `Opened: ${path}`;
+  }
+
+  async function runManifestAction(action: OperationActionManifestAction) {
+    if (!selectedAsset) return;
+    if (action.confirmation) {
+      const approved = window.confirm(
+        `${action.label}\n\nThis action is marked ${action.risk}. Continue?`,
+      );
+      if (!approved) return;
+    }
+
+    inspectorActionBusy = true;
+    inspectorActionMessage = "";
+    try {
+      if (action.id.startsWith("open_")) {
+        const routes: Record<string, string> = {
+          open_radarr: "#/movies",
+          open_sonarr: "#/series",
+          open_qbittorrent: "#/qbittorrent",
+          open_plex: "#/operations",
+        };
+        const target = routes[action.id] ?? "#/settings";
+        window.open(`${window.location.origin}/${target}`, "_blank", "noopener,noreferrer");
+        inspectorActionMessage = `${action.label} launched.`;
+        return;
+      }
+
+      if (action.id === "ignore_recommendation" || action.id === "manual_review") {
+        inspectorActionMessage = `${action.label} recorded for manual workflow.`;
+        return;
+      }
+
+      if (!selectedRecommendation) {
+        inspectorActionMessage = "This asset has no executable recommendation.";
+        return;
+      }
+
+      const executableId = normalizeActionId(selectedRecommendation.action);
+      if (action.id !== executableId) {
+        inspectorActionMessage =
+          "Action preview is available, but automation for this action is not yet wired.";
+        return;
+      }
+
+      const result = await post_api<OperationWorkflowResponse>(
+        `/api/operations/recommendations/${selectedRecommendation.id}/execute`,
+        {},
+      );
+      workflowResults = [result, ...workflowResults].slice(0, 10);
+      inspectorActionMessage = result.execution.message || `${action.label} completed.`;
+      await Promise.all([loadWorkspace(), loadHistory()]);
+    } catch (e: any) {
+      inspectorActionMessage = e?.message ?? `Failed to execute ${action.label}`;
+    } finally {
+      inspectorActionBusy = false;
+    }
+  }
+
   function addArrayParams(params: URLSearchParams, key: string, values: number[]) {
     for (const value of values) {
       params.append(key, String(value));
@@ -425,6 +650,16 @@
     });
     setStageSelection(stageKey, next);
     lastClickedByStage = { ...lastClickedByStage, [stageKey]: assetId };
+  }
+
+  function inspectAsset(assetId: string) {
+    if (selectedAssetId !== assetId) {
+      selectedAssetId = assetId;
+      inspectorPreview = null;
+      inspectorValidation = null;
+      loadedCockpitKeys = new Set();
+    }
+    void ensureCockpitTabData(cockpitTab);
   }
 
   function selectAllFiltered() {
@@ -696,6 +931,11 @@
     if (selectedFilter && !stageFilterRows.some((row) => row.key === selectedFilter)) {
       selectedFilter = null;
     }
+  });
+
+  $effect(() => {
+    if (!selectedAssetId) return;
+    void ensureCockpitTabData(cockpitTab);
   });
 
   onMount(async () => {
@@ -1001,7 +1241,7 @@
                     <button
                       type="button"
                       class="text-xs text-primary underline-offset-2 hover:underline"
-                      onclick={() => (selectedAssetId = asset.id)}
+                      onclick={() => inspectAsset(asset.id)}
                     >
                       Inspect
                     </button>
@@ -1010,7 +1250,7 @@
                   <button
                     type="button"
                     class={displayMode === "list" ? "grid w-full gap-3 text-left md:grid-cols-[140px_minmax(0,1fr)]" : "w-full text-left"}
-                    onclick={() => (selectedAssetId = asset.id)}
+                    onclick={() => inspectAsset(asset.id)}
                     aria-label={`Open inspector for ${asset.title}`}
                   >
                     {#if hasPoster}
@@ -1115,92 +1355,249 @@
         </div>
 
         <aside class="rounded-2xl border border-border/70 bg-card/60 p-4">
-          <h2 class="text-lg font-semibold text-foreground">Inspector</h2>
+          <h2 class="text-lg font-semibold text-foreground">Operational Cockpit</h2>
           {#if selectedAsset}
             <div class="mt-3 space-y-3 text-sm" in:fade>
-              {#if selectedAsset.poster_url}
-                <img
-                  src={selectedAsset.poster_url}
-                  alt={posterAlt(selectedAsset)}
-                  class="h-72 w-full rounded-xl object-cover"
-                  loading="lazy"
-                />
-              {:else}
-                <div class="flex h-72 w-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground">
-                  Missing Artwork • Artwork Repair Available
+              <div class="flex flex-wrap gap-2">
+                {#each cockpitTabs as tab}
+                  <button
+                    type="button"
+                    class={`rounded-full border px-2.5 py-1 text-[11px] ${cockpitTab === tab.key ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
+                    onclick={() => selectCockpitTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                {/each}
+              </div>
+
+              {#if inspectorActionMessage}
+                <p class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                  {inspectorActionMessage}
+                </p>
+              {/if}
+
+              {#if inspectorTabBusy}
+                <p class="text-xs text-muted-foreground">Loading tab data...</p>
+              {/if}
+
+              {#if cockpitTab === "overview"}
+                <div class="space-y-3">
+                  {#if selectedAsset.poster_url}
+                    <img
+                      src={selectedAsset.poster_url}
+                      alt={posterAlt(selectedAsset)}
+                      class="h-72 w-full rounded-xl object-cover"
+                      loading="lazy"
+                    />
+                  {:else}
+                    <div class="flex h-72 w-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground">
+                      Artwork unavailable
+                    </div>
+                  {/if}
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Title</p><p class="font-medium text-foreground">{selectedAsset.title}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Year</p><p class="font-medium text-foreground">{selectedAsset.year ?? "Unknown"}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Media Type</p><p class="font-medium text-foreground">{selectedAsset.media_type ?? "Unknown"}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Lifecycle</p><p class="font-medium text-foreground">{selectedAsset.current_stage}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Recommendation</p><p class="font-medium text-foreground">{selectedAsset.next_action.replaceAll("_", " ")}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Confidence</p><p class="font-medium text-foreground">{selectedAsset.confidence ?? 0}%</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Health Status</p><p class="font-medium text-foreground">{selectedAsset.current_status}</p></div>
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Current Owner</p><p class="font-medium text-foreground">{selectedAsset.policy_name ?? "Unavailable"}</p></div>
+                  </div>
                 </div>
               {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Identity</p>
-                <p class="mt-1 text-foreground">{selectedAsset.title}</p>
-                <p class="text-xs text-muted-foreground">
-                  {selectedAsset.media_type ?? "media"}
-                  {#if selectedAsset.year} • {selectedAsset.year}{/if}
-                </p>
-              </div>
+              {#if cockpitTab === "status"}
+                <div class="space-y-2 text-xs">
+                  {#each [
+                    ["Download", selectedAsset.torrent_state || "Unavailable"],
+                    ["Import", selectedAsset.import_state || "Unavailable"],
+                    ["Filesystem", selectedAsset.library_location ? "Healthy" : "Pending"],
+                    ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"],
+                    ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"],
+                    ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"],
+                    ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"],
+                    ["Retention", selectedAsset.retention_policy || "Unavailable"],
+                    ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"],
+                  ] as [label, value]}
+                    <div class="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                      <span class="text-muted-foreground">{label}</span>
+                      <span class="font-medium text-foreground">{value}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Timeline</p>
-                <p class="mt-1 text-foreground">Stage {selectedAsset.current_stage}</p>
-                <p class="text-xs text-muted-foreground">Status {selectedAsset.current_status}</p>
-              </div>
-
-              {#if selectedExecutionItem}
-                <div>
-                  <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Execution</p>
-                  <p class="mt-1 text-foreground">{selectedExecutionItem.message || selectedExecutionItem.status}</p>
-                  <div class="mt-2 space-y-2">
-                    {#each selectedExecutionItem.stages as stage}
-                      <div class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-xs">
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="font-medium text-foreground">{stage.label}</span>
-                          <span class={stage.status === "completed" ? "text-emerald-400" : stage.status === "running" ? "text-primary" : stage.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{stage.status.replaceAll("_", " ")}</span>
-                        </div>
-                        {#if stage.detail}
-                          <p class="mt-1 text-muted-foreground">{stage.detail}</p>
-                        {/if}
+              {#if cockpitTab === "locations"}
+                <div class="space-y-2 text-xs">
+                  {#each selectedLocations as row}
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <div class="flex items-center justify-between gap-2">
+                        <p class="font-medium text-foreground">{row.label}</p>
+                        <span class="text-muted-foreground">{row.path ? "Exists" : "Unavailable"}</span>
                       </div>
+                      <p class="mt-1 break-all text-muted-foreground">{row.path ?? "Unknown"}</p>
+                      <div class="mt-2 flex flex-wrap gap-1">
+                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Open Folder</button>
+                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Browse</button>
+                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => copyPath(row.path)}>Copy Path</button>
+                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Reveal File</button>
+                      </div>
+                    </div>
+                  {/each}
+                  <button type="button" class="w-full rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left" onclick={() => copyPath(`${selectedAsset.download_location ?? "n/a"} <> ${selectedAsset.library_location ?? "n/a"}`)}>Compare Locations</button>
+                </div>
+              {/if}
+
+              {#if cockpitTab === "applications"}
+                <div class="space-y-2 text-xs">
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Requested By</p><p class="font-medium text-foreground">{selectedAsset.media_type === "movie" ? "Radarr" : selectedAsset.media_type === "series" ? "Sonarr" : "Unavailable"}</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Managed By</p><p class="font-medium text-foreground">Plex</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Download Client</p><p class="font-medium text-foreground">{selectedAsset.torrent_state ? "qBittorrent" : "Unavailable"}</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Indexer</p><p class="font-medium text-foreground">Unavailable</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Collection</p><p class="font-medium text-foreground">{selectedAsset.policy_name ?? "Unknown"}</p></div>
+                  <div class="flex flex-wrap gap-1">
+                    {#each selectedManifestActions.filter((row) => row.category === "external") as action}
+                      <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{action.label}</button>
                     {/each}
                   </div>
                 </div>
               {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Relationships</p>
-                <p class="text-xs text-muted-foreground">
-                  {(selectedAsset.graph_references ?? []).join(" • ") ||
-                    "Additional relationship details unavailable."}
-                </p>
-              </div>
+              {#if cockpitTab === "relationships"}
+                <div class="space-y-2 text-xs">
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">IMDb</p><p class="font-medium text-foreground">Unavailable</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">TMDB</p><p class="font-medium text-foreground">Unavailable</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">TVDB</p><p class="font-medium text-foreground">Unavailable</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Trakt</p><p class="font-medium text-foreground">Unavailable</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Plex GUID</p><p class="font-medium text-foreground">{selectedAsset.target_id ?? "Unavailable"}</p></div>
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Graph References</p><p class="font-medium text-foreground">{selectedAsset.graph_references.join(" • ") || "Unavailable"}</p></div>
+                </div>
+              {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Providers</p>
-                <p class="text-xs text-muted-foreground">
-                  {selectedAsset.torrent_state ? `Torrent ${selectedAsset.torrent_state}` : "Provider status unavailable"}
-                </p>
-              </div>
+              {#if cockpitTab === "timeline"}
+                <div class="space-y-2 text-xs">
+                  {#if selectedTimeline.length > 0}
+                    {#each selectedTimeline as event}
+                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                        <p class="font-medium text-foreground">{event.title}</p>
+                        <p class="text-muted-foreground">{new Date(event.happened_at).toLocaleString()} • {event.origin}</p>
+                        <p class="mt-1 text-muted-foreground">{event.summary}</p>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">No timeline events available for this asset.</p>
+                  {/if}
+                </div>
+              {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Policies</p>
-                <p class="text-xs text-muted-foreground">{selectedAsset.policy_name ?? "Policy unavailable"}</p>
-                {#if selectedAsset.retention_policy}
-                  <p class="text-xs text-muted-foreground">
-                    {selectedAsset.retention_policy}
-                    {selectedAsset.retention_remaining ? ` (${selectedAsset.retention_remaining})` : ""}
-                  </p>
-                {/if}
-              </div>
+              {#if cockpitTab === "actions"}
+                <div class="space-y-3 text-xs">
+                  {#if groupedManifestActions.length > 0}
+                    {#each groupedManifestActions as group}
+                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                        <p class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{group.category}</p>
+                        <div class="mt-2 space-y-2">
+                          {#each group.actions as action}
+                            <div class="rounded-md border border-border/50 bg-background/70 p-2">
+                              <div class="flex items-start justify-between gap-2">
+                                <div>
+                                  <p class="font-medium text-foreground">{action.label}</p>
+                                  <p class="text-muted-foreground">{action.description || "No description"}</p>
+                                </div>
+                                <span class={`rounded-full border px-2 py-0.5 ${action.risk === "high" ? "border-destructive/60 text-destructive" : action.risk === "medium" ? "border-orange-400/60 text-orange-300" : "border-emerald-500/60 text-emerald-300"}`}>Risk {action.risk}</span>
+                              </div>
+                              <div class="mt-2 flex items-center justify-between gap-2">
+                                <p class="text-muted-foreground">{action.kind} • {action.automation}</p>
+                                <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{inspectorActionBusy ? "Running..." : "Run"}</button>
+                              </div>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">No actions available.</p>
+                  {/if}
+                </div>
+              {/if}
 
-              <div>
-                <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Recommendation</p>
-                <p class="mt-1 font-semibold text-foreground">{selectedAsset.next_action.replaceAll("_", " ")}</p>
-                <p class="text-xs text-muted-foreground">{selectedAsset.recommendation}</p>
-              </div>
+              {#if cockpitTab === "execution"}
+                <div class="space-y-2 text-xs">
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                    <p class="text-muted-foreground">Execution Preview</p>
+                    <p class="font-medium text-foreground">Expected Recovery {formatFileSize(inspectorPreview?.preview?.estimated_recovery_bytes ?? 0)}</p>
+                    {#if inspectorPreview?.preview?.details?.length}
+                      <ul class="mt-2 space-y-1 text-muted-foreground">
+                        {#each inspectorPreview.preview.details as detail}
+                          <li>{detail}</li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  </div>
+
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                    <p class="text-muted-foreground">Validation</p>
+                    {#if inspectorValidation?.validation?.checks?.length}
+                      <div class="mt-2 space-y-1">
+                        {#each inspectorValidation.validation.checks as check}
+                          <p class={check.passed ? "text-emerald-300" : "text-destructive"}>{check.passed ? "✓" : "✕"} {check.label} • {check.detail}</p>
+                        {/each}
+                      </div>
+                    {:else}
+                      <p class="text-muted-foreground">Validation unavailable.</p>
+                    {/if}
+                  </div>
+
+                  {#if selectedExecutionItem}
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <p class="text-muted-foreground">Execution Monitor</p>
+                      <p class="font-medium text-foreground">{selectedExecutionItem.message || selectedExecutionItem.status}</p>
+                      <div class="mt-2 space-y-1">
+                        {#each selectedExecutionItem.stages as stage}
+                          <p class="text-muted-foreground">{stage.label}: {stage.status}</p>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if cockpitTab === "history"}
+                <div class="space-y-2 text-xs">
+                  {#if selectedHistoryRows.length > 0}
+                    {#each selectedHistoryRows as row}
+                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                        <p class="font-medium text-foreground">{row.action}</p>
+                        <p class="text-muted-foreground">{row.status} • {new Date(row.created_at).toLocaleString()}</p>
+                        <p class="text-muted-foreground">Recovered {formatFileSize(row.recovered_space_bytes)}</p>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">No history for this asset yet.</p>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if cockpitTab === "logs"}
+                <div class="space-y-2 text-xs">
+                  {#if selectedAuditRows.length > 0}
+                    {#each selectedAuditRows.slice(0, 30) as row}
+                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                        <p class="font-medium text-foreground">{row.action}</p>
+                        <p class="text-muted-foreground">{row.result} • {new Date(row.created_at).toLocaleString()}</p>
+                        <p class="text-muted-foreground">{row.target_type}#{row.target_id ?? "n/a"} • {formatFileSize(row.recovery_bytes)}</p>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">No diagnostic logs available for this asset.</p>
+                  {/if}
+                </div>
+              {/if}
             </div>
           {:else}
             <p class="mt-2 text-sm text-muted-foreground">
-              Select an asset card to inspect identity, relationships, policy, and live execution details.
+              Select an asset card to inspect why it happened, where files are, which apps own it, and what you can do next.
             </p>
           {/if}
         </aside>
