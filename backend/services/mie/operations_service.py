@@ -65,6 +65,7 @@ from backend.services.mie.downloads_intelligence import DownloadsIntelligenceSer
 from backend.services.mie.identity_service import IdentityCenterService
 from backend.services.mie.operations_engine import OperationsEngine
 from backend.services.mie.request_context import MieRequestContext
+from backend.services.query_engine import QueryEngineSpec, apply_spec
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
     ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
@@ -2178,6 +2179,16 @@ class OperationsService:
         )
 
     async def workspace(self) -> OperationsWorkspaceResponse:
+        return await self.workspace_filtered()
+
+    async def workspace_filtered(
+        self,
+        *,
+        candidates_only: bool = False,
+        imported_filter_ids: list[int] | None = None,
+        decision_filter_ids: list[int] | None = None,
+        smart_filter_ids: list[int] | None = None,
+    ) -> OperationsWorkspaceResponse:
         overview = await self.overview()
         recommendations = await self.recommendations()
         filesystem = await self.filesystem_config()
@@ -2185,6 +2196,28 @@ class OperationsService:
         artwork_issues = await self.artwork_issues_summary()
         _, intelligence = await self._graph_intelligence()
         downloads = await self._downloads_intelligence()
+
+        allowed_movie_ids, allowed_series_ids = await self._workspace_allowed_media_ids(
+            candidates_only=candidates_only,
+            imported_filter_ids=imported_filter_ids,
+            decision_filter_ids=decision_filter_ids,
+            smart_filter_ids=smart_filter_ids,
+        )
+
+        if allowed_movie_ids is not None or allowed_series_ids is not None:
+            recommendations = OperationsRecommendationsResponse(
+                items=[
+                    item
+                    for item in recommendations.items
+                    if self._include_recommendation_for_media_filters(
+                        item,
+                        allowed_movie_ids=allowed_movie_ids,
+                        allowed_series_ids=allowed_series_ids,
+                    )
+                ],
+                total=0,
+            )
+            recommendations.total = len(recommendations.items)
 
         health_categories = [
             OperationsHealthCategory(
@@ -2212,6 +2245,12 @@ class OperationsService:
                 graph_references=item.graph_references,
             )
             for item in intelligence.issues
+            if self._include_media_target(
+                item.media_type,
+                item.media_id,
+                allowed_movie_ids=allowed_movie_ids,
+                allowed_series_ids=allowed_series_ids,
+            )
         ]
         timeline_events = [
             MieTimelineEvent(
@@ -2234,6 +2273,13 @@ class OperationsService:
             issues=issues,
             downloads=downloads,
         )
+
+        if allowed_movie_ids is not None or allowed_series_ids is not None:
+            workflow = self._filter_workflow_board(
+                workflow,
+                allowed_movie_ids=allowed_movie_ids,
+                allowed_series_ids=allowed_series_ids,
+            )
 
         return OperationsWorkspaceResponse(
             overview=overview,
@@ -2269,6 +2315,147 @@ class OperationsService:
             downloads_health=downloads.summary,
             downloads=downloads.items,
         )
+
+    async def _workspace_allowed_media_ids(
+        self,
+        *,
+        candidates_only: bool,
+        imported_filter_ids: list[int] | None,
+        decision_filter_ids: list[int] | None,
+        smart_filter_ids: list[int] | None,
+    ) -> tuple[set[int] | None, set[int] | None]:
+        imported_ids = [int(value) for value in (imported_filter_ids or [])]
+        decision_ids = [int(value) for value in (decision_filter_ids or [])]
+        smart_ids = [int(value) for value in (smart_filter_ids or [])]
+        if not candidates_only and not imported_ids and not decision_ids and not smart_ids:
+            return None, None
+        movie_ids = await self._filtered_media_ids(
+            media_type=MediaType.MOVIE,
+            candidates_only=candidates_only,
+            imported_filter_ids=imported_ids,
+            decision_filter_ids=decision_ids,
+            smart_filter_ids=smart_ids,
+        )
+        series_ids = await self._filtered_media_ids(
+            media_type=MediaType.SERIES,
+            candidates_only=candidates_only,
+            imported_filter_ids=imported_ids,
+            decision_filter_ids=decision_ids,
+            smart_filter_ids=smart_ids,
+        )
+        return movie_ids, series_ids
+
+    async def _filtered_media_ids(
+        self,
+        *,
+        media_type: MediaType,
+        candidates_only: bool,
+        imported_filter_ids: list[int],
+        decision_filter_ids: list[int],
+        smart_filter_ids: list[int],
+    ) -> set[int]:
+        model = Movie if media_type is MediaType.MOVIE else Series
+        query = select(model.id).where(model.removed_at.is_(None))
+        count_query = (
+            select(func.count()).select_from(model).where(model.removed_at.is_(None))
+        )
+        query, _ = await apply_spec(
+            self.db,
+            spec=QueryEngineSpec(
+                media_type=media_type,
+                search=None,
+                candidates_only=candidates_only,
+                imported_filter_ids=imported_filter_ids,
+                decision_filter_ids=decision_filter_ids,
+                smart_filter_ids=smart_filter_ids,
+            ),
+            query=query,
+            count_query=count_query,
+        )
+        rows = (await self.db.execute(query)).all()
+        return {int(media_id) for (media_id,) in rows}
+
+    @staticmethod
+    def _include_media_target(
+        media_type: MediaType | None,
+        media_id: int | str | None,
+        *,
+        allowed_movie_ids: set[int] | None,
+        allowed_series_ids: set[int] | None,
+    ) -> bool:
+        if allowed_movie_ids is None and allowed_series_ids is None:
+            return True
+        if media_type is None or media_id is None:
+            return False
+        try:
+            parsed_id = int(media_id)
+        except (TypeError, ValueError):
+            return False
+        if media_type is MediaType.MOVIE:
+            return allowed_movie_ids is None or parsed_id in allowed_movie_ids
+        if media_type is MediaType.SERIES:
+            return allowed_series_ids is None or parsed_id in allowed_series_ids
+        return False
+
+    def _include_recommendation_for_media_filters(
+        self,
+        item: OperationsRecommendation,
+        *,
+        allowed_movie_ids: set[int] | None,
+        allowed_series_ids: set[int] | None,
+    ) -> bool:
+        media_type = None
+        if item.target_type == "movie":
+            media_type = MediaType.MOVIE
+        elif item.target_type in {"series", "season", "episode"}:
+            media_type = MediaType.SERIES
+        return self._include_media_target(
+            media_type,
+            item.target_id,
+            allowed_movie_ids=allowed_movie_ids,
+            allowed_series_ids=allowed_series_ids,
+        )
+
+    def _filter_workflow_board(
+        self,
+        workflow: OperationsWorkflowBoard,
+        *,
+        allowed_movie_ids: set[int] | None,
+        allowed_series_ids: set[int] | None,
+    ) -> OperationsWorkflowBoard:
+        filtered_stages: list[OperationsWorkflowStage] = []
+        filter_counts: Counter[str] = Counter()
+        for stage in workflow.stages:
+            assets = [
+                asset
+                for asset in stage.assets
+                if self._include_media_target(
+                    asset.media_type,
+                    asset.target_id,
+                    allowed_movie_ids=allowed_movie_ids,
+                    allowed_series_ids=allowed_series_ids,
+                )
+            ]
+            for asset in assets:
+                filter_counts.update(asset.filters)
+            filtered_stages.append(
+                OperationsWorkflowStage(
+                    key=stage.key,
+                    title=stage.title,
+                    description=stage.description,
+                    count=len(assets),
+                    assets=assets,
+                )
+            )
+        filtered_filters = [
+            OperationsWorkflowFilter(
+                key=row.key,
+                title=row.title,
+                count=filter_counts.get(row.key, 0),
+            )
+            for row in workflow.filters
+        ]
+        return OperationsWorkflowBoard(stages=filtered_stages, filters=filtered_filters)
 
     async def artwork_issues_summary(self) -> ArtworkIssuesSummary:
         identity_health = await IdentityCenterService(

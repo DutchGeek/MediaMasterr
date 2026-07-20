@@ -22,10 +22,20 @@ Operators can process many assets without leaving the stage.
 - Individual checkbox selection.
 - Select all for current filtered result.
 - Shift range selection.
-- Clear selection.
-- Sticky toolbar with bulk Preview, Validate, Execute, Refresh, and Export.
+- Shared selection persists through Preview, Validate, Execute, and targeted refresh.
+- Sticky toolbar now uses the shared workspace filter model for ARR, decision, and smart filters.
 
 Preview, Validate, and Execute use existing operations APIs and aggregate results across selected recommendation-backed assets.
+
+## Execution Engine
+Execute no longer rebuilds the Operations route.
+
+- Bulk execute starts an async execution session and keeps the workspace visible.
+- Live progress shows current asset, current step, completed count, remaining count, elapsed time, and ETA.
+- Execution pipeline stages are shown per asset so operators can see when filesystem, identity, metadata, artwork, collections, tags, Plex refresh, ARR sync, or cleanup work is relevant.
+- Execution results persist into an execution history feed backed by operation history records.
+
+When an asset completes, the workspace updates only the affected cards and lane counters. Successful work can move cards forward through lifecycle lanes without a manual page reload.
 
 ## Explainability and Technical Details
 Cards keep decision context readable while hiding implementation-heavy information by default.
@@ -40,8 +50,9 @@ Stage lanes present workflow state, not static counters.
 - Filters refine only the active stage.
 - Media filters include Movies, Series, Anime, and Collections.
 - Readiness filters include Ready, Blocked, Needs Review, High Confidence, and Low Confidence.
+- Shared ARR, decision, and smart filters now use the same toolbar contract as other MediaMasterr workspaces.
 
-Selection persists per stage while operators refine filters.
+Selection persists per stage while operators refine filters, and bulk actions run against the shared selected set rather than only the active card grid.
 
 ## Inspector
 Clicking an asset opens an in-page inspector panel with:
@@ -58,5 +69,5 @@ This keeps operators in the Operations workflow without route changes.
 The workspace supports keyboard-first operation:
 
 - Ctrl/Cmd+A selects all visible assets in the active stage.
-- Escape clears stage selection.
+- Escape clears the shared selection set.
 - Controls include explicit labels for screen reader navigation.

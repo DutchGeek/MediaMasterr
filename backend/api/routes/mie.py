@@ -60,8 +60,17 @@ async def get_mie_operations(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
     request_context: MieRequestContext = Depends(get_mie_request_context),
+    candidates_only: bool = False,
+    arr_filter_ids: list[int] = Query(default_factory=list),
+    decision_filter_ids: list[int] = Query(default_factory=list),
+    smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> OperationsWorkspaceResponse:
-    return await OperationsService(db, request_context=request_context).workspace()
+    return await OperationsService(db, request_context=request_context).workspace_filtered(
+        candidates_only=candidates_only,
+        imported_filter_ids=arr_filter_ids,
+        decision_filter_ids=decision_filter_ids,
+        smart_filter_ids=smart_filter_ids,
+    )
 
 
 @router.get("/recommendations", response_model=OperationsRecommendationsResponse)

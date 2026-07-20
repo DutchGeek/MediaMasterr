@@ -215,6 +215,80 @@ class OperationWorkflowResponse(BaseModel):
     execution: OperationWorkflowExecution
 
 
+class OperationExecutionSessionRequest(BaseModel):
+    recommendation_ids: list[str] = Field(default_factory=list)
+
+
+class OperationExecutionStageProgress(BaseModel):
+    key: str
+    label: str
+    status: Literal["pending", "running", "completed", "failed", "skipped"] = (
+        "pending"
+    )
+    detail: str | None = None
+
+
+class OperationExecutionItemProgress(BaseModel):
+    recommendation_id: str
+    title: str
+    target_type: str
+    target_id: str | None = None
+    status: Literal["pending", "running", "completed", "failed", "blocked"] = (
+        "pending"
+    )
+    message: str = ""
+    estimated_recovery_bytes: int = 0
+    stages: list[OperationExecutionStageProgress] = Field(default_factory=list)
+    operation_history_id: int | None = None
+
+
+class OperationExecutionSummary(BaseModel):
+    successful: int = 0
+    warnings: int = 0
+    failed: int = 0
+    recovered_space_bytes: int = 0
+    elapsed_ms: int = 0
+
+
+class OperationExecutionSessionResponse(BaseModel):
+    session_id: str
+    status: Literal["queued", "running", "completed", "failed", "partial"] = "queued"
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+    warnings: int = 0
+    remaining: int = 0
+    current_asset_title: str | None = None
+    current_step_label: str | None = None
+    elapsed_ms: int = 0
+    estimated_remaining_ms: int | None = None
+    history_id: int | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    items: list[OperationExecutionItemProgress] = Field(default_factory=list)
+    summary: OperationExecutionSummary = Field(default_factory=OperationExecutionSummary)
+
+
+class OperationExecutionHistoryEntry(BaseModel):
+    session_id: str
+    history_id: int
+    action: str
+    status: str
+    selected_count: int = 0
+    successful: int = 0
+    warnings: int = 0
+    failed: int = 0
+    recovered_space_bytes: int = 0
+    elapsed_ms: int = 0
+    created_at: datetime
+    completed_at: datetime | None = None
+    items: list[OperationExecutionItemProgress] = Field(default_factory=list)
+
+
+class OperationExecutionHistoryListResponse(BaseModel):
+    items: list[OperationExecutionHistoryEntry] = Field(default_factory=list)
+
+
 class OperationAuditEntryResponse(BaseModel):
     id: int
     action: str

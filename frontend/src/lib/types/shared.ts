@@ -326,6 +326,76 @@ export interface OperationWorkflowResponse {
   execution: OperationWorkflowExecution;
 }
 
+export interface OperationExecutionSessionRequest {
+  recommendation_ids: string[];
+}
+
+export interface OperationExecutionStageProgress {
+  key: string;
+  label: string;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  detail: string | null;
+}
+
+export interface OperationExecutionItemProgress {
+  recommendation_id: string;
+  title: string;
+  target_type: string;
+  target_id: string | null;
+  status: "pending" | "running" | "completed" | "failed" | "blocked";
+  message: string;
+  estimated_recovery_bytes: number;
+  stages: OperationExecutionStageProgress[];
+  operation_history_id: number | null;
+}
+
+export interface OperationExecutionSummary {
+  successful: number;
+  warnings: number;
+  failed: number;
+  recovered_space_bytes: number;
+  elapsed_ms: number;
+}
+
+export interface OperationExecutionSessionResponse {
+  session_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "partial";
+  total: number;
+  completed: number;
+  failed: number;
+  warnings: number;
+  remaining: number;
+  current_asset_title: string | null;
+  current_step_label: string | null;
+  elapsed_ms: number;
+  estimated_remaining_ms: number | null;
+  history_id: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  items: OperationExecutionItemProgress[];
+  summary: OperationExecutionSummary;
+}
+
+export interface OperationExecutionHistoryEntry {
+  session_id: string;
+  history_id: number;
+  action: string;
+  status: string;
+  selected_count: number;
+  successful: number;
+  warnings: number;
+  failed: number;
+  recovered_space_bytes: number;
+  elapsed_ms: number;
+  created_at: string;
+  completed_at: string | null;
+  items: OperationExecutionItemProgress[];
+}
+
+export interface OperationExecutionHistoryListResponse {
+  items: OperationExecutionHistoryEntry[];
+}
+
 export interface OperationAuditEntry {
   id: number;
   action: string;

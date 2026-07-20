@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
 from backend.database import Base
-from backend.database.models import CleanupPlan, MediaAsset, Movie, ReclaimCandidate
+from backend.database.models import CleanupPlan, MediaAsset, Movie, OperationHistory, ReclaimCandidate
 from backend.enums import MediaType
+from backend.services.mie.operations_execution import operations_execution_manager
 from backend.services.mie.operations_service import OperationsService
 
 
@@ -229,3 +233,81 @@ async def test_operations_workspace_includes_issue_health_and_confidence_section
         "completed",
     }
     assert workspace.media_policies
+
+
+@pytest.mark.anyio
+async def test_operations_execution_session_tracks_progress_and_history() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(title="Execution Session Movie", tmdb_id=5001, poster_url="/exec.jpg")
+        db.add(movie)
+        await db.flush()
+
+        db.add(
+            ReclaimCandidate(
+                media_type=MediaType.MOVIE,
+                matched_rule_ids=[21],
+                matched_criteria={"rule": "execution"},
+                movie_id=movie.id,
+                reason="Execution session candidate",
+                estimated_space_bytes=654321,
+                approved_for_deletion=True,
+            )
+        )
+        await db.commit()
+
+    async with session_maker() as db:
+        recommendations = await OperationsService(db).recommendations()
+        recommendation_id = recommendations.items[0].id
+
+    created = await operations_execution_manager.start_session(
+        service_factory=lambda db: OperationsService(db),
+        session_factory=session_maker,
+        recommendation_ids=[recommendation_id],
+        created_by_user_id=None,
+    )
+
+    assert created.total == 1
+    assert created.history_id is not None
+
+    latest = created
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+        current = await operations_execution_manager.get_session(created.session_id)
+        assert current is not None
+        latest = current
+        if latest.status in {"completed", "failed", "partial"}:
+            break
+
+    assert latest.status == "completed"
+    assert latest.summary.successful == 1
+    assert latest.items[0].operation_history_id is not None
+
+    async with session_maker() as db:
+        history_rows = (
+            (
+                await db.execute(
+                    select(OperationHistory).where(
+                        OperationHistory.target_type == "execution_session"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert history_rows
+
+        history = await operations_execution_manager.list_history(db)
+
+    assert history.items
+    assert history.items[0].session_id == created.session_id
+    assert history.items[0].successful == 1
+
+    await engine.dispose()

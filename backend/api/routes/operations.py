@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.utils.mie_request_context import get_mie_request_context
 from backend.core.auth import require_page_access
-from backend.database import get_db
+from backend.database import async_db, get_db
 from backend.database.models import FilesystemRoot, MieSettings, User
 from backend.enums import PageAccess
 from backend.models.mie import (
@@ -17,11 +17,15 @@ from backend.models.mie import (
     FilesystemConfigResponse,
     FilesystemConfigUpdateRequest,
     OperationAuditListResponse,
+    OperationExecutionHistoryListResponse,
+    OperationExecutionSessionRequest,
+    OperationExecutionSessionResponse,
     OperationsOverviewResponse,
     OperationsRecommendationsResponse,
     OperationsWorkspaceResponse,
     OperationWorkflowResponse,
 )
+from backend.services.mie.operations_execution import operations_execution_manager
 from backend.services.mie.operations_service import OperationsService
 from backend.services.mie.request_context import MieRequestContext
 
@@ -42,9 +46,18 @@ async def get_operations_workspace_compat(
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
     db: AsyncSession = Depends(get_db),
     request_context: MieRequestContext = Depends(get_mie_request_context),
+    candidates_only: bool = False,
+    arr_filter_ids: list[int] = Query(default_factory=list),
+    decision_filter_ids: list[int] = Query(default_factory=list),
+    smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> OperationsWorkspaceResponse:
     """Compatibility endpoint for legacy clients expecting /api/operations/workspace."""
-    return await OperationsService(db, request_context=request_context).workspace()
+    return await OperationsService(db, request_context=request_context).workspace_filtered(
+        candidates_only=candidates_only,
+        imported_filter_ids=arr_filter_ids,
+        decision_filter_ids=decision_filter_ids,
+        smart_filter_ids=smart_filter_ids,
+    )
 
 
 @router.get("/recommendations", response_model=OperationsRecommendationsResponse)
@@ -160,6 +173,42 @@ async def execute_recommendation_operation(
     return await OperationsService(
         db, request_context=request_context
     ).recommendation_execute(recommendation_id)
+
+
+@router.post("/executions", response_model=OperationExecutionSessionResponse)
+async def create_execution_session(
+    payload: OperationExecutionSessionRequest,
+    user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    request_context: MieRequestContext = Depends(get_mie_request_context),
+) -> OperationExecutionSessionResponse:
+    return await operations_execution_manager.start_session(
+        service_factory=lambda session: OperationsService(
+            session,
+            request_context=request_context,
+        ),
+        session_factory=async_db,
+        recommendation_ids=payload.recommendation_ids,
+        created_by_user_id=user.id,
+    )
+
+
+@router.get("/executions/history", response_model=OperationExecutionHistoryListResponse)
+async def get_execution_history(
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+    db: AsyncSession = Depends(get_db),
+) -> OperationExecutionHistoryListResponse:
+    return await operations_execution_manager.list_history(db)
+
+
+@router.get("/executions/{session_id}", response_model=OperationExecutionSessionResponse)
+async def get_execution_session(
+    session_id: str,
+    _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
+) -> OperationExecutionSessionResponse:
+    session = await operations_execution_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Unknown execution session '{session_id}'")
+    return session
 
 
 @router.get("/audit", response_model=OperationAuditListResponse)

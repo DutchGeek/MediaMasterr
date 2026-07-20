@@ -72,12 +72,15 @@ The Operations workspace is lifecycle-first and visual-first.
 
 - Kanban-style workflow lanes: Download, Import, Organize, Retention, Cleanup, Completed
 - Poster-anchored asset cards with recommendation, confidence, risk, and recoverable space
+- Shared workspace toolbar integration for ARR, decision, and smart filter context
 - Stage-scoped filters and readiness views (ready, blocked, needs review)
-- Sticky bulk-operations toolbar for Preview, Validate, Execute, Refresh, Export
+- Sticky bulk-operations toolbar for Preview, Validate, and async Execute without route reloads
+- Live execution progress with current asset, current step, elapsed time, ETA, and per-asset pipeline stages
+- Targeted lane/card updates and persisted execution history summaries after bulk runs
 - In-page side inspector for identity, relationship, policy, and recommendation context
 
 The intelligence remains recommendation-driven, but operators can now execute in
-batches without leaving the active workflow lane.
+batches without leaving the active workflow lane or losing selection context.
 
 ### Operations Intelligence Engine (Phase 2)
 

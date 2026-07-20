@@ -109,8 +109,8 @@
   } = $props();
 
   let selectDisplayedRef = $state<HTMLInputElement | null>(null);
-  let sortByValue = $state(sortBy);
-  let sortOrderValue = $state(sortOrder);
+  let sortByValue = $state("");
+  let sortOrderValue = $state<"asc" | "desc">("asc");
 
   $effect(() => {
     if (!selectDisplayedRef) return;

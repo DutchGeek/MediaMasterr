@@ -7,6 +7,9 @@ def test_operations_workspace_compat_route_exists() -> None:
     paths = set(fastapi_app.openapi().get("paths", {}).keys())
     assert "/api/operations/workspace" in paths
     assert "/api/mie/operations" in paths
+    assert "/api/operations/executions" in paths
+    assert "/api/operations/executions/history" in paths
+    assert "/api/operations/executions/{session_id}" in paths
 
 
 def test_dashboard_and_qbittorrent_routes_exist() -> None:
@@ -54,6 +57,31 @@ def test_mie_operations_and_graph_openapi_contracts() -> None:
         "workflow",
         "media_policies",
     } <= operations_props
+
+    execution_post = schema["paths"]["/api/operations/executions"]["post"]
+    execution_ref = execution_post["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    execution_name = execution_ref.rsplit("/", 1)[-1]
+    execution_props = set(
+        schema["components"]["schemas"][execution_name]["properties"].keys()
+    )
+    assert {
+        "session_id",
+        "status",
+        "total",
+        "completed",
+        "failed",
+        "warnings",
+        "remaining",
+        "current_asset_title",
+        "current_step_label",
+        "elapsed_ms",
+        "estimated_remaining_ms",
+        "history_id",
+        "items",
+        "summary",
+    } <= execution_props
 
     graph_get = schema["paths"]["/api/mie/media/{media_id}/graph"]["get"]
     graph_ref = graph_get["responses"]["200"]["content"]["application/json"][

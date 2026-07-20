@@ -28,11 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Stage lane rollups (ready, blocked, needs review, warnings)
   - Side inspector panel for per-asset operational context
   - Collapsible Why and Technical Details sections for explainability-first card layout
+- Operations execution engine foundation (v0.8.2):
+  - Async execution sessions layered on top of the existing Preview, Validate, and Execute recommendation APIs
+  - Live execution progress with current asset, current step, elapsed time, and estimated remaining time
+  - Per-asset execution pipeline stages and persisted execution-session history records
+  - Shared workspace toolbar integration for ARR, decision, and smart filter context in Operations
 
 ### Changed
 
 - Operations workflow response now includes poster/year/risk visual identity fields per workflow asset
 - Operations documentation updated to reflect lifecycle workspace and bulk operator flow
+- Operations no longer reloads the full route after Execute; workflow cards, lane counters, selection, filters, and inspector state update in place
+- Operations workspace refreshes only changed workflow data and execution history after bulk runs instead of rebuilding the full page
 
 ## [0.1.11] - 2026-07-10
 
