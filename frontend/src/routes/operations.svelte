@@ -370,7 +370,9 @@
 
   async function loadFilterCatalog() {
     try {
-      filterCatalog = await get_api<MediaFilterCatalogResponse>("/api/media/filters");
+      filterCatalog = await get_api<MediaFilterCatalogResponse>(
+        "/api/media/filters?media_types=movie&media_types=series",
+      );
     } catch {
       filterCatalog = null;
     }

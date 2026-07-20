@@ -1076,6 +1076,11 @@ class OperationsService:
                     ),
                     target_type="reclaim_candidate",
                     target_id=str(candidate.id),
+                    media_type=(
+                        MediaType.MOVIE
+                        if candidate.movie_id is not None
+                        else MediaType.SERIES
+                    ),
                     estimated_recovery_bytes=candidate.estimated_space_bytes or 0,
                     poster_url=resolved_artwork.poster_url,
                     artwork=resolved_artwork.artwork,
@@ -1699,6 +1704,8 @@ class OperationsService:
                 media_type = MediaType.MOVIE
             elif item.target_type in {"series", "season", "episode"}:
                 media_type = MediaType.SERIES
+            elif item.target_type == "reclaim_candidate":
+                media_type = item.media_type
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
                     id=item.id,
@@ -2220,6 +2227,10 @@ class OperationsService:
             smart_filter_ids=smart_filter_ids,
         )
 
+        reclaim_candidate_targets = await self._recommendation_candidate_targets(
+            recommendations.items
+        )
+
         if allowed_movie_ids is not None or allowed_series_ids is not None:
             recommendations = OperationsRecommendationsResponse(
                 items=[
@@ -2229,6 +2240,7 @@ class OperationsService:
                         item,
                         allowed_movie_ids=allowed_movie_ids,
                         allowed_series_ids=allowed_series_ids,
+                        reclaim_candidate_targets=reclaim_candidate_targets,
                     )
                 ],
                 total=0,
@@ -2295,6 +2307,7 @@ class OperationsService:
                 workflow,
                 allowed_movie_ids=allowed_movie_ids,
                 allowed_series_ids=allowed_series_ids,
+                reclaim_candidate_targets=reclaim_candidate_targets,
             )
 
         return OperationsWorkspaceResponse(
@@ -2361,6 +2374,39 @@ class OperationsService:
         )
         return movie_ids, series_ids
 
+    async def _recommendation_candidate_targets(
+        self,
+        items: list[OperationsRecommendation],
+    ) -> dict[int, tuple[MediaType, int]]:
+        candidate_ids = [
+            int(item.target_id)
+            for item in items
+            if item.target_type == "reclaim_candidate"
+            and item.target_id is not None
+            and item.target_id.isdigit()
+        ]
+        if not candidate_ids:
+            return {}
+        rows = (
+            (
+                await self.db.execute(
+                    select(
+                        ReclaimCandidate.id,
+                        ReclaimCandidate.movie_id,
+                        ReclaimCandidate.series_id,
+                    ).where(ReclaimCandidate.id.in_(candidate_ids))
+                )
+            )
+            .all()
+        )
+        mapping: dict[int, tuple[MediaType, int]] = {}
+        for candidate_id, movie_id, series_id in rows:
+            if movie_id is not None:
+                mapping[int(candidate_id)] = (MediaType.MOVIE, int(movie_id))
+            elif series_id is not None:
+                mapping[int(candidate_id)] = (MediaType.SERIES, int(series_id))
+        return mapping
+
     async def _filtered_media_ids(
         self,
         *,
@@ -2419,15 +2465,27 @@ class OperationsService:
         *,
         allowed_movie_ids: set[int] | None,
         allowed_series_ids: set[int] | None,
+        reclaim_candidate_targets: dict[int, tuple[MediaType, int]],
     ) -> bool:
         media_type = None
+        target_id = item.target_id
         if item.target_type == "movie":
             media_type = MediaType.MOVIE
         elif item.target_type in {"series", "season", "episode"}:
             media_type = MediaType.SERIES
+        elif item.target_type == "reclaim_candidate":
+            if item.target_id is not None and item.target_id.isdigit():
+                resolved = reclaim_candidate_targets.get(int(item.target_id))
+                if resolved is not None:
+                    media_type, resolved_media_id = resolved
+                    target_id = str(resolved_media_id)
+                else:
+                    media_type = item.media_type
+            else:
+                media_type = item.media_type
         return self._include_media_target(
             media_type,
-            item.target_id,
+            target_id,
             allowed_movie_ids=allowed_movie_ids,
             allowed_series_ids=allowed_series_ids,
         )
@@ -2438,20 +2496,30 @@ class OperationsService:
         *,
         allowed_movie_ids: set[int] | None,
         allowed_series_ids: set[int] | None,
+        reclaim_candidate_targets: dict[int, tuple[MediaType, int]],
     ) -> OperationsWorkflowBoard:
         filtered_stages: list[OperationsWorkflowStage] = []
         filter_counts: Counter[str] = Counter()
         for stage in workflow.stages:
-            assets = [
-                asset
-                for asset in stage.assets
+            assets: list[OperationsWorkflowAsset] = []
+            for asset in stage.assets:
+                target_id = asset.target_id
+                if (
+                    asset.target_type == "reclaim_candidate"
+                    and asset.target_id is not None
+                    and asset.target_id.isdigit()
+                ):
+                    resolved = reclaim_candidate_targets.get(int(asset.target_id))
+                    if resolved is not None:
+                        _, resolved_media_id = resolved
+                        target_id = str(resolved_media_id)
                 if self._include_media_target(
                     asset.media_type,
-                    asset.target_id,
+                    target_id,
                     allowed_movie_ids=allowed_movie_ids,
                     allowed_series_ids=allowed_series_ids,
-                )
-            ]
+                ):
+                    assets.append(asset)
             for asset in assets:
                 filter_counts.update(asset.filters)
             filtered_stages.append(

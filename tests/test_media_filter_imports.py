@@ -3,13 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.core.service_manager import service_manager
 from backend.database import Base
-from backend.database.models import QueryFilter, User
+from backend.database.models import Movie, MovieArrRef, QueryFilter, Series, SeriesArrRef, ServiceConfig, User
 from backend.enums import MediaType, Service, UserRole
-from backend.services.query_engine import get_filter_catalog, sync_imported_arr_filters
+from backend.services.query_engine import QueryEngineSpec, apply_spec, get_filter_catalog, sync_imported_arr_filters
 
 
 class _RadarrClientNoSaved:
@@ -146,3 +147,162 @@ async def test_filter_catalog_prefixes_imported_provider_names() -> None:
         service_manager.radarr_clients = old_radarr_clients  # type: ignore[method-assign]
         service_manager.sonarr_clients = old_sonarr_clients  # type: ignore[method-assign]
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_filter_catalog_supports_combined_movie_and_series_context() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    old_radarr_clients = service_manager.radarr_clients
+    old_sonarr_clients = service_manager.sonarr_clients
+    service_manager.radarr_clients = lambda: {}  # type: ignore[method-assign]
+    service_manager.sonarr_clients = lambda: {}  # type: ignore[method-assign]
+
+    try:
+        async with session_maker() as db:
+            user = User(username="admin", password_hash="x", role=UserRole.ADMIN)
+            db.add(user)
+            await db.flush()
+
+            db.add_all(
+                [
+                    QueryFilter(
+                        name="Kids",
+                        kind="imported_arr",
+                        media_type=MediaType.SERIES,
+                        read_only=True,
+                        enabled=True,
+                        provider_service=Service.SONARR,
+                        provider_filter_id="tag:kids",
+                        definition={"raw": {"seriesIds": [11]}},
+                    ),
+                    QueryFilter(
+                        name="Marvel",
+                        kind="imported_arr",
+                        media_type=MediaType.MOVIE,
+                        read_only=True,
+                        enabled=True,
+                        provider_service=Service.RADARR,
+                        provider_filter_id="tag:marvel",
+                        definition={"raw": {"movieIds": [101]}},
+                    ),
+                ]
+            )
+            await db.commit()
+
+            catalog = await get_filter_catalog(
+                db,
+                current_user=user,
+                media_type=MediaType.MOVIE,
+                media_types=[MediaType.MOVIE, MediaType.SERIES],
+            )
+
+        labels = [item.label for item in catalog.imported]
+        assert "Radarr - Marvel" in labels
+        assert "Sonarr - Kids" in labels
+    finally:
+        service_manager.radarr_clients = old_radarr_clients  # type: ignore[method-assign]
+        service_manager.sonarr_clients = old_sonarr_clients  # type: ignore[method-assign]
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_imported_arr_filters_apply_only_to_matching_media_type() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(title="Kids Movie", tmdb_id=101)
+        series = Series(title="Kids Show", tmdb_id=202)
+        radarr_config = ServiceConfig(
+            service_type=Service.RADARR,
+            base_url="http://radarr",
+            api_key="k",
+            name="RadarrMain",
+            enabled=True,
+        )
+        sonarr_config = ServiceConfig(
+            service_type=Service.SONARR,
+            base_url="http://sonarr",
+            api_key="k",
+            name="SonarrMain",
+            enabled=True,
+        )
+        db.add_all([movie, series, radarr_config, sonarr_config])
+        await db.flush()
+
+        db.add_all(
+            [
+                MovieArrRef(
+                    movie_id=movie.id,
+                    service_config_id=radarr_config.id,
+                    arr_movie_id=101,
+                ),
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=sonarr_config.id,
+                    arr_series_id=202,
+                ),
+            ]
+        )
+
+        sonarr_filter = QueryFilter(
+            name="Kids",
+            kind="imported_arr",
+            media_type=MediaType.SERIES,
+            read_only=True,
+            enabled=True,
+            provider_service=Service.SONARR,
+            provider_filter_id="tag:kids",
+            definition={"raw": {"seriesIds": [202]}},
+        )
+        db.add(sonarr_filter)
+        await db.commit()
+
+        movie_query = select(Movie.id).where(Movie.removed_at.is_(None))
+        movie_count_query = (
+            select(func.count()).select_from(Movie).where(Movie.removed_at.is_(None))
+        )
+        movie_query, _ = await apply_spec(
+            db,
+            spec=QueryEngineSpec(
+                media_type=MediaType.MOVIE,
+                imported_filter_ids=[int(sonarr_filter.id)],
+            ),
+            query=movie_query,
+            count_query=movie_count_query,
+        )
+        movie_rows = (await db.execute(movie_query)).all()
+
+        series_query = select(Series.id).where(Series.removed_at.is_(None))
+        series_count_query = (
+            select(func.count())
+            .select_from(Series)
+            .where(Series.removed_at.is_(None))
+        )
+        series_query, _ = await apply_spec(
+            db,
+            spec=QueryEngineSpec(
+                media_type=MediaType.SERIES,
+                imported_filter_ids=[int(sonarr_filter.id)],
+            ),
+            query=series_query,
+            count_query=series_count_query,
+        )
+        series_rows = (await db.execute(series_query)).all()
+
+    await engine.dispose()
+
+    assert movie_rows == []
+    assert [int(row[0]) for row in series_rows] == [int(series.id)]

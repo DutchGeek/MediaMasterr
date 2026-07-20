@@ -145,6 +145,7 @@ export interface OperationsRecommendation {
   issue_key?: string | null;
   confidence?: number | null;
   graph_references?: string[];
+  media_type?: MediaType | null;
 }
 
 export type OperationsIssueSeverity = "critical" | "high" | "medium" | "low";

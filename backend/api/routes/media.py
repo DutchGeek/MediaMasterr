@@ -1404,19 +1404,23 @@ async def get_media_filters(
     current_user: Annotated[User, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),
     media_type: MediaType = Query(MediaType.MOVIE),
+    media_types: list[MediaType] = Query(default_factory=list),
 ) -> MediaFilterCatalogResponse:
-    required_page = (
-        PageAccess.MOVIES if media_type is MediaType.MOVIE else PageAccess.SERIES
-    )
-    if not has_page_access(current_user, required_page):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"{required_page.value.replace('_', ' ').title()} page access required",
+    requested_media_types = list(dict.fromkeys(media_types or [media_type]))
+    for requested in requested_media_types:
+        required_page = (
+            PageAccess.MOVIES if requested is MediaType.MOVIE else PageAccess.SERIES
         )
+        if not has_page_access(current_user, required_page):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{required_page.value.replace('_', ' ').title()} page access required",
+            )
     return await get_filter_catalog(
         db,
         current_user=current_user,
         media_type=media_type,
+        media_types=requested_media_types,
     )
 
 

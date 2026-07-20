@@ -42,6 +42,7 @@ class OperationsRecommendation(BaseModel):
     issue_key: str | None = None
     confidence: int | None = None
     graph_references: list[str] = Field(default_factory=list)
+    media_type: MediaType | None = None
 
 
 OperationsIssueSeverity = Literal["critical", "high", "medium", "low"]

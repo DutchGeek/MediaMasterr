@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, exists, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.service_manager import service_manager
@@ -473,15 +473,26 @@ async def get_filter_catalog(
     *,
     current_user: User,
     media_type: MediaType,
+    media_types: list[MediaType] | None = None,
 ) -> MediaFilterCatalogResponse:
     await sync_imported_arr_filters(db)
+
+    selected_media_types = list(dict.fromkeys(media_types or [media_type]))
+    if not selected_media_types:
+        selected_media_types = [media_type]
+
+    media_type_clause = (
+        QueryFilter.media_type.in_(selected_media_types)
+        if len(selected_media_types) > 1
+        else QueryFilter.media_type == selected_media_types[0]
+    )
 
     imported_rows = (
         (
             await db.execute(
                 select(QueryFilter).where(
                     QueryFilter.kind == "imported_arr",
-                    QueryFilter.media_type == media_type,
+                    media_type_clause,
                     QueryFilter.enabled.is_(True),
                     QueryFilter.read_only.is_(True),
                 )
@@ -497,7 +508,7 @@ async def get_filter_catalog(
                 select(QueryFilter).where(
                     QueryFilter.kind == "decision",
                     QueryFilter.user_id == current_user.id,
-                    QueryFilter.media_type == media_type,
+                    media_type_clause,
                     QueryFilter.enabled.is_(True),
                 )
             )
@@ -512,7 +523,7 @@ async def get_filter_catalog(
                 select(QueryFilter).where(
                     QueryFilter.kind == "smart",
                     QueryFilter.user_id == current_user.id,
-                    QueryFilter.media_type == media_type,
+                    media_type_clause,
                     QueryFilter.enabled.is_(True),
                 )
             )
@@ -618,14 +629,20 @@ async def apply_spec(
             .scalars()
             .all()
         )
-        if imported_filters:
+        compatible_filters = [
+            row for row in imported_filters if row.media_type is media_type
+        ]
+        if imported_filters and not compatible_filters:
+            query = query.where(false())
+            count_query = count_query.where(false())
+        elif compatible_filters:
             # Imported filters combine naturally as OR groups at user level.
             # We apply each as intersection inside a subquery set then OR by unioning ids.
             # For the first release we use incremental refinement with OR-less fallback heuristics.
             # Practical behavior: selecting multiple filters broadens results.
             branch_queries: list[Any] = []
             branch_count_queries: list[Any] = []
-            for imported_filter in imported_filters:
+            for imported_filter in compatible_filters:
                 q_branch, c_branch = _apply_imported_filter(
                     query=query,
                     count_query=count_query,
