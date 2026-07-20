@@ -1,16 +1,62 @@
 # Operations Workspace
 
-## Why Operations Uses Collections
-Operations decisions are made in batches and context, not isolated records. Collection cards group recommendations into meaningful clusters so operators can triage by impact first.
+## Overview
+Operations is a lifecycle workspace, not a reporting table. The UI guides operators through Download, Import, Organize, Retention, Cleanup, and Completed lanes while preserving existing recommendation intelligence.
 
-## Layout Strategy
-- Collections at top: filter the decision scope.
-- Series context section: preserve season relationships.
-- Movie actions section: direct asset-level actions.
-- Shared details drawer: diagnostics, lifecycle, filesystem, provider data.
+## Poster-First Identity
+Each asset card is visually anchored by canonical artwork from the identity/artwork pipeline.
 
-## Decision Traceability
-The drawer contains recommendation rationale and risk framing so operators can answer why an action is shown before approving it.
+- Card identity block shows poster, title, year, media type, and stage.
+- Recommendation becomes the primary action callout.
+- Confidence and risk are rendered as visual indicators.
+- Recoverable space is shown only when relevant.
 
-## Display Profile Isolation
-Operations display preferences are stored under the operations module key. Changing this workspace does not affect qBittorrent or other modules.
+When artwork is unavailable, the card shows an explicit placeholder:
+
+- Missing Artwork
+- Artwork Repair Available
+
+## Bulk Workflow
+Operators can process many assets without leaving the stage.
+
+- Individual checkbox selection.
+- Select all for current filtered result.
+- Shift range selection.
+- Clear selection.
+- Sticky toolbar with bulk Preview, Validate, Execute, Refresh, and Export.
+
+Preview, Validate, and Execute use existing operations APIs and aggregate results across selected recommendation-backed assets.
+
+## Explainability and Technical Details
+Cards keep decision context readable while hiding implementation-heavy information by default.
+
+- Why? section summarizes operational evidence.
+- Technical Details section is collapsed by default and includes graph references, paths, and policy details.
+
+## Stage and Filter Behavior
+Stage lanes present workflow state, not static counters.
+
+- Stage cards include Ready, Blocked, Needs Review, and Warnings rollups.
+- Filters refine only the active stage.
+- Media filters include Movies, Series, Anime, and Collections.
+- Readiness filters include Ready, Blocked, Needs Review, High Confidence, and Low Confidence.
+
+Selection persists per stage while operators refine filters.
+
+## Inspector
+Clicking an asset opens an in-page inspector panel with:
+
+- Poster and identity summary.
+- Stage/timeline context.
+- Relationship and provider hints.
+- Policy information.
+- Recommendation and direct action entry points.
+
+This keeps operators in the Operations workflow without route changes.
+
+## Accessibility and Interaction
+The workspace supports keyboard-first operation:
+
+- Ctrl/Cmd+A selects all visible assets in the active stage.
+- Escape clears stage selection.
+- Controls include explicit labels for screen reader navigation.

@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /api/mie/providers`
   - `GET /api/mie/external-ids`
 - Additive migration with initial canonical identity backfill for existing movies and series
+- Operations Workspace UX redesign (v0.8.1):
+  - Poster-first lifecycle asset cards with explicit missing-artwork placeholders
+  - Bulk selection workflows (single, select-all, shift-range, clear)
+  - Sticky operations toolbar with bulk Preview, Validate, Execute, Refresh, and Export
+  - Stage lane rollups (ready, blocked, needs review, warnings)
+  - Side inspector panel for per-asset operational context
+  - Collapsible Why and Technical Details sections for explainability-first card layout
+
+### Changed
+
+- Operations workflow response now includes poster/year/risk visual identity fields per workflow asset
+- Operations documentation updated to reflect lifecycle workspace and bulk operator flow
 
 ## [0.1.11] - 2026-07-10
 

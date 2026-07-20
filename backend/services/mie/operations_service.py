@@ -1377,6 +1377,16 @@ class OperationsService:
         return None
 
     @staticmethod
+    def _extract_year_from_title(title: str) -> int | None:
+        match = re.search(r"\((19\d{2}|20\d{2}|21\d{2})\)", title or "")
+        if match is None:
+            return None
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
     def _policy_name_for_asset(
         media_type: MediaType | None,
         title: str,
@@ -1641,7 +1651,17 @@ class OperationsService:
                 OperationsWorkflowAsset(
                     id=f"download:{row.path}",
                     title=row.media_identity or row.path,
+                    year=self._extract_year_from_title(row.media_identity or row.path),
                     media_type=row.media_type,
+                    poster_url=None,
+                    risk_level=(
+                        "high"
+                        if row.cleanup_classification in {"failed_import", "needs_investigation"}
+                        else "medium"
+                        if row.cleanup_classification
+                        in {"duplicate_download", "abandoned_download", "safe_to_archive"}
+                        else "low"
+                    ),
                     target_type="download_object",
                     target_id=row.path,
                     current_stage=cast(Any, stage_key),
@@ -1682,7 +1702,20 @@ class OperationsService:
                 OperationsWorkflowAsset(
                     id=item.id,
                     title=item.title,
+                    year=self._extract_year_from_title(item.title),
                     media_type=media_type,
+                    poster_url=(
+                        item.artwork.poster
+                        if item.artwork is not None and item.artwork.poster
+                        else item.poster_url
+                    ),
+                    risk_level=(
+                        "high"
+                        if item.safety_level == "high_risk"
+                        else "medium"
+                        if item.safety_level == "medium_risk"
+                        else "low"
+                    ),
                     target_type=item.target_type,
                     target_id=item.target_id,
                     current_stage=cast(Any, stage_key),
@@ -1736,7 +1769,16 @@ class OperationsService:
                 OperationsWorkflowAsset(
                     id=f"issue:{issue.key}",
                     title=issue.title,
+                    year=self._extract_year_from_title(issue.title),
                     media_type=issue.media_type,
+                    poster_url=None,
+                    risk_level=(
+                        "high"
+                        if issue.severity in {"critical", "high"}
+                        else "medium"
+                        if issue.severity == "medium"
+                        else "low"
+                    ),
                     target_type=issue.media_type.value,
                     target_id=str(issue.media_id),
                     current_stage=cast(Any, issue_stage),

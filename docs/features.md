@@ -68,8 +68,16 @@ flowchart TD
 
 ### Operations Surface
 
-The Operations page is recommendation-first and grouped by actionable cards,
-including import backlog, duplicates, orphan detection, and space recovery.
+The Operations workspace is lifecycle-first and visual-first.
+
+- Kanban-style workflow lanes: Download, Import, Organize, Retention, Cleanup, Completed
+- Poster-anchored asset cards with recommendation, confidence, risk, and recoverable space
+- Stage-scoped filters and readiness views (ready, blocked, needs review)
+- Sticky bulk-operations toolbar for Preview, Validate, Execute, Refresh, Export
+- In-page side inspector for identity, relationship, policy, and recommendation context
+
+The intelligence remains recommendation-driven, but operators can now execute in
+batches without leaving the active workflow lane.
 
 ### Operations Intelligence Engine (Phase 2)
 

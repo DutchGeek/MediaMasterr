@@ -391,7 +391,10 @@ export interface OperationsWorkflowFilter {
 export interface OperationsWorkflowAsset {
   id: string;
   title: string;
+  year: number | null;
   media_type: MediaType | null;
+  poster_url: string | null;
+  risk_level: string | null;
   target_type: string;
   target_id: string | null;
   current_stage: WorkflowStageKey;

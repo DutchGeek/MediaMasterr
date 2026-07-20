@@ -294,7 +294,10 @@ class OperationsWorkflowFilter(BaseModel):
 class OperationsWorkflowAsset(BaseModel):
     id: str
     title: str
+    year: int | None = None
     media_type: MediaType | None = None
+    poster_url: str | None = None
+    risk_level: str | None = None
     target_type: str
     target_id: str | None = None
     current_stage: WorkflowStageKey
