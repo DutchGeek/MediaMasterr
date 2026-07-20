@@ -47,7 +47,31 @@ class OperationActionManifest(BaseModel):
 class OperationsFileEvidence(BaseModel):
     key: str
     label: str
+    hierarchy_role: Literal[
+        "library_root",
+        "managed_folder",
+        "primary_media_file",
+        "additional_file",
+        "additional_copy",
+        "download_source",
+        "unknown",
+    ] = "unknown"
+    absolute_path: str | None = None
     path: str | None = None
+    filename: str | None = None
+    dataset: str | None = None
+    pool: str | None = None
+    filesystem: str | None = None
+    exists: bool | None = None
+    owner: str | None = None
+    group: str | None = None
+    permissions: str | None = None
+    file_size: int | None = None
+    created: datetime | None = None
+    modified: datetime | None = None
+    expected_destination: str | None = None
+    known_copy_of: str | None = None
+    import_eligibility: str | None = None
     source: str | None = None
     state: Literal["available", "missing", "partial", "duplicate", "unavailable"] = (
         "unavailable"
@@ -455,6 +479,7 @@ class OperationsWorkflowAsset(BaseModel):
     action_manifest: OperationActionManifest = Field(default_factory=OperationActionManifest)
     case_summary: str | None = None
     expected_destination: str | None = None
+    filesystem_comparison_summary: str | None = None
     file_evidence: list[OperationsFileEvidence] = Field(default_factory=list)
     application_evidence: list[OperationsApplicationEvidence] = Field(default_factory=list)
     relationship_evidence: list[OperationsRelationshipEvidence] = Field(default_factory=list)

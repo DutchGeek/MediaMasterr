@@ -8,8 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.core.artwork import CENTRAL_PLACEHOLDER_POSTER_URL
 from backend.database import Base
-from backend.database.models import CleanupPlan, MediaAsset, Movie, OperationHistory, ReclaimCandidate
-from backend.enums import MediaType
+from backend.database.models import (
+    CleanupPlan,
+    MediaAsset,
+    Movie,
+    MovieArrRef,
+    MovieVersion,
+    OperationHistory,
+    ReclaimCandidate,
+    ServiceConfig,
+)
+from backend.enums import MediaType, Service
 from backend.services.mie.operations_execution import operations_execution_manager
 from backend.services.mie.operations_service import OperationsService
 
@@ -323,3 +332,104 @@ async def test_operations_execution_session_tracks_progress_and_history() -> Non
     assert history.items[0].successful == 1
 
     await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_file_evidence_hierarchy_and_duplicate_detection_is_semantic() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(title="Hierarchy Movie", tmdb_id=9901)
+        db.add(movie)
+        await db.flush()
+
+        radarr = ServiceConfig(
+            service_type=Service.RADARR,
+            base_url="http://radarr.local",
+            api_key="test",
+            name="Radarr Main",
+            enabled=True,
+        )
+        db.add(radarr)
+        await db.flush()
+
+        db.add(
+            MovieArrRef(
+                movie_id=movie.id,
+                service_config_id=radarr.id,
+                arr_movie_id=123,
+                arr_movie_path="/media/movies/american/A Minecraft Movie (2025)",
+            )
+        )
+        db.add_all(
+            [
+                MovieVersion(
+                    movie_id=movie.id,
+                    service=Service.PLEX,
+                    service_item_id="plex-1",
+                    service_media_id="plex-media-1",
+                    library_id="lib-1",
+                    library_name="American Movies",
+                    path="/media/movies/american/A Minecraft Movie (2025)/A Minecraft Movie (2025).mkv",
+                ),
+                MovieVersion(
+                    movie_id=movie.id,
+                    service=Service.JELLYFIN,
+                    service_item_id="jf-1",
+                    service_media_id="jf-media-1",
+                    library_id="lib-2",
+                    library_name="Backup Movies",
+                    path="/media/backup/movies/A Minecraft Movie (2025).mkv",
+                ),
+            ]
+        )
+
+        db.add(
+            ReclaimCandidate(
+                media_type=MediaType.MOVIE,
+                matched_rule_ids=[42],
+                matched_criteria={"rule": "hierarchy"},
+                movie_id=movie.id,
+                reason="Hierarchy verification",
+                estimated_space_bytes=0,
+            )
+        )
+        await db.commit()
+
+        workspace = await OperationsService(db).workspace()
+
+    await engine.dispose()
+
+    assets = [asset for stage in workspace.workflow.stages for asset in stage.assets]
+    target = next((asset for asset in assets if "Hierarchy Movie" in asset.title), None)
+    assert target is not None
+
+    assert target.filesystem_comparison_summary is not None
+    assert "outside the canonical managed folder" in target.filesystem_comparison_summary
+
+    rows = target.file_evidence
+    library_root = next((row for row in rows if row.hierarchy_role == "library_root"), None)
+    managed_folder = next((row for row in rows if row.hierarchy_role == "managed_folder"), None)
+    primary_inside = next(
+        (
+            row
+            for row in rows
+            if row.hierarchy_role == "primary_media_file"
+            and row.path
+            and "/media/movies/american/A Minecraft Movie (2025)/" in row.path
+        ),
+        None,
+    )
+    outside_copy = next((row for row in rows if row.hierarchy_role == "additional_copy"), None)
+
+    assert library_root is not None
+    assert managed_folder is not None
+    assert primary_inside is not None
+    assert outside_copy is not None
+    assert outside_copy.state == "duplicate"

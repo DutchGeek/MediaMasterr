@@ -184,7 +184,30 @@ export interface OperationActionManifest {
 export interface OperationsFileEvidence {
   key: string;
   label: string;
+  hierarchy_role:
+    | "library_root"
+    | "managed_folder"
+    | "primary_media_file"
+    | "additional_file"
+    | "additional_copy"
+    | "download_source"
+    | "unknown";
+  absolute_path: string | null;
   path: string | null;
+  filename: string | null;
+  dataset: string | null;
+  pool: string | null;
+  filesystem: string | null;
+  exists: boolean | null;
+  owner: string | null;
+  group: string | null;
+  permissions: string | null;
+  file_size: number | null;
+  created: string | null;
+  modified: string | null;
+  expected_destination: string | null;
+  known_copy_of: string | null;
+  import_eligibility: string | null;
   source: string | null;
   state: "available" | "missing" | "partial" | "duplicate" | "unavailable";
   explanation: string | null;
@@ -546,6 +569,7 @@ export interface OperationsWorkflowAsset {
   action_manifest: OperationActionManifest;
   case_summary: string | null;
   expected_destination: string | null;
+  filesystem_comparison_summary: string | null;
   file_evidence: OperationsFileEvidence[];
   application_evidence: OperationsApplicationEvidence[];
   relationship_evidence: OperationsRelationshipEvidence[];

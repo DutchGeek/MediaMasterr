@@ -13,6 +13,7 @@
     OperationExecutionHistoryListResponse,
     OperationExecutionSessionResponse,
     OperationWorkflowResponse,
+    OperationsFileEvidence,
     OperationsWorkflowAsset,
     WorkflowStageKey,
   } from "$lib/types/shared";
@@ -87,8 +88,8 @@
     { key: "overview", label: "Overview" },
     { key: "status", label: "Status" },
     { key: "files", label: "Files" },
-    { key: "applications", label: "Applications" },
     { key: "relationships", label: "Relationships" },
+    { key: "applications", label: "Applications" },
     { key: "timeline", label: "Timeline" },
     { key: "actions", label: "Actions" },
     { key: "execution", label: "Execution" },
@@ -376,20 +377,47 @@
     if (!selectedAsset || selectedLocations.length === 0) {
       return "No filesystem evidence is currently available for comparison.";
     }
-    const expected = selectedAsset.expected_destination;
-    const known = selectedLocations.filter((row) => !!row.path).map((row) => row.path);
-    if (!expected) {
-      return "Expected destination is unavailable because no managed destination is currently linked.";
+    if (selectedAsset.filesystem_comparison_summary) {
+      return selectedAsset.filesystem_comparison_summary;
     }
-    if (known.length === 0) {
-      return "Expected destination is known, but no indexed copies are currently linked.";
-    }
-    const mismatches = known.filter((path) => path !== expected);
-    if (mismatches.length === 0) {
-      return "All known copies match the expected destination.";
-    }
-    return `${mismatches.length} known path${mismatches.length === 1 ? " differs" : "s differ"} from the expected destination.`;
+    return "Filesystem comparison is unavailable because semantic hierarchy evidence has not been generated for this asset.";
   });
+
+  function formatEvidenceDate(value: string | null | undefined) {
+    if (!value) return "Unavailable";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  }
+
+  function fileEvidenceFields(row: OperationsFileEvidence) {
+    return [
+      { label: "Hierarchy Role", value: row.hierarchy_role ?? "unknown" },
+      { label: "Absolute Path", value: row.absolute_path ?? row.path ?? "Unavailable" },
+      { label: "Filename", value: row.filename ?? "Unavailable" },
+      { label: "Dataset", value: row.dataset ?? "Unavailable" },
+      { label: "Pool", value: row.pool ?? "Unavailable" },
+      { label: "Filesystem", value: row.filesystem ?? "Unavailable" },
+      {
+        label: "Exists",
+        value: row.exists === null ? "Unavailable" : row.exists ? "Yes" : "No",
+      },
+      { label: "Owner", value: row.owner ?? "Unavailable" },
+      { label: "Group", value: row.group ?? "Unavailable" },
+      { label: "Permissions", value: row.permissions ?? "Unavailable" },
+      {
+        label: "File Size",
+        value:
+          row.file_size === null || row.file_size === undefined
+            ? "Unavailable"
+            : formatFileSize(row.file_size),
+      },
+      { label: "Created", value: formatEvidenceDate(row.created) },
+      { label: "Modified", value: formatEvidenceDate(row.modified) },
+      { label: "Expected Destination", value: row.expected_destination ?? "Unavailable" },
+      { label: "Known Copy Of", value: row.known_copy_of ?? "Unavailable" },
+      { label: "Import Eligibility", value: row.import_eligibility ?? "Unavailable" },
+    ];
+  }
 
   function normalizeActionId(action: string) {
     const source = String(action || "").trim().toLowerCase();
@@ -1391,23 +1419,33 @@
 
               {#if cockpitTab === "files"}
                 <div class="space-y-2 text-xs">
-                  {#each selectedLocations as row}
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
-                      <div class="flex items-center justify-between gap-2">
-                        <p class="font-medium text-foreground">{row.label}</p>
-                        <span class="text-muted-foreground">{row.state}</span>
+                  {#if selectedLocations.length > 0}
+                    {#each selectedLocations as row}
+                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                        <div class="flex items-center justify-between gap-2">
+                          <p class="font-medium text-foreground">{row.label}</p>
+                          <span class="text-muted-foreground">{row.state}</span>
+                        </div>
+                        <div class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {#each fileEvidenceFields(row) as field}
+                            <div class="rounded-md border border-border/40 bg-background/70 p-2">
+                              <p class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{field.label}</p>
+                              <p class="mt-1 break-all font-medium text-foreground">{field.value}</p>
+                            </div>
+                          {/each}
+                        </div>
+                        <p class="mt-2 text-muted-foreground">{row.explanation ?? "No additional filesystem explanation is available."}</p>
+                        <p class="mt-1 text-muted-foreground">Source: {row.source ?? "Unavailable"}</p>
+                        <div class="mt-2 flex flex-wrap gap-1">
+                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Open Folder</button>
+                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => copyPath(row.path)}>Copy Path</button>
+                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Reveal File</button>
+                        </div>
                       </div>
-                      <p class="mt-1 break-all text-muted-foreground">{row.path ?? "Unavailable"}</p>
-                      <p class="mt-1 text-muted-foreground">{row.explanation ?? "No additional filesystem explanation is available."}</p>
-                      <p class="mt-1 text-muted-foreground">Source: {row.source ?? "Unavailable"}</p>
-                      <div class="mt-2 flex flex-wrap gap-1">
-                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Open Folder</button>
-                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Browse</button>
-                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => copyPath(row.path)}>Copy Path</button>
-                        <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Reveal File</button>
-                      </div>
-                    </div>
-                  {/each}
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">No filesystem evidence is currently indexed for this asset.</p>
+                  {/if}
                   <div class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left text-muted-foreground">
                     <p class="font-medium text-foreground">Compare Files</p>
                     <p class="mt-1">{fileComparisonSummary}</p>

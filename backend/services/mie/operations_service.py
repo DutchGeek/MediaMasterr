@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
 from datetime import UTC, datetime
+from pathlib import Path
+from stat import filemode
 from typing import Any, Literal, cast
 
 from sqlalchemy import Integer, and_, func, or_, select
@@ -10,10 +13,12 @@ from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.service_manager import service_manager
+from backend.core.utils.filesystem import normalize_fpath
 from backend.database.models import (
     CleanupPlan,
     CleanupPlanItem,
     Episode,
+    FilesystemIndexEntry,
     FilesystemRoot,
     MediaAsset,
     MieSettings,
@@ -1912,22 +1917,50 @@ class OperationsService:
         if expected_destination:
             preview.append(f"Expected destination: {expected_destination}")
         if known_paths:
-            preview.append(f"Known file paths: {len(known_paths)}")
+            preview.append(f"Files affected: {len(known_paths)} known path(s)")
+            preview.append(f"Source path: {known_paths[0]}")
             preview.append(f"Primary path: {known_paths[0]}")
         if estimated_recovery_bytes > 0:
-            preview.append(f"Estimated recovery: {estimated_recovery_bytes} bytes")
+            preview.append(f"Estimated work: {estimated_recovery_bytes} bytes of recovery potential")
         if references:
             preview.append(f"Supporting evidence: {references[0]}")
 
         normalized = self._normalize_action_id(action_id)
+        applications: list[str] = []
+        reversible = True
         if normalized in {"delete_torrent", "delete_torrent_and_files", "archive"}:
-            preview.append("Confirmation is required before destructive changes are applied.")
+            preview.append("Reversibility: limited or manual rollback only.")
+            preview.append("Confirmation requirements: explicit confirmation is required.")
+            reversible = False
         elif normalized in {"retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
-            preview.append("MediaMasterr will preview supporting evidence before applying automated steps.")
+            preview.append("Reversibility: generally safe to rerun or refresh.")
+            preview.append("Confirmation requirements: no confirmation required.")
         elif normalized.startswith("open_"):
-            preview.append("This action opens the related application context without mutating MediaMasterr data.")
+            preview.append("Reversibility: fully reversible because no MediaMasterr data is mutated.")
+            preview.append("Confirmation requirements: no confirmation required.")
+        else:
+            preview.append("Reversibility: review the preview before committing changes.")
+            preview.append("Confirmation requirements: confirm if the action mutates files or imports.")
 
-        return preview[:5]
+        if normalized in {"open_radarr", "retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+            applications.append("Radarr")
+        if normalized in {"open_sonarr"}:
+            applications.append("Sonarr")
+        if normalized in {"open_qbittorrent", "resume_download", "pause_torrent", "force_recheck", "delete_torrent", "delete_torrent_and_files"}:
+            applications.append("qBittorrent")
+        if normalized in {"retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+            applications.append("Plex")
+        if normalized in {"refresh_metadata", "repair_identity"}:
+            applications.append("Identity Engine")
+        if normalized in {"refresh_artwork"}:
+            applications.append("Artwork pipeline")
+        if normalized in {"ignore_recommendation", "manual_review", "mark_resolved", "archive"}:
+            applications.append("Operations Engine")
+
+        if applications:
+            preview.append(f"Applications affected: {', '.join(dict.fromkeys(applications))}")
+
+        return preview[:8]
 
     @staticmethod
     def _destination_for_policy(
@@ -1990,6 +2023,7 @@ class OperationsService:
     ) -> tuple[
         str,
         str | None,
+        str,
         list[OperationsFileEvidence],
         list[OperationsApplicationEvidence],
         list[OperationsRelationshipEvidence],
@@ -2002,7 +2036,21 @@ class OperationsService:
         )
         expected_destination = self._destination_for_policy(policy_name, resolved_media_type)
 
-        known_paths: list[tuple[str, str, str | None]] = []
+        def _norm_path(value: str | None) -> str:
+            return normalize_fpath(value or "", strip_ending_slash=True, lower=True)
+
+        def _is_same_or_child(path: str | None, parent: str | None) -> bool:
+            if not path or not parent:
+                return False
+            normalized_path = _norm_path(path)
+            normalized_parent = _norm_path(parent)
+            if not normalized_path or not normalized_parent:
+                return False
+            return normalized_path == normalized_parent or normalized_path.startswith(
+                f"{normalized_parent.rstrip('/')}/"
+            )
+
+        known_paths: list[tuple[str | None, str, str | None, str]] = []
         applications: list[OperationsApplicationEvidence] = []
         relationships: list[OperationsRelationshipEvidence] = []
 
@@ -2035,10 +2083,24 @@ class OperationsService:
             )
             for path, library_name, service, _ in versions:
                 if path:
-                    known_paths.append((path, "Known copy", library_name or str(service.value)))
+                    known_paths.append(
+                        (
+                            path,
+                            "Primary Media File",
+                            library_name or str(service.value),
+                            "primary_media_file",
+                        )
+                    )
             for service_name, arr_movie_id, arr_path in arr_refs:
                 if arr_path:
-                    known_paths.append((arr_path, "Managed destination", service_name))
+                    known_paths.append(
+                        (
+                            arr_path,
+                            "Managed Folder",
+                            service_name,
+                            "managed_folder",
+                        )
+                    )
                 applications.append(
                     OperationsApplicationEvidence(
                         role="Requested By",
@@ -2172,12 +2234,34 @@ class OperationsService:
             )
             for path, library_name, service, _, _ in service_refs:
                 if path:
-                    known_paths.append((path, "Known copy", library_name or str(service.value)))
+                    known_paths.append(
+                        (
+                            path,
+                            "Managed Folder",
+                            library_name or str(service.value),
+                            "managed_folder",
+                        )
+                    )
             for path in season_paths[:3]:
-                known_paths.append((path, "Season path", "Season"))
+                if path:
+                    known_paths.append(
+                        (
+                            path,
+                            "Additional Files",
+                            "Season",
+                            "additional_file",
+                        )
+                    )
             for service_name, arr_series_id, arr_path in arr_refs:
                 if arr_path:
-                    known_paths.append((arr_path, "Managed destination", service_name))
+                    known_paths.append(
+                        (
+                            arr_path,
+                            "Managed Folder",
+                            service_name,
+                            "managed_folder",
+                        )
+                    )
                 applications.append(
                     OperationsApplicationEvidence(
                         role="Requested By",
@@ -2301,25 +2385,267 @@ class OperationsService:
             )
         )
 
-        unique_file_rows: list[OperationsFileEvidence] = []
-        seen_paths: set[tuple[str, str]] = set()
-        base_rows = [
-            ("download", "Download Source", download_location, "Download Client"),
-            ("library", "Library Path", library_location, "Media Library"),
-            ("expected", "Expected Destination", expected_destination, policy_name or "Policy"),
+        media_asset = None
+        if resolved_media_type is MediaType.MOVIE and media_id is not None:
+            media_asset = (
+                await self.db.execute(
+                    select(MediaAsset).where(
+                        MediaAsset.media_type == resolved_media_type,
+                        MediaAsset.movie_id == media_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        elif resolved_media_type is MediaType.SERIES and media_id is not None:
+            media_asset = (
+                await self.db.execute(
+                    select(MediaAsset).where(
+                        MediaAsset.media_type == resolved_media_type,
+                        MediaAsset.series_id == media_id,
+                    )
+                )
+            ).scalar_one_or_none()
+
+        def _parse_datetime_value(value: Any) -> datetime | None:
+            if isinstance(value, datetime):
+                return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+            if isinstance(value, str):
+                try:
+                    parsed = datetime.fromisoformat(value)
+                except ValueError:
+                    return None
+                return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+            return None
+
+        def _match_root(path: str | None) -> FilesystemRoot | None:
+            if not path:
+                return None
+            normalized_path = _norm_path(path)
+            for root in filesystem_roots:
+                normalized_root = _norm_path(root.path)
+                if not normalized_root:
+                    continue
+                if normalized_path == normalized_root or normalized_path.startswith(f"{normalized_root.rstrip('/')}/"):
+                    return root
+            return None
+
+        def _file_details(path: str | None) -> dict[str, Any]:
+            details: dict[str, Any] = {
+                "absolute_path": path,
+                "filename": Path(path).name if path else None,
+                "dataset": None,
+                "pool": None,
+                "filesystem": None,
+                "exists": None,
+                "owner": None,
+                "group": None,
+                "permissions": None,
+                "file_size": None,
+                "created": None,
+                "modified": None,
+                "import_eligibility": None,
+                "state": "unavailable",
+                "explanation": "The file path is unavailable because no provider path is linked.",
+            }
+            if not path:
+                return details
+
+            indexed_entry = filesystem_entries.get(_norm_path(path))
+            entry = indexed_entry[0] if indexed_entry is not None else None
+            root = indexed_entry[1] if indexed_entry is not None else _match_root(path)
+            metadata = entry.metadata_json if entry is not None and isinstance(entry.metadata_json, dict) else {}
+            local_path = Path(path)
+            stat_result = None
+            try:
+                details["exists"] = local_path.exists()
+            except OSError:
+                details["exists"] = None
+            if details["exists"]:
+                try:
+                    stat_result = local_path.stat()
+                except OSError:
+                    stat_result = None
+
+            if entry is not None:
+                details["file_size"] = max(0, int(entry.size_bytes or 0))
+                details["modified"] = entry.modified_at
+            if details["file_size"] is None and stat_result is not None:
+                details["file_size"] = max(0, int(stat_result.st_size))
+            if details["modified"] is None and stat_result is not None:
+                details["modified"] = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
+
+            details["dataset"] = (
+                str(metadata.get("dataset")).strip() or None
+                if metadata.get("dataset") is not None
+                else None
+            )
+            details["pool"] = (
+                str(metadata.get("pool") or metadata.get("pool_name")).strip() or None
+                if metadata.get("pool") is not None or metadata.get("pool_name") is not None
+                else None
+            )
+            filesystem_value = metadata.get("filesystem")
+            if filesystem_value is None and root is not None:
+                filesystem_value = root.name
+            details["filesystem"] = str(filesystem_value).strip() or None if filesystem_value is not None else None
+
+            if metadata.get("owner") is not None:
+                details["owner"] = str(metadata.get("owner")).strip() or None
+            if metadata.get("group") is not None:
+                details["group"] = str(metadata.get("group")).strip() or None
+            if metadata.get("permissions") is not None:
+                details["permissions"] = str(metadata.get("permissions")).strip() or None
+
+            if stat_result is not None:
+                if details["permissions"] is None:
+                    details["permissions"] = filemode(stat_result.st_mode)
+                if os.name != "nt":
+                    try:
+                        import grp
+                        import pwd
+
+                        pwd_module = cast(Any, pwd)
+                        grp_module = cast(Any, grp)
+
+                        if details["owner"] is None:
+                            details["owner"] = pwd_module.getpwuid(stat_result.st_uid).pw_name
+                        if details["group"] is None:
+                            details["group"] = grp_module.getgrgid(stat_result.st_gid).gr_name
+                    except Exception:
+                        pass
+                created = _parse_datetime_value(metadata.get("created"))
+                if created is None:
+                    created = _parse_datetime_value(metadata.get("created_at"))
+                if created is None:
+                    created = _parse_datetime_value(metadata.get("birthtime"))
+                if created is None and os.name == "nt":
+                    created = datetime.fromtimestamp(stat_result.st_ctime, tz=UTC)
+                details["created"] = created
+
+            if details["created"] is None:
+                details["created"] = _parse_datetime_value(metadata.get("created_at"))
+            if details["modified"] is None:
+                details["modified"] = _parse_datetime_value(metadata.get("modified"))
+            if details["modified"] is None:
+                details["modified"] = _parse_datetime_value(metadata.get("modified_at"))
+
+            if expected_destination:
+                normalized_expected = _norm_path(expected_destination)
+                normalized_path = _norm_path(path)
+                if normalized_path == normalized_expected:
+                    details["import_eligibility"] = "eligible"
+                elif details["exists"] is False:
+                    details["import_eligibility"] = "missing"
+                elif details["exists"] is True:
+                    details["import_eligibility"] = "review required"
+                else:
+                    details["import_eligibility"] = "unknown"
+            else:
+                details["import_eligibility"] = "unknown"
+
+            if details["exists"] is False:
+                details["state"] = "missing"
+                details["explanation"] = "The file path is linked but the filesystem entry could not be found."
+            elif details["exists"] is True:
+                details["state"] = "available"
+                details["explanation"] = "Filesystem evidence is available from the indexed path and local filesystem probe."
+            else:
+                details["state"] = "partial"
+                details["explanation"] = "The filesystem path is linked, but availability could not be confirmed." 
+            return details
+
+        filesystem_roots = (
+            await self.db.execute(
+                select(FilesystemRoot).where(FilesystemRoot.enabled.is_(True))
+            )
+        ).scalars().all()
+
+        all_file_paths = [
+            path
+            for path in [
+                download_location,
+                library_location,
+                expected_destination,
+                *[path for path, _, _, _ in known_paths],
+            ]
+            if path
         ]
-        for key, label, path, source in base_rows:
+        filesystem_entries: dict[str, tuple[FilesystemIndexEntry, FilesystemRoot]] = {}
+        if all_file_paths:
+            for entry, root in (
+                await self.db.execute(
+                    select(FilesystemIndexEntry, FilesystemRoot)
+                    .join(FilesystemRoot, FilesystemRoot.id == FilesystemIndexEntry.root_id)
+                    .where(FilesystemIndexEntry.path.in_(sorted(set(all_file_paths))))
+                )
+            ).all():
+                filesystem_entries[_norm_path(entry.path)] = (entry, root)
+
+        unique_file_rows: list[OperationsFileEvidence] = []
+        seen_paths: set[tuple[str, str, str]] = set()
+
+        managed_folder_candidates = [
+            path
+            for path, _, _, role in known_paths
+            if path and role == "managed_folder"
+        ]
+        canonical_managed_folder = managed_folder_candidates[0] if managed_folder_candidates else None
+
+        base_rows = [
+            (
+                "download",
+                "Download Source",
+                download_location,
+                "Download Client",
+                None,
+                "download_source",
+            ),
+            (
+                "library-root",
+                "Library Root",
+                expected_destination,
+                policy_name or "Policy",
+                None,
+                "library_root",
+            ),
+            (
+                "managed-folder",
+                "Managed Folder",
+                library_location,
+                "Media Library",
+                expected_destination,
+                "managed_folder",
+            ),
+        ]
+        for key, label, path, source, known_copy_of, hierarchy_role in base_rows:
             row_key = (key, str(path))
-            if row_key in seen_paths:
+            dedupe_key = (key, _norm_path(path), hierarchy_role)
+            if dedupe_key in seen_paths:
                 continue
-            seen_paths.add(row_key)
+            seen_paths.add(dedupe_key)
+            details = _file_details(path)
             unique_file_rows.append(
                 OperationsFileEvidence(
                     key=key,
                     label=label,
+                    hierarchy_role=cast(Any, hierarchy_role),
+                    absolute_path=details["absolute_path"],
                     path=path,
+                    filename=details["filename"],
+                    dataset=details["dataset"],
+                    pool=details["pool"],
+                    filesystem=details["filesystem"],
+                    exists=details["exists"],
+                    owner=details["owner"],
+                    group=details["group"],
+                    permissions=details["permissions"],
+                    file_size=details["file_size"],
+                    created=details["created"],
+                    modified=details["modified"],
+                    expected_destination=expected_destination,
+                    known_copy_of=known_copy_of,
+                    import_eligibility=details["import_eligibility"],
                     source=source,
-                    state="available" if path else "unavailable",
+                    state=cast(Any, details["state"]),
                     explanation=(
                         f"{label} is known from {source}."
                         if path
@@ -2327,27 +2653,130 @@ class OperationsService:
                     ),
                 )
             )
-        for index, (path, label, source) in enumerate(known_paths, start=1):
-            if not path:
+
+        canonical_primary_seen = False
+        primary_inside_canonical = 0
+        primary_outside_canonical = 0
+
+        for index, known_path in enumerate(known_paths, start=1):
+            known_path_value: str | None = known_path[0]
+            known_label: str = known_path[1]
+            known_source: str | None = known_path[2]
+            known_role: str = known_path[3]
+            if not known_path_value:
                 continue
-            row_key = (label, path)
-            if row_key in seen_paths:
+            dedupe_key = (known_label, _norm_path(known_path_value), known_role)
+            if dedupe_key in seen_paths:
                 continue
-            seen_paths.add(row_key)
+            seen_paths.add(dedupe_key)
+            details = _file_details(known_path_value)
+
+            hierarchy_role = known_role
+            state = cast(str, details["state"])
+            explanation = f"{known_label} is linked from {known_source or 'provider evidence'}."
+
+            if known_role == "primary_media_file":
+                in_canonical = _is_same_or_child(known_path_value, canonical_managed_folder)
+                if canonical_managed_folder and in_canonical:
+                    primary_inside_canonical += 1
+                    if canonical_primary_seen:
+                        hierarchy_role = "additional_file"
+                        explanation = "Additional media file inside the canonical managed folder."
+                    else:
+                        canonical_primary_seen = True
+                        hierarchy_role = "primary_media_file"
+                        explanation = "Primary media file is inside the canonical managed folder."
+                elif canonical_managed_folder:
+                    primary_outside_canonical += 1
+                    hierarchy_role = "additional_copy"
+                    state = "duplicate"
+                    explanation = "Additional primary media file exists outside the canonical managed folder."
+                else:
+                    hierarchy_role = "primary_media_file"
+                    explanation = "Primary media file is linked, but canonical managed folder is unavailable."
+            elif known_role == "managed_folder":
+                if canonical_managed_folder and _norm_path(known_path_value) == _norm_path(canonical_managed_folder):
+                    explanation = "Managed folder matches the canonical destination for this asset."
+                else:
+                    explanation = "Managed folder is linked as filesystem hierarchy context."
+            elif known_role == "additional_file":
+                explanation = "Additional related files or folders are linked for this asset."
+
             unique_file_rows.append(
                 OperationsFileEvidence(
                     key=f"known-copy-{index}",
-                    label=label,
-                    path=path,
-                    source=source,
-                    state="duplicate" if label == "Known copy" and len(known_paths) > 1 else "available",
-                    explanation=(
-                        "This known copy differs from the expected destination and remains part of the supporting evidence."
-                        if expected_destination and path != expected_destination
-                        else "This path matches the expected destination."
-                    ),
+                    label=known_label,
+                    hierarchy_role=cast(Any, hierarchy_role),
+                    absolute_path=details["absolute_path"],
+                    path=known_path_value,
+                    filename=details["filename"],
+                    dataset=details["dataset"],
+                    pool=details["pool"],
+                    filesystem=details["filesystem"],
+                    exists=details["exists"],
+                    owner=details["owner"],
+                    group=details["group"],
+                    permissions=details["permissions"],
+                    file_size=details["file_size"],
+                    created=details["created"],
+                    modified=details["modified"],
+                    expected_destination=expected_destination,
+                    known_copy_of=canonical_managed_folder or expected_destination,
+                    import_eligibility=details["import_eligibility"],
+                    source=known_source,
+                    state=cast(Any, state),
+                    explanation=explanation,
                 )
             )
+
+        if canonical_managed_folder:
+            if primary_inside_canonical > 0 and primary_outside_canonical == 0:
+                filesystem_comparison_summary = (
+                    "Primary media file is correctly located within the expected managed folder. "
+                    "Library root and managed folder rows are treated as hierarchy context, not conflicting paths."
+                )
+            elif primary_inside_canonical > 0 and primary_outside_canonical > 0:
+                filesystem_comparison_summary = (
+                    f"{primary_outside_canonical} additional primar"
+                    f"y media file{'s' if primary_outside_canonical != 1 else ''} exist outside the canonical managed folder."
+                )
+            elif primary_inside_canonical == 0 and primary_outside_canonical > 0:
+                filesystem_comparison_summary = (
+                    "Primary media file exists, but only outside the canonical managed folder."
+                )
+            else:
+                filesystem_comparison_summary = (
+                    "Canonical managed folder is linked, but no primary media file is currently linked."
+                )
+        else:
+            filesystem_comparison_summary = (
+                "No canonical managed folder is linked yet, so duplicate detection is limited to known primary files only."
+            )
+
+        file_count = len([row for row in unique_file_rows if row.path])
+        metadata_summary_parts: list[str] = []
+        if resolved_media_type is MediaType.MOVIE:
+            movie = (
+                await self.db.execute(select(Movie).where(Movie.id == media_id))
+            ).scalar_one_or_none()
+            if movie is not None:
+                metadata_summary_parts.append("IMDb" if movie.imdb_id else "IMDb unavailable")
+                metadata_summary_parts.append("TMDB" if movie.tmdb_id else "TMDB unavailable")
+                metadata_summary_parts.append("TVDB unavailable")
+        elif resolved_media_type is MediaType.SERIES:
+            series = (
+                await self.db.execute(select(Series).where(Series.id == media_id))
+            ).scalar_one_or_none()
+            if series is not None:
+                metadata_summary_parts.append("IMDb" if series.imdb_id else "IMDb unavailable")
+                metadata_summary_parts.append("TMDB" if series.tmdb_id else "TMDB unavailable")
+                metadata_summary_parts.append("TVDB" if series.tvdb_id else "TVDB unavailable")
+
+        artwork_summary = "Unavailable"
+        if media_asset is not None and media_asset.poster_url:
+            artwork_summary = "Poster linked"
+
+        identity_summary = title
 
         if not relationships:
             relationships = [
@@ -2362,6 +2791,83 @@ class OperationsService:
         relationships.extend(
             [
                 OperationsRelationshipEvidence(
+                    key="files",
+                    label="Files",
+                    value=f"{file_count} indexed path(s)" if file_count else "Unavailable",
+                    status="linked" if file_count else "unavailable",
+                    explanation=(
+                        "Filesystem evidence is linked to this asset and is summarized in the Files tab."
+                        if file_count
+                        else "No filesystem evidence is currently indexed for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="plex",
+                    label="Plex",
+                    value="Linked" if any(row.application == "Plex" and row.status == "linked" for row in applications) else "Unavailable",
+                    status="linked" if any(row.application == "Plex" and row.status == "linked" for row in applications) else "unavailable",
+                    explanation=(
+                        "Plex ownership is linked for this asset."
+                        if any(row.application == "Plex" and row.status == "linked" for row in applications)
+                        else "No Plex relationship is currently linked for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="arr",
+                    label="Radarr" if resolved_media_type is MediaType.MOVIE else "Sonarr",
+                    value=("Linked" if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications) else "Unavailable"),
+                    status="linked" if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications) else "unavailable",
+                    explanation=(
+                        ("Radarr ownership is linked for this asset." if resolved_media_type is MediaType.MOVIE else "Sonarr ownership is linked for this asset.")
+                        if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications)
+                        else ("No Radarr relationship is currently linked for this asset." if resolved_media_type is MediaType.MOVIE else "No Sonarr relationship is currently linked for this asset.")
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="qbittorrent",
+                    label="qBittorrent",
+                    value=torrent_state or "Unavailable",
+                    status="linked" if torrent_state else "unavailable",
+                    explanation=(
+                        "qBittorrent ownership is linked for this asset."
+                        if torrent_state
+                        else "No qBittorrent relationship is currently linked for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="metadata",
+                    label="Metadata",
+                    value=", ".join(metadata_summary_parts) if metadata_summary_parts else "Unavailable",
+                    status="linked" if metadata_summary_parts else "unavailable",
+                    explanation=(
+                        "Metadata providers are linked for this asset."
+                        if metadata_summary_parts
+                        else "No metadata provider relationships are currently linked for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="artwork",
+                    label="Artwork",
+                    value=artwork_summary,
+                    status="linked" if artwork_summary != "Unavailable" else "unavailable",
+                    explanation=(
+                        "Artwork evidence is linked for this asset."
+                        if artwork_summary != "Unavailable"
+                        else "No artwork relationship is currently linked for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="identity",
+                    label="Identity",
+                    value=identity_summary,
+                    status="linked" if identity_summary else "unavailable",
+                    explanation=(
+                        "Identity evidence is linked for this asset."
+                        if identity_summary
+                        else "No identity relationship is currently linked for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
                     key="related_torrents",
                     label="Related Torrents",
                     value=torrent_state,
@@ -2370,17 +2876,6 @@ class OperationsService:
                         "Torrent state is linked to this asset."
                         if torrent_state
                         else "No torrent relationship is currently linked."
-                    ),
-                ),
-                OperationsRelationshipEvidence(
-                    key="related_files",
-                    label="Related Files",
-                    value=str(len([row for row in unique_file_rows if row.path])),
-                    status="linked" if any(row.path for row in unique_file_rows) else "unavailable",
-                    explanation=(
-                        "MediaMasterr has indexed file evidence for this asset."
-                        if any(row.path for row in unique_file_rows)
-                        else "No file evidence is currently indexed for this asset."
                     ),
                 ),
                 OperationsRelationshipEvidence(
@@ -2401,6 +2896,7 @@ class OperationsService:
         return (
             case_summary,
             expected_destination,
+            filesystem_comparison_summary,
             unique_file_rows,
             applications,
             relationships,
@@ -2502,6 +2998,7 @@ class OperationsService:
             (
                 case_summary,
                 expected_destination,
+                filesystem_comparison_summary,
                 file_evidence,
                 application_evidence,
                 relationship_evidence,
@@ -2567,6 +3064,7 @@ class OperationsService:
                     ),
                     case_summary=case_summary,
                     expected_destination=expected_destination,
+                    filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
@@ -2593,6 +3091,7 @@ class OperationsService:
             (
                 case_summary,
                 expected_destination,
+                filesystem_comparison_summary,
                 file_evidence,
                 application_evidence,
                 relationship_evidence,
@@ -2682,6 +3181,7 @@ class OperationsService:
                     ),
                     case_summary=case_summary,
                     expected_destination=expected_destination,
+                    filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
@@ -2698,6 +3198,7 @@ class OperationsService:
             (
                 case_summary,
                 expected_destination,
+                filesystem_comparison_summary,
                 file_evidence,
                 application_evidence,
                 relationship_evidence,
@@ -2762,6 +3263,7 @@ class OperationsService:
                     ),
                     case_summary=case_summary,
                     expected_destination=expected_destination,
+                    filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
