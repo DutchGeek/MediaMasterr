@@ -13,17 +13,23 @@ from backend.core.service_manager import service_manager
 from backend.database.models import (
     CleanupPlan,
     CleanupPlanItem,
+    Episode,
     FilesystemRoot,
     MediaAsset,
     MieSettings,
     Movie,
+    MovieArrRef,
     MovieVersion,
     OperationHistory,
     ProtectedMedia,
     ReclaimCandidate,
+    Season,
     Series,
+    SeriesArrRef,
+    SeriesServiceRef,
+    ServiceConfig,
 )
-from backend.enums import MediaType
+from backend.enums import MediaType, Service
 from backend.models.mie import (
     ArtworkIssuesSummary,
     CleanupPlanListResponse,
@@ -37,8 +43,10 @@ from backend.models.mie import (
     OperationActionManifestAction,
     OperationAuditEntryResponse,
     OperationAuditListResponse,
+    OperationsApplicationEvidence,
     OperationsCard,
     OperationsConfidenceSummary,
+    OperationsFileEvidence,
     OperationsGraphSummary,
     OperationsHealthCategory,
     OperationsHealthSummary,
@@ -47,6 +55,7 @@ from backend.models.mie import (
     OperationsOverviewResponse,
     OperationsRecommendation,
     OperationsRecommendationsResponse,
+    OperationsRelationshipEvidence,
     OperationsTimelineSummary,
     OperationsWorkflowAsset,
     OperationsWorkflowBoard,
@@ -1857,7 +1866,11 @@ class OperationsService:
         return _ACTION_ALIASES.get(action_id, action_id)
 
     @staticmethod
-    def _manifest_entry(action_id: str) -> OperationActionManifestAction:
+    def _manifest_entry(
+        action_id: str,
+        *,
+        impact_preview: list[str] | None = None,
+    ) -> OperationActionManifestAction:
         definition = _ACTION_DEFINITIONS.get(action_id)
         if definition is None:
             return OperationActionManifestAction(
@@ -1867,6 +1880,7 @@ class OperationsService:
                 risk="medium",
                 confirmation=False,
                 description="Action metadata unavailable.",
+                impact_preview=list(impact_preview or []),
                 automation="manual",
                 kind="operations",
             )
@@ -1877,8 +1891,520 @@ class OperationsService:
             risk=cast(Any, definition["risk"]),
             confirmation=bool(definition.get("confirmation", False)),
             description=str(definition.get("description") or ""),
+            impact_preview=list(impact_preview or []),
             automation=cast(Any, definition.get("automation", "manual")),
             kind=cast(Any, definition.get("kind", "operations")),
+        )
+
+    def _impact_preview_for_action(
+        self,
+        action_id: str,
+        *,
+        summary: str,
+        expected_destination: str | None,
+        known_paths: list[str],
+        estimated_recovery_bytes: int,
+        references: list[str],
+    ) -> list[str]:
+        preview: list[str] = []
+        if summary:
+            preview.append(summary)
+        if expected_destination:
+            preview.append(f"Expected destination: {expected_destination}")
+        if known_paths:
+            preview.append(f"Known file paths: {len(known_paths)}")
+            preview.append(f"Primary path: {known_paths[0]}")
+        if estimated_recovery_bytes > 0:
+            preview.append(f"Estimated recovery: {estimated_recovery_bytes} bytes")
+        if references:
+            preview.append(f"Supporting evidence: {references[0]}")
+
+        normalized = self._normalize_action_id(action_id)
+        if normalized in {"delete_torrent", "delete_torrent_and_files", "archive"}:
+            preview.append("Confirmation is required before destructive changes are applied.")
+        elif normalized in {"retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+            preview.append("MediaMasterr will preview supporting evidence before applying automated steps.")
+        elif normalized.startswith("open_"):
+            preview.append("This action opens the related application context without mutating MediaMasterr data.")
+
+        return preview[:5]
+
+    @staticmethod
+    def _destination_for_policy(
+        policy_name: str | None,
+        media_type: MediaType | None,
+    ) -> str | None:
+        for policy in OperationsService._build_media_policies():
+            if policy.name == policy_name:
+                return policy.destination_library
+        if media_type is MediaType.MOVIE:
+            return "/media/movies"
+        if media_type is MediaType.SERIES:
+            return "/media/tv"
+        return None
+
+    async def _resolve_asset_media_identity(
+        self,
+        *,
+        media_type: MediaType | None,
+        target_type: str,
+        target_id: str | None,
+    ) -> tuple[MediaType | None, int | None]:
+        if target_type == "movie" and target_id and target_id.isdigit():
+            return MediaType.MOVIE, int(target_id)
+        if target_type in {"series", "season", "episode"} and target_id and target_id.isdigit():
+            return MediaType.SERIES, int(target_id)
+        if target_type == "reclaim_candidate" and target_id and target_id.isdigit():
+            row = (
+                await self.db.execute(
+                    select(ReclaimCandidate.movie_id, ReclaimCandidate.series_id).where(
+                        ReclaimCandidate.id == int(target_id)
+                    )
+                )
+            ).first()
+            if row is not None:
+                if row.movie_id is not None:
+                    return MediaType.MOVIE, int(row.movie_id)
+                if row.series_id is not None:
+                    return MediaType.SERIES, int(row.series_id)
+        if media_type is not None and target_id and target_id.isdigit():
+            return media_type, int(target_id)
+        return media_type, None
+
+    async def _build_asset_evidence(
+        self,
+        *,
+        title: str,
+        media_type: MediaType | None,
+        target_type: str,
+        target_id: str | None,
+        policy_name: str | None,
+        download_location: str | None,
+        library_location: str | None,
+        torrent_state: str | None,
+        summary: str,
+        reason: str,
+        recommendation: str,
+        estimated_recovery_bytes: int,
+        graph_references: list[str],
+    ) -> tuple[
+        str,
+        str | None,
+        list[OperationsFileEvidence],
+        list[OperationsApplicationEvidence],
+        list[OperationsRelationshipEvidence],
+        list[str],
+    ]:
+        resolved_media_type, media_id = await self._resolve_asset_media_identity(
+            media_type=media_type,
+            target_type=target_type,
+            target_id=target_id,
+        )
+        expected_destination = self._destination_for_policy(policy_name, resolved_media_type)
+
+        known_paths: list[tuple[str, str, str | None]] = []
+        applications: list[OperationsApplicationEvidence] = []
+        relationships: list[OperationsRelationshipEvidence] = []
+
+        if resolved_media_type is MediaType.MOVIE and media_id is not None:
+            movie = (
+                await self.db.execute(select(Movie).where(Movie.id == media_id))
+            ).scalar_one_or_none()
+            versions = (
+                (
+                    await self.db.execute(
+                        select(
+                            MovieVersion.path,
+                            MovieVersion.library_name,
+                            MovieVersion.service,
+                            MovieVersion.service_item_id,
+                        ).where(MovieVersion.movie_id == media_id)
+                    )
+                )
+                .all()
+            )
+            arr_refs = (
+                (
+                    await self.db.execute(
+                        select(ServiceConfig.name, MovieArrRef.arr_movie_id, MovieArrRef.arr_movie_path)
+                        .join(ServiceConfig, ServiceConfig.id == MovieArrRef.service_config_id)
+                        .where(MovieArrRef.movie_id == media_id)
+                    )
+                )
+                .all()
+            )
+            for path, library_name, service, _ in versions:
+                if path:
+                    known_paths.append((path, "Known copy", library_name or str(service.value)))
+            for service_name, arr_movie_id, arr_path in arr_refs:
+                if arr_path:
+                    known_paths.append((arr_path, "Managed destination", service_name))
+                applications.append(
+                    OperationsApplicationEvidence(
+                        role="Requested By",
+                        application="Radarr",
+                        status="linked",
+                        reference=f"{service_name} #{arr_movie_id}",
+                        explanation="Radarr currently owns a managed relationship for this movie.",
+                    )
+                )
+            if not arr_refs:
+                applications.append(
+                    OperationsApplicationEvidence(
+                        role="Requested By",
+                        application="Radarr",
+                        status="unavailable",
+                        reference=None,
+                        explanation="No Radarr relationship is currently linked for this movie.",
+                    )
+                )
+            plex_version = next((row for row in versions if row.service == Service.PLEX), None)
+            applications.append(
+                OperationsApplicationEvidence(
+                    role="Managed By",
+                    application="Plex",
+                    status="linked" if plex_version is not None else "unavailable",
+                    reference=plex_version.service_item_id if plex_version is not None else None,
+                    explanation=(
+                        "Plex library ownership is linked for this movie."
+                        if plex_version is not None
+                        else "No Plex relationship is currently linked for this movie."
+                    ),
+                )
+            )
+            relationships.extend(
+                [
+                    OperationsRelationshipEvidence(
+                        key="imdb",
+                        label="IMDb",
+                        value=movie.imdb_id if movie is not None else None,
+                        status="linked" if movie is not None and movie.imdb_id else "unavailable",
+                        explanation=(
+                            "IMDb identity is linked."
+                            if movie is not None and movie.imdb_id
+                            else "No IMDb relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="tmdb",
+                        label="TMDB",
+                        value=str(movie.tmdb_id) if movie is not None else None,
+                        status="linked" if movie is not None else "unavailable",
+                        explanation=(
+                            "TMDB identity is linked."
+                            if movie is not None
+                            else "No TMDB relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="tvdb",
+                        label="TVDB",
+                        value=None,
+                        status="unavailable",
+                        explanation="Movies do not currently carry a TVDB relationship in MediaMasterr.",
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="collection",
+                        label="Collection",
+                        value=(movie.tmdb_collection_name if movie is not None else None)
+                        or policy_name,
+                        status=(
+                            "linked"
+                            if (movie is not None and movie.tmdb_collection_name) or policy_name
+                            else "unavailable"
+                        ),
+                        explanation=(
+                            "Collection context is available."
+                            if (movie is not None and movie.tmdb_collection_name) or policy_name
+                            else "No collection relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="duplicates",
+                        label="Duplicate Assets",
+                        value=str(max(0, len([row for row in versions if row.path]) - 1)),
+                        status="linked" if len([row for row in versions if row.path]) > 1 else "unavailable",
+                        explanation=(
+                            "Multiple known copies are tracked for this movie."
+                            if len([row for row in versions if row.path]) > 1
+                            else "No duplicate file relationship is currently linked."
+                        ),
+                    ),
+                ]
+            )
+
+        elif resolved_media_type is MediaType.SERIES and media_id is not None:
+            series = (
+                await self.db.execute(select(Series).where(Series.id == media_id))
+            ).scalar_one_or_none()
+            service_refs = (
+                (
+                    await self.db.execute(
+                        select(
+                            SeriesServiceRef.path,
+                            SeriesServiceRef.library_name,
+                            SeriesServiceRef.service,
+                            SeriesServiceRef.service_id,
+                            SeriesServiceRef.media_server_collection_names,
+                        ).where(SeriesServiceRef.series_id == media_id)
+                    )
+                )
+                .all()
+            )
+            arr_refs = (
+                (
+                    await self.db.execute(
+                        select(ServiceConfig.name, SeriesArrRef.arr_series_id, SeriesArrRef.arr_series_path)
+                        .join(ServiceConfig, ServiceConfig.id == SeriesArrRef.service_config_id)
+                        .where(SeriesArrRef.series_id == media_id)
+                    )
+                )
+                .all()
+            )
+            season_paths = (
+                (
+                    await self.db.execute(
+                        select(Season.path).where(Season.series_id == media_id, Season.path.is_not(None))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for path, library_name, service, _, _ in service_refs:
+                if path:
+                    known_paths.append((path, "Known copy", library_name or str(service.value)))
+            for path in season_paths[:3]:
+                known_paths.append((path, "Season path", "Season"))
+            for service_name, arr_series_id, arr_path in arr_refs:
+                if arr_path:
+                    known_paths.append((arr_path, "Managed destination", service_name))
+                applications.append(
+                    OperationsApplicationEvidence(
+                        role="Requested By",
+                        application="Sonarr",
+                        status="linked",
+                        reference=f"{service_name} #{arr_series_id}",
+                        explanation="Sonarr currently owns a managed relationship for this series.",
+                    )
+                )
+            if not arr_refs:
+                applications.append(
+                    OperationsApplicationEvidence(
+                        role="Requested By",
+                        application="Sonarr",
+                        status="unavailable",
+                        reference=None,
+                        explanation="No Sonarr relationship is currently linked for this series.",
+                    )
+                )
+            plex_ref = next((row for row in service_refs if row.service == Service.PLEX), None)
+            applications.append(
+                OperationsApplicationEvidence(
+                    role="Managed By",
+                    application="Plex",
+                    status="linked" if plex_ref is not None else "unavailable",
+                    reference=plex_ref.service_id if plex_ref is not None else None,
+                    explanation=(
+                        "Plex library ownership is linked for this series."
+                        if plex_ref is not None
+                        else "No Plex relationship is currently linked for this series."
+                    ),
+                )
+            )
+            collection_name = None
+            for _, _, _, _, collection_names in service_refs:
+                if collection_names:
+                    collection_name = collection_names[0]
+                    break
+            relationships.extend(
+                [
+                    OperationsRelationshipEvidence(
+                        key="imdb",
+                        label="IMDb",
+                        value=series.imdb_id if series is not None else None,
+                        status="linked" if series is not None and series.imdb_id else "unavailable",
+                        explanation=(
+                            "IMDb identity is linked."
+                            if series is not None and series.imdb_id
+                            else "No IMDb relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="tmdb",
+                        label="TMDB",
+                        value=str(series.tmdb_id) if series is not None else None,
+                        status="linked" if series is not None else "unavailable",
+                        explanation=(
+                            "TMDB identity is linked."
+                            if series is not None
+                            else "No TMDB relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="tvdb",
+                        label="TVDB",
+                        value=series.tvdb_id if series is not None else None,
+                        status="linked" if series is not None and series.tvdb_id else "unavailable",
+                        explanation=(
+                            "TVDB identity is linked."
+                            if series is not None and series.tvdb_id
+                            else "No TVDB relationship is currently linked."
+                        ),
+                    ),
+                    OperationsRelationshipEvidence(
+                        key="collection",
+                        label="Collection",
+                        value=collection_name or policy_name,
+                        status="linked" if collection_name or policy_name else "unavailable",
+                        explanation=(
+                            "Collection context is available."
+                            if collection_name or policy_name
+                            else "No collection relationship is currently linked."
+                        ),
+                    ),
+                ]
+            )
+
+        applications.append(
+            OperationsApplicationEvidence(
+                role="Download Client",
+                application="qBittorrent",
+                status="linked" if torrent_state or download_location else "unavailable",
+                reference=torrent_state,
+                explanation=(
+                    "A download client relationship is present for this asset."
+                    if torrent_state or download_location
+                    else "No download client relationship is currently linked."
+                ),
+            )
+        )
+        applications.append(
+            OperationsApplicationEvidence(
+                role="Indexer",
+                application="Prowlarr",
+                status="unavailable",
+                reference=None,
+                explanation="No indexer relationship is currently linked for this asset.",
+            )
+        )
+        applications.append(
+            OperationsApplicationEvidence(
+                role="Current Owner",
+                application=policy_name or "Unavailable",
+                status="linked" if policy_name else "unavailable",
+                reference=policy_name,
+                explanation=(
+                    "Policy and destination ownership are known for this asset."
+                    if policy_name
+                    else "No policy ownership is currently linked for this asset."
+                ),
+            )
+        )
+
+        unique_file_rows: list[OperationsFileEvidence] = []
+        seen_paths: set[tuple[str, str]] = set()
+        base_rows = [
+            ("download", "Download Source", download_location, "Download Client"),
+            ("library", "Library Path", library_location, "Media Library"),
+            ("expected", "Expected Destination", expected_destination, policy_name or "Policy"),
+        ]
+        for key, label, path, source in base_rows:
+            row_key = (key, str(path))
+            if row_key in seen_paths:
+                continue
+            seen_paths.add(row_key)
+            unique_file_rows.append(
+                OperationsFileEvidence(
+                    key=key,
+                    label=label,
+                    path=path,
+                    source=source,
+                    state="available" if path else "unavailable",
+                    explanation=(
+                        f"{label} is known from {source}."
+                        if path
+                        else f"{label} is unavailable because no provider path is linked."
+                    ),
+                )
+            )
+        for index, (path, label, source) in enumerate(known_paths, start=1):
+            if not path:
+                continue
+            row_key = (label, path)
+            if row_key in seen_paths:
+                continue
+            seen_paths.add(row_key)
+            unique_file_rows.append(
+                OperationsFileEvidence(
+                    key=f"known-copy-{index}",
+                    label=label,
+                    path=path,
+                    source=source,
+                    state="duplicate" if label == "Known copy" and len(known_paths) > 1 else "available",
+                    explanation=(
+                        "This known copy differs from the expected destination and remains part of the supporting evidence."
+                        if expected_destination and path != expected_destination
+                        else "This path matches the expected destination."
+                    ),
+                )
+            )
+
+        if not relationships:
+            relationships = [
+                OperationsRelationshipEvidence(
+                    key="graph",
+                    label="Operational Graph",
+                    value=None,
+                    status="unavailable",
+                    explanation="No graph-based operational relationships are currently linked for this asset.",
+                )
+            ]
+        relationships.extend(
+            [
+                OperationsRelationshipEvidence(
+                    key="related_torrents",
+                    label="Related Torrents",
+                    value=torrent_state,
+                    status="linked" if torrent_state else "unavailable",
+                    explanation=(
+                        "Torrent state is linked to this asset."
+                        if torrent_state
+                        else "No torrent relationship is currently linked."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="related_files",
+                    label="Related Files",
+                    value=str(len([row for row in unique_file_rows if row.path])),
+                    status="linked" if any(row.path for row in unique_file_rows) else "unavailable",
+                    explanation=(
+                        "MediaMasterr has indexed file evidence for this asset."
+                        if any(row.path for row in unique_file_rows)
+                        else "No file evidence is currently indexed for this asset."
+                    ),
+                ),
+                OperationsRelationshipEvidence(
+                    key="workflow_reasoning",
+                    label="Workflow Reasoning",
+                    value=graph_references[0] if graph_references else None,
+                    status="linked" if graph_references else "unavailable",
+                    explanation=(
+                        "Graph and workflow evidence support this recommendation."
+                        if graph_references
+                        else "No graph-backed workflow reference is currently linked."
+                    ),
+                ),
+            ]
+        )
+
+        case_summary = f"{reason} Next step: {recommendation}."
+        return (
+            case_summary,
+            expected_destination,
+            unique_file_rows,
+            applications,
+            relationships,
+            [row.path for row in unique_file_rows if row.path],
         )
 
     def _build_action_manifest(
@@ -1887,6 +2413,11 @@ class OperationsService:
         primary_action: str,
         target_type: str,
         media_type: MediaType | None,
+        summary: str = "",
+        expected_destination: str | None = None,
+        known_paths: list[str] | None = None,
+        estimated_recovery_bytes: int = 0,
+        references: list[str] | None = None,
     ) -> OperationActionManifest:
         resolved_primary = self._normalize_action_id(primary_action)
         actions: list[str] = [resolved_primary]
@@ -1923,7 +2454,20 @@ class OperationsService:
             deduped.append(action)
 
         return OperationActionManifest(
-            available_actions=[self._manifest_entry(action) for action in deduped]
+            available_actions=[
+                self._manifest_entry(
+                    action,
+                    impact_preview=self._impact_preview_for_action(
+                        action,
+                        summary=summary,
+                        expected_destination=expected_destination,
+                        known_paths=list(known_paths or []),
+                        estimated_recovery_bytes=estimated_recovery_bytes,
+                        references=list(references or []),
+                    ),
+                )
+                for action in deduped
+            ]
         )
 
     def _supported_actions(self) -> set[str]:
@@ -1951,6 +2495,31 @@ class OperationsService:
                 f"{row.retention_remaining_hours}h"
                 if row.retention_remaining_hours is not None
                 else None
+            )
+            policy_name = self._policy_name_for_asset(
+                row.media_type, row.media_identity or row.path
+            )
+            (
+                case_summary,
+                expected_destination,
+                file_evidence,
+                application_evidence,
+                relationship_evidence,
+                known_paths,
+            ) = await self._build_asset_evidence(
+                title=row.media_identity or row.path,
+                media_type=row.media_type,
+                target_type="download_object",
+                target_id=row.path,
+                policy_name=policy_name,
+                download_location=row.path,
+                library_location=row.library_path,
+                torrent_state=row.torrent_state,
+                summary=row.lifecycle_state,
+                reason=row.cleanup_reason or "Download lifecycle classification",
+                recommendation=row.recommendation,
+                estimated_recovery_bytes=row.recoverable_space_bytes,
+                graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
             )
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
@@ -1984,13 +2553,23 @@ class OperationsService:
                     reason=row.cleanup_reason or "Download lifecycle classification",
                     after_action="Asset progresses to next lifecycle stage after successful operation.",
                     graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
-                    policy_name=self._policy_name_for_asset(row.media_type, row.media_identity or row.path),
+                    policy_name=policy_name,
                     filters=["downloads"],
                     action_manifest=self._build_action_manifest(
                         primary_action=row.recommendation,
                         target_type="download_object",
                         media_type=row.media_type,
+                        summary=row.cleanup_reason or row.recommendation,
+                        expected_destination=expected_destination,
+                        known_paths=known_paths,
+                        estimated_recovery_bytes=row.recoverable_space_bytes,
+                        references=["correlation_graph.timeline", "filesystem_index_entries.path"],
                     ),
+                    case_summary=case_summary,
+                    expected_destination=expected_destination,
+                    file_evidence=file_evidence,
+                    application_evidence=application_evidence,
+                    relationship_evidence=relationship_evidence,
                 )
             )
 
@@ -2010,6 +2589,29 @@ class OperationsService:
                 media_type = MediaType.SERIES
             elif item.target_type == "reclaim_candidate":
                 media_type = item.media_type
+            policy_name = self._policy_name_for_asset(media_type, item.title)
+            (
+                case_summary,
+                expected_destination,
+                file_evidence,
+                application_evidence,
+                relationship_evidence,
+                known_paths,
+            ) = await self._build_asset_evidence(
+                title=item.title,
+                media_type=media_type,
+                target_type=item.target_type,
+                target_id=item.target_id,
+                policy_name=policy_name,
+                download_location=(matched_download.path if matched_download is not None else None),
+                library_location=(matched_download.library_path if matched_download is not None else None),
+                torrent_state=(matched_download.torrent_state if matched_download is not None else None),
+                summary=item.summary,
+                reason=(item.reasons[0] if item.reasons else item.summary),
+                recommendation=item.explanation or item.summary,
+                estimated_recovery_bytes=item.estimated_recovery_bytes,
+                graph_references=item.graph_references,
+            )
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
                     id=item.id,
@@ -2066,9 +2668,23 @@ class OperationsService:
                     reason=(item.reasons[0] if item.reasons else item.summary),
                     after_action="Operation result is audited and lifecycle advances when checks pass.",
                     graph_references=item.graph_references,
-                    policy_name=self._policy_name_for_asset(media_type, item.title),
+                    policy_name=policy_name,
                     filters=self._filters_for_recommendation(item),
-                    action_manifest=item.action_manifest,
+                    action_manifest=self._build_action_manifest(
+                        primary_action=item.action,
+                        target_type=item.target_type,
+                        media_type=media_type,
+                        summary=item.summary,
+                        expected_destination=expected_destination,
+                        known_paths=known_paths,
+                        estimated_recovery_bytes=item.estimated_recovery_bytes,
+                        references=item.graph_references,
+                    ),
+                    case_summary=case_summary,
+                    expected_destination=expected_destination,
+                    file_evidence=file_evidence,
+                    application_evidence=application_evidence,
+                    relationship_evidence=relationship_evidence,
                 )
             )
 
@@ -2077,6 +2693,29 @@ class OperationsService:
                 "import"
                 if issue.issue_type in {"missing_request", "failed_import"}
                 else "organize"
+            )
+            policy_name = self._policy_name_for_asset(issue.media_type, issue.title)
+            (
+                case_summary,
+                expected_destination,
+                file_evidence,
+                application_evidence,
+                relationship_evidence,
+                known_paths,
+            ) = await self._build_asset_evidence(
+                title=issue.title,
+                media_type=issue.media_type,
+                target_type=issue.media_type.value,
+                target_id=str(issue.media_id),
+                policy_name=policy_name,
+                download_location=None,
+                library_location=None,
+                torrent_state=None,
+                summary=issue.issue_type,
+                reason=issue.reason,
+                recommendation=issue.recommendation,
+                estimated_recovery_bytes=0,
+                graph_references=issue.graph_references,
             )
             stage_assets[issue_stage].append(
                 OperationsWorkflowAsset(
@@ -2109,13 +2748,23 @@ class OperationsService:
                     reason=issue.reason,
                     after_action="Issue resolution updates graph health and removes the blocker.",
                     graph_references=issue.graph_references,
-                    policy_name=self._policy_name_for_asset(issue.media_type, issue.title),
+                    policy_name=policy_name,
                     filters=self._filters_for_issue(issue),
                     action_manifest=self._build_action_manifest(
                         primary_action=issue.suggested_remediation,
                         target_type=issue.media_type.value,
                         media_type=issue.media_type,
+                        summary=issue.reason,
+                        expected_destination=expected_destination,
+                        known_paths=known_paths,
+                        estimated_recovery_bytes=0,
+                        references=issue.graph_references,
                     ),
+                    case_summary=case_summary,
+                    expected_destination=expected_destination,
+                    file_evidence=file_evidence,
+                    application_evidence=application_evidence,
+                    relationship_evidence=relationship_evidence,
                 )
             )
 

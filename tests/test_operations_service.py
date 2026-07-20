@@ -157,6 +157,7 @@ async def test_operations_recommendations_resolve_posters() -> None:
     assert manifests["With Poster"]
     assert any(action.category for action in manifests["With Poster"])
     assert any(action.risk for action in manifests["With Poster"])
+    assert any(action.impact_preview for action in manifests["With Poster"])
 
 
 @pytest.mark.anyio
@@ -241,6 +242,9 @@ async def test_operations_workspace_includes_issue_health_and_confidence_section
     stage_assets = [asset for stage in workspace.workflow.stages for asset in stage.assets]
     if stage_assets:
         assert stage_assets[0].action_manifest.available_actions
+        assert stage_assets[0].file_evidence is not None
+        assert stage_assets[0].application_evidence is not None
+        assert stage_assets[0].relationship_evidence is not None
 
 
 @pytest.mark.anyio

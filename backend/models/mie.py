@@ -27,6 +27,7 @@ class OperationActionManifestAction(BaseModel):
     risk: ActionManifestRisk
     confirmation: bool = False
     description: str | None = None
+    impact_preview: list[str] = Field(default_factory=list)
     automation: Literal["manual", "automated", "hybrid"] = "automated"
     kind: Literal[
         "filesystem",
@@ -41,6 +42,33 @@ class OperationActionManifestAction(BaseModel):
 
 class OperationActionManifest(BaseModel):
     available_actions: list[OperationActionManifestAction] = Field(default_factory=list)
+
+
+class OperationsFileEvidence(BaseModel):
+    key: str
+    label: str
+    path: str | None = None
+    source: str | None = None
+    state: Literal["available", "missing", "partial", "duplicate", "unavailable"] = (
+        "unavailable"
+    )
+    explanation: str | None = None
+
+
+class OperationsApplicationEvidence(BaseModel):
+    role: str
+    application: str
+    status: Literal["linked", "unavailable"] = "unavailable"
+    reference: str | None = None
+    explanation: str
+
+
+class OperationsRelationshipEvidence(BaseModel):
+    key: str
+    label: str
+    value: str | None = None
+    status: Literal["linked", "unavailable"] = "unavailable"
+    explanation: str
 
 
 class OperationsCard(BaseModel):
@@ -425,6 +453,11 @@ class OperationsWorkflowAsset(BaseModel):
     policy_name: str | None = None
     filters: list[str] = Field(default_factory=list)
     action_manifest: OperationActionManifest = Field(default_factory=OperationActionManifest)
+    case_summary: str | None = None
+    expected_destination: str | None = None
+    file_evidence: list[OperationsFileEvidence] = Field(default_factory=list)
+    application_evidence: list[OperationsApplicationEvidence] = Field(default_factory=list)
+    relationship_evidence: list[OperationsRelationshipEvidence] = Field(default_factory=list)
 
 
 class OperationsWorkflowStage(BaseModel):

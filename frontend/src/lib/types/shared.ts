@@ -165,6 +165,7 @@ export interface OperationActionManifestAction {
   risk: ActionManifestRisk;
   confirmation: boolean;
   description: string | null;
+  impact_preview: string[];
   automation: "manual" | "automated" | "hybrid";
   kind:
     | "filesystem"
@@ -178,6 +179,31 @@ export interface OperationActionManifestAction {
 
 export interface OperationActionManifest {
   available_actions: OperationActionManifestAction[];
+}
+
+export interface OperationsFileEvidence {
+  key: string;
+  label: string;
+  path: string | null;
+  source: string | null;
+  state: "available" | "missing" | "partial" | "duplicate" | "unavailable";
+  explanation: string | null;
+}
+
+export interface OperationsApplicationEvidence {
+  role: string;
+  application: string;
+  status: "linked" | "unavailable";
+  reference: string | null;
+  explanation: string;
+}
+
+export interface OperationsRelationshipEvidence {
+  key: string;
+  label: string;
+  value: string | null;
+  status: "linked" | "unavailable";
+  explanation: string;
 }
 
 export type OperationsIssueSeverity = "critical" | "high" | "medium" | "low";
@@ -518,6 +544,11 @@ export interface OperationsWorkflowAsset {
   policy_name: string | null;
   filters: string[];
   action_manifest: OperationActionManifest;
+  case_summary: string | null;
+  expected_destination: string | null;
+  file_evidence: OperationsFileEvidence[];
+  application_evidence: OperationsApplicationEvidence[];
+  relationship_evidence: OperationsRelationshipEvidence[];
 }
 
 export interface OperationsWorkflowStage {

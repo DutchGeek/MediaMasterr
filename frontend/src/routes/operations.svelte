@@ -11,7 +11,6 @@
     OperationActionManifestAction,
     OperationAuditListResponse,
     OperationExecutionHistoryListResponse,
-    OperationExecutionItemProgress,
     OperationExecutionSessionResponse,
     OperationWorkflowResponse,
     OperationsWorkflowAsset,
@@ -24,7 +23,6 @@
     confidenceLabel,
     filterAndSortAssets,
     formatDuration,
-    inferCategory,
     riskLabel,
     stageStats,
     stageTitle,
@@ -46,7 +44,7 @@
   type CockpitTab =
     | "overview"
     | "status"
-    | "locations"
+    | "files"
     | "applications"
     | "relationships"
     | "timeline"
@@ -88,7 +86,7 @@
   const cockpitTabs: Array<{ key: CockpitTab; label: string }> = [
     { key: "overview", label: "Overview" },
     { key: "status", label: "Status" },
-    { key: "locations", label: "Locations" },
+    { key: "files", label: "Files" },
     { key: "applications", label: "Applications" },
     { key: "relationships", label: "Relationships" },
     { key: "timeline", label: "Timeline" },
@@ -314,8 +312,8 @@
 
   const selectedManifestActions = $derived.by(() => {
     return (
-      selectedRecommendation?.action_manifest?.available_actions ??
       selectedAsset?.action_manifest?.available_actions ??
+      selectedRecommendation?.action_manifest?.available_actions ??
       []
     ) as OperationActionManifestAction[];
   });
@@ -363,13 +361,34 @@
   });
 
   const selectedLocations = $derived.by(() => {
-    if (!selectedAsset) return [];
-    return [
-      { key: "downloads", label: "Downloads", path: selectedAsset.download_location },
-      { key: "library", label: "Library", path: selectedAsset.library_location },
-      { key: "temporary", label: "Temporary", path: "/app/transcode/" },
-      { key: "cache", label: "Cache", path: "/metadata/" },
-    ];
+    return selectedAsset?.file_evidence ?? [];
+  });
+
+  const selectedApplications = $derived.by(() => {
+    return selectedAsset?.application_evidence ?? [];
+  });
+
+  const selectedRelationships = $derived.by(() => {
+    return selectedAsset?.relationship_evidence ?? [];
+  });
+
+  const fileComparisonSummary = $derived.by(() => {
+    if (!selectedAsset || selectedLocations.length === 0) {
+      return "No filesystem evidence is currently available for comparison.";
+    }
+    const expected = selectedAsset.expected_destination;
+    const known = selectedLocations.filter((row) => !!row.path).map((row) => row.path);
+    if (!expected) {
+      return "Expected destination is unavailable because no managed destination is currently linked.";
+    }
+    if (known.length === 0) {
+      return "Expected destination is known, but no indexed copies are currently linked.";
+    }
+    const mismatches = known.filter((path) => path !== expected);
+    if (mismatches.length === 0) {
+      return "All known copies match the expected destination.";
+    }
+    return `${mismatches.length} known path${mismatches.length === 1 ? " differs" : "s differ"} from the expected destination.`;
   });
 
   function normalizeActionId(action: string) {
@@ -905,18 +924,6 @@
     return `${asset.title} poster`;
   }
 
-  function executionStageClass(status: string) {
-    if (status === "completed") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
-    if (status === "running") return "border-primary/50 bg-primary/10 text-primary";
-    if (status === "failed") return "border-destructive/40 bg-destructive/10 text-destructive";
-    if (status === "skipped") return "border-border/60 bg-secondary/30 text-muted-foreground";
-    return "border-border/60 bg-background/60 text-muted-foreground";
-  }
-
-  function itemExecution(assetId: string): OperationExecutionItemProgress | null {
-    return executionItemsByRecommendation.get(assetId) ?? null;
-  }
-
   $effect(() => {
     savePrefs();
   });
@@ -1218,7 +1225,6 @@
             <div class={displayMode === "list" ? "space-y-3" : "grid gap-3 md:grid-cols-2 2xl:grid-cols-3"}>
               {#each displayedAssets as asset, index (`${asset.id}:${asset.current_stage ?? ""}:${index}`)}
                 {@const hasPoster = !!asset.poster_url}
-                {@const executionItem = itemExecution(asset.id)}
                 <article
                   animate:flip={{ duration: 220 }}
                   class={`rounded-2xl border bg-card/60 p-3 transition ${selectedAssetId === asset.id ? "border-primary shadow-lg shadow-primary/10" : "border-border/70 hover:bg-card"}`}
@@ -1275,27 +1281,16 @@
                       <div class="flex flex-wrap items-start justify-between gap-2">
                         <div>
                           <h3 class="line-clamp-2 text-base font-semibold text-foreground">{asset.title}</h3>
-                          <p class="text-xs text-muted-foreground">
-                            {asset.year ?? "Year n/a"} • {asset.media_type ?? inferCategory(asset)} • {asset.current_stage}
-                          </p>
+                          <p class="text-xs text-muted-foreground">Lifecycle {asset.current_stage}</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-xs">
                           <span class="rounded-full border border-border px-2 py-0.5 text-muted-foreground">Risk {riskLabel(asset.risk_level)}</span>
-                          {#if asset.estimated_space_recovery > 0}
-                            <span class="rounded-full border border-border px-2 py-0.5 text-muted-foreground">Recoverable {formatFileSize(asset.estimated_space_recovery)}</span>
-                          {/if}
                         </div>
-                      </div>
-
-                      <div class="rounded-lg bg-background/70 p-2">
-                        <p class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Current Status</p>
-                        <p class="mt-1 text-sm text-foreground">{asset.current_status}</p>
                       </div>
 
                       <div class="rounded-lg bg-background/70 p-2">
                         <p class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Recommendation</p>
                         <p class="mt-1 text-sm font-semibold text-foreground">{asset.next_action.replaceAll("_", " ")}</p>
-                        <p class="mt-1 text-xs text-muted-foreground">{asset.recommendation}</p>
                       </div>
 
                       <div>
@@ -1307,45 +1302,6 @@
                           <div class={`h-full ${confidenceBarClass(asset.confidence)}`} style={`width:${asset.confidence ?? 0}%`}></div>
                         </div>
                       </div>
-
-                      {#if executionItem}
-                        <div class="rounded-lg border border-border/60 bg-background/40 p-2">
-                          <p class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Execution Pipeline</p>
-                          <div class="mt-2 flex flex-wrap gap-1.5">
-                            {#each executionItem.stages as stage}
-                              <span class={`rounded-full border px-2 py-1 text-[11px] ${executionStageClass(stage.status)}`}>
-                                {stage.status === "completed" ? "✓" : stage.status === "running" ? "Running" : stage.status === "failed" ? "Failed" : stage.status === "skipped" ? "Skipped" : "Waiting"}
-                                {stage.label}
-                              </span>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
-
-                      <details class="rounded-lg border border-border/60 bg-background/40 p-2 text-xs text-muted-foreground">
-                        <summary class="cursor-pointer font-medium text-foreground">Why?</summary>
-                        <ul class="mt-2 space-y-1">
-                          <li>✓ {asset.reason}</li>
-                          {#if asset.library_location}<li>✓ Library path verified</li>{/if}
-                          {#if asset.torrent_state}<li>✓ Torrent state {asset.torrent_state}</li>{/if}
-                          {#if asset.import_state}<li>✓ Import state {asset.import_state}</li>{/if}
-                          {#if asset.retention_policy}<li>✓ Retention policy {asset.retention_policy}</li>{/if}
-                        </ul>
-                      </details>
-
-                      <details class="rounded-lg border border-border/60 bg-background/40 p-2 text-xs text-muted-foreground">
-                        <summary class="cursor-pointer font-medium text-foreground">Technical Details</summary>
-                        <div class="mt-2 space-y-1">
-                          {#if asset.download_location}<p>Download: {asset.download_location}</p>{/if}
-                          {#if asset.library_location}<p>Library: {asset.library_location}</p>{/if}
-                          {#if asset.policy_name}<p>Policy: {asset.policy_name}</p>{/if}
-                          {#if asset.graph_references.length > 0}
-                            <p>Graph refs: {asset.graph_references.join(" • ")}</p>
-                          {:else}
-                            <p>Additional provider information unavailable.</p>
-                          {/if}
-                        </div>
-                      </details>
                     </div>
                   </button>
                 </article>
@@ -1394,6 +1350,11 @@
                       Artwork unavailable
                     </div>
                   {/if}
+                  <div class="rounded-lg border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground">
+                    <p class="text-[11px] uppercase tracking-[0.14em]">Operational Case Summary</p>
+                    <p class="mt-2 text-sm text-foreground">{selectedAsset.case_summary ?? selectedAsset.reason}</p>
+                    <p class="mt-2">Expected destination: {selectedAsset.expected_destination ?? "Unavailable"}</p>
+                  </div>
                   <div class="grid grid-cols-2 gap-2 text-xs">
                     <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Title</p><p class="font-medium text-foreground">{selectedAsset.title}</p></div>
                     <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Year</p><p class="font-medium text-foreground">{selectedAsset.year ?? "Unknown"}</p></div>
@@ -1412,7 +1373,7 @@
                   {#each [
                     ["Download", selectedAsset.torrent_state || "Unavailable"],
                     ["Import", selectedAsset.import_state || "Unavailable"],
-                    ["Filesystem", selectedAsset.library_location ? "Healthy" : "Pending"],
+                    ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"],
                     ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"],
                     ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"],
                     ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"],
@@ -1428,15 +1389,17 @@
                 </div>
               {/if}
 
-              {#if cockpitTab === "locations"}
+              {#if cockpitTab === "files"}
                 <div class="space-y-2 text-xs">
                   {#each selectedLocations as row}
                     <div class="rounded-lg border border-border/60 bg-background/60 p-2">
                       <div class="flex items-center justify-between gap-2">
                         <p class="font-medium text-foreground">{row.label}</p>
-                        <span class="text-muted-foreground">{row.path ? "Exists" : "Unavailable"}</span>
+                        <span class="text-muted-foreground">{row.state}</span>
                       </div>
-                      <p class="mt-1 break-all text-muted-foreground">{row.path ?? "Unknown"}</p>
+                      <p class="mt-1 break-all text-muted-foreground">{row.path ?? "Unavailable"}</p>
+                      <p class="mt-1 text-muted-foreground">{row.explanation ?? "No additional filesystem explanation is available."}</p>
+                      <p class="mt-1 text-muted-foreground">Source: {row.source ?? "Unavailable"}</p>
                       <div class="mt-2 flex flex-wrap gap-1">
                         <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Open Folder</button>
                         <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Browse</button>
@@ -1445,17 +1408,23 @@
                       </div>
                     </div>
                   {/each}
-                  <button type="button" class="w-full rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left" onclick={() => copyPath(`${selectedAsset.download_location ?? "n/a"} <> ${selectedAsset.library_location ?? "n/a"}`)}>Compare Locations</button>
+                  <div class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left text-muted-foreground">
+                    <p class="font-medium text-foreground">Compare Files</p>
+                    <p class="mt-1">{fileComparisonSummary}</p>
+                  </div>
                 </div>
               {/if}
 
               {#if cockpitTab === "applications"}
                 <div class="space-y-2 text-xs">
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Requested By</p><p class="font-medium text-foreground">{selectedAsset.media_type === "movie" ? "Radarr" : selectedAsset.media_type === "series" ? "Sonarr" : "Unavailable"}</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Managed By</p><p class="font-medium text-foreground">Plex</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Download Client</p><p class="font-medium text-foreground">{selectedAsset.torrent_state ? "qBittorrent" : "Unavailable"}</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Indexer</p><p class="font-medium text-foreground">Unavailable</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Collection</p><p class="font-medium text-foreground">{selectedAsset.policy_name ?? "Unknown"}</p></div>
+                  {#each selectedApplications as row}
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <p class="text-muted-foreground">{row.role}</p>
+                      <p class="font-medium text-foreground">{row.application}</p>
+                      <p class="mt-1 text-muted-foreground">{row.status === "linked" ? row.reference ?? "Linked" : "Unavailable"}</p>
+                      <p class="mt-1 text-muted-foreground">{row.explanation}</p>
+                    </div>
+                  {/each}
                   <div class="flex flex-wrap gap-1">
                     {#each selectedManifestActions.filter((row) => row.category === "external") as action}
                       <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{action.label}</button>
@@ -1466,12 +1435,13 @@
 
               {#if cockpitTab === "relationships"}
                 <div class="space-y-2 text-xs">
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">IMDb</p><p class="font-medium text-foreground">Unavailable</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">TMDB</p><p class="font-medium text-foreground">Unavailable</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">TVDB</p><p class="font-medium text-foreground">Unavailable</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Trakt</p><p class="font-medium text-foreground">Unavailable</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Plex GUID</p><p class="font-medium text-foreground">{selectedAsset.target_id ?? "Unavailable"}</p></div>
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Graph References</p><p class="font-medium text-foreground">{selectedAsset.graph_references.join(" • ") || "Unavailable"}</p></div>
+                  {#each selectedRelationships as row}
+                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <p class="text-muted-foreground">{row.label}</p>
+                      <p class="font-medium text-foreground">{row.value ?? "Unavailable"}</p>
+                      <p class="mt-1 text-muted-foreground">{row.explanation}</p>
+                    </div>
+                  {/each}
                 </div>
               {/if}
 
@@ -1483,10 +1453,11 @@
                         <p class="font-medium text-foreground">{event.title}</p>
                         <p class="text-muted-foreground">{new Date(event.happened_at).toLocaleString()} • {event.origin}</p>
                         <p class="mt-1 text-muted-foreground">{event.summary}</p>
+                        <p class="mt-1 text-muted-foreground">This event explains how the asset reached its current operational state.</p>
                       </div>
                     {/each}
                   {:else}
-                    <p class="text-muted-foreground">No timeline events available for this asset.</p>
+                    <p class="text-muted-foreground">Timeline is unavailable because no lifecycle events are currently linked for this asset.</p>
                   {/if}
                 </div>
               {/if}
@@ -1510,6 +1481,18 @@
                               <div class="mt-2 flex items-center justify-between gap-2">
                                 <p class="text-muted-foreground">{action.kind} • {action.automation}</p>
                                 <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{inspectorActionBusy ? "Running..." : "Run"}</button>
+                              </div>
+                              <div class="mt-2 rounded-md border border-border/40 bg-background/60 p-2 text-muted-foreground">
+                                <p class="font-medium text-foreground">Impact Preview</p>
+                                {#if action.impact_preview.length > 0}
+                                  <ul class="mt-1 space-y-1">
+                                    {#each action.impact_preview as detail}
+                                      <li>{detail}</li>
+                                    {/each}
+                                  </ul>
+                                {:else}
+                                  <p class="mt-1">Impact preview unavailable because no supporting evidence is currently linked.</p>
+                                {/if}
                               </div>
                             </div>
                           {/each}
