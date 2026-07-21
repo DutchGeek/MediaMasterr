@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from stat import filemode
+from time import perf_counter
 from typing import Any, Literal, cast
 
 from sqlalchemy import Integer, and_, func, or_, select
@@ -61,6 +62,8 @@ from backend.models.mie import (
     OperationsNarrative,
     OperationsNarrativeLocation,
     OperationsOverviewResponse,
+    OperationsPerformanceStage,
+    OperationsPerformanceSummary,
     OperationsRecommendation,
     OperationsRecommendationsResponse,
     OperationsRelationshipEvidence,
@@ -358,6 +361,15 @@ _ACTION_DEFINITIONS: dict[str, dict[str, Any]] = {
         "kind": "operations",
         "description": "Mark the recommendation as resolved after manual verification.",
     },
+    "verify_library": {
+        "label": "Verify Library",
+        "category": "maintenance",
+        "risk": "safe",
+        "confirmation": False,
+        "automation": "manual",
+        "kind": "operations",
+        "description": "Confirm media availability and playback health in the library.",
+    },
     "archive": {
         "label": "Archive",
         "category": "maintenance",
@@ -488,6 +500,19 @@ class OperationsService:
         self._operations_engine = OperationsEngine()
         self._graph_intelligence_cache: tuple[list[Any], Any] | None = None
         self._downloads_intelligence_cache: Any | None = None
+        self._perf_samples: dict[str, float] = {}
+
+    @staticmethod
+    def _perf_now() -> float:
+        return perf_counter()
+
+    def _perf_add(self, key: str, delta_seconds: float) -> None:
+        self._perf_samples[key] = self._perf_samples.get(key, 0.0) + max(
+            0.0, float(delta_seconds)
+        )
+
+    def _perf_block(self, key: str, started_at: float) -> None:
+        self._perf_add(key, self._perf_now() - started_at)
 
     @staticmethod
     def _coerce_card_severity(value: str) -> Literal["info", "low", "medium", "high"]:
@@ -563,6 +588,13 @@ class OperationsService:
             graphs.append(graph)
         return graphs
 
+    async def _resolve_artwork(self, **kwargs: Any) -> Any:
+        started_at = self._perf_now()
+        try:
+            return await media_asset_artwork_resolver.resolve(self.db, **kwargs)
+        finally:
+            self._perf_block("artwork_loading", started_at)
+
     async def _graph_issue_recommendations(
         self,
         issues: list[Any],
@@ -584,8 +616,7 @@ class OperationsService:
         }
 
         for issue in issues:
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.graph_issue",
                 media_type=issue.media_type,
                 media_id=issue.media_id,
@@ -637,8 +668,10 @@ class OperationsService:
             return self._request_context.graph_intelligence
         if self._graph_intelligence_cache is not None:
             return self._graph_intelligence_cache
+        started_at = self._perf_now()
         graphs = await self._load_correlation_graphs()
         intelligence = self._operations_engine.run(graphs)
+        self._perf_block("identity_graph", started_at)
         self._graph_intelligence_cache = (graphs, intelligence)
         if self._request_context is not None:
             self._request_context.graph_intelligence = self._graph_intelligence_cache
@@ -652,10 +685,12 @@ class OperationsService:
             return self._request_context.downloads_intelligence
         if self._downloads_intelligence_cache is not None:
             return self._downloads_intelligence_cache
+        started_at = self._perf_now()
         self._downloads_intelligence_cache = await DownloadsIntelligenceService(
             self.db,
             request_context=self._request_context,
         ).run()
+        self._perf_block("torrent_intelligence", started_at)
         return self._downloads_intelligence_cache
 
     async def _detached_media_recommendations(
@@ -675,8 +710,7 @@ class OperationsService:
             if graph.file_intelligence.total_size_bytes <= 0:
                 continue
 
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.detached_media",
                 media_type=graph.media_type,
                 media_id=graph.media_id,
@@ -728,8 +762,7 @@ class OperationsService:
             if graph.file_intelligence.missing_files > 0:
                 continue
 
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.ready_to_detach_graph",
                 media_type=graph.media_type,
                 media_id=graph.media_id,
@@ -1222,8 +1255,7 @@ class OperationsService:
             )
             if not reasons and item.summary:
                 reasons = [item.summary]
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.cleanup_plan",
                 media_type=(
                     MediaType.MOVIE
@@ -1292,8 +1324,7 @@ class OperationsService:
                 else ["Rule engine matched candidate."]
             )
             media_id = candidate.movie_id or candidate.series_id
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.reclaim_candidate",
                 media_type=(
                     MediaType.MOVIE
@@ -1353,8 +1384,7 @@ class OperationsService:
             )
         ).all()
         for movie_id, movie_title, version_count in duplicate_rows:
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.duplicate_release",
                 media_type=MediaType.MOVIE,
                 media_id=int(movie_id),
@@ -1399,8 +1429,7 @@ class OperationsService:
             ratio = float(raw.get("ratio") or 0)
 
             if artwork.media_id is None:
-                orphan_artwork = await media_asset_artwork_resolver.resolve(
-                    self.db,
+                orphan_artwork = await self._resolve_artwork(
                     context="operations.recommendations.orphaned_torrent",
                     media_type=None,
                     media_id=None,
@@ -1431,8 +1460,7 @@ class OperationsService:
                 continue
 
             if self._is_completed(progress) and ratio >= 1:
-                resolved_artwork = await media_asset_artwork_resolver.resolve(
-                    self.db,
+                resolved_artwork = await self._resolve_artwork(
                     context="operations.recommendations.detach_torrent",
                     media_type=artwork.media_type,
                     media_id=artwork.media_id,
@@ -1521,8 +1549,7 @@ class OperationsService:
                 if asset.artwork_status == "INVALID"
                 else "artwork_stale"
             )
-            resolved_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            resolved_artwork = await self._resolve_artwork(
                 context="operations.recommendations.artwork_issue",
                 media_type=media_type,
                 media_id=media_id,
@@ -1557,8 +1584,7 @@ class OperationsService:
             )
 
         if not items:
-            healthy_artwork = await media_asset_artwork_resolver.resolve(
-                self.db,
+            healthy_artwork = await self._resolve_artwork(
                 context="operations.recommendations.healthy",
                 media_type=None,
                 media_id=None,
@@ -1939,11 +1965,19 @@ class OperationsService:
         workflow_outcome: Literal["blocked", "in_progress", "completed"],
     ) -> Literal["required", "recommended", "secondary"]:
         normalized = OperationsService._normalize_action_id(action_id)
+        completed_recommended = {
+            "delete_torrent",
+            "delete_torrent_and_files",
+            "refresh_plex",
+            "verify_library",
+        }
         if normalized.startswith("open_") or normalized in _SECONDARY_ACTION_IDS:
             return "secondary"
         if is_primary and primary_is_required:
             return "required"
         if is_primary and workflow_outcome == "completed":
+            return "recommended"
+        if workflow_outcome == "completed" and normalized in completed_recommended:
             return "recommended"
         return "secondary"
 
@@ -2064,8 +2098,10 @@ class OperationsService:
         if workflow_outcome == "blocked":
             return f"Workflow blocked. Required action: {primary_label}."
         if workflow_outcome == "completed":
-            return f"Workflow completed successfully. Recommended action: {primary_label}."
-        return f"Workflow in progress. Next action: {primary_label}."
+            return (
+                f"Workflow completed successfully. Recommended action: {primary_label}."
+            )
+        return f"Workflow progressing normally. Next: {primary_label}."
 
     @staticmethod
     def _format_duration_hours(hours: int | None) -> str | None:
@@ -2171,6 +2207,7 @@ class OperationsService:
         file_evidence: list[OperationsFileEvidence],
         action_manifest: OperationActionManifest,
     ) -> OperationsNarrative:
+        started_at = self._perf_now()
         primary_action = next(
             (
                 action
@@ -2221,16 +2258,14 @@ class OperationsService:
                 "The files are waiting to be moved into the managed library location."
             )
             if import_state:
-                why.append(
-                    "Import is still being coordinated automatically in the background."
-                )
+                why.append("Import is running automatically.")
             impact.append(
                 "The media may not appear in Plex until the import completes."
             )
             next_steps.extend(
                 [
                     "No action required.",
-                    "Import will begin automatically when the library workflow is ready.",
+                    "Waiting for import.",
                 ]
             )
             outcome = "healthy"
@@ -2252,7 +2287,7 @@ class OperationsService:
             next_steps.extend(
                 [
                     "No action required.",
-                    "Cleanup will become available automatically when the retention rule completes.",
+                    "Waiting for retention to complete.",
                 ]
             )
             outcome = "healthy"
@@ -2279,16 +2314,14 @@ class OperationsService:
             next_steps.append(primary_label)
             outcome = "healthy_with_recommendations"
         else:
-            why.append("The workflow is continuing automatically.")
+            why.append("Workflow progressing normally.")
             if torrent_state:
-                why.append(
-                    "Download activity is still in progress before the library workflow can move to the next step."
-                )
-            impact.append("No immediate user action is required.")
+                why.append("Download activity is still active.")
+            impact.append("No action required.")
             next_steps.append("No action required.")
             outcome = "healthy"
 
-        return OperationsNarrative(
+        narrative = OperationsNarrative(
             outcome=cast(Any, outcome),
             what=self._what_for_narrative(
                 media_type=media_type,
@@ -2305,6 +2338,8 @@ class OperationsService:
             impact=impact,
             next=next_steps,
         )
+        self._perf_block("narrative_generation", started_at)
+        return narrative
 
     @staticmethod
     def _manifest_entry(
@@ -2368,13 +2403,38 @@ class OperationsService:
 
         normalized = self._normalize_action_id(action_id)
         applications: list[str] = []
-        reversible = True
         if normalized in {"delete_torrent", "delete_torrent_and_files", "archive"}:
-            preview.append("Reversibility: limited or manual rollback only.")
-            preview.append(
-                "Confirmation requirements: explicit confirmation is required."
-            )
-            reversible = False
+            if normalized == "delete_torrent":
+                preview.append(
+                    "Safety: safe after import and seeding completion because library media remains available."
+                )
+                preview.append(
+                    "Result: removes the torrent entry from qBittorrent while keeping imported library media."
+                )
+                preview.append(
+                    "Reversible: partially. You can re-add the torrent, but prior swarm/ratio history is not restored."
+                )
+            elif normalized == "delete_torrent_and_files":
+                preview.append(
+                    "Safety: safe only when import is verified and seeding obligations are complete."
+                )
+                preview.append(
+                    "Result: removes the torrent and original download payload to reclaim storage."
+                )
+                preview.append(
+                    "Reversible: no direct rollback. Recovery requires a new download or backup restore."
+                )
+            else:
+                preview.append(
+                    "Safety: archive is low-risk when media integrity has already been verified."
+                )
+                preview.append(
+                    "Result: moves files into archive storage according to configured policy."
+                )
+                preview.append(
+                    "Reversible: yes with manual restore from archive storage."
+                )
+            preview.append("Confirmation requirements: explicit confirmation is required.")
         elif normalized in {
             "retry_import",
             "repair_identity",
@@ -2382,6 +2442,17 @@ class OperationsService:
             "refresh_artwork",
         }:
             preview.append("Reversibility: generally safe to rerun or refresh.")
+            preview.append("Confirmation requirements: no confirmation required.")
+        elif normalized in {"refresh_plex", "verify_library"}:
+            preview.append(
+                "Safety: safe read-only or metadata-only maintenance action."
+            )
+            preview.append(
+                "Result: refreshes downstream visibility and verifies playback/library state."
+            )
+            preview.append(
+                "Reversible: yes. No destructive filesystem change is applied."
+            )
             preview.append("Confirmation requirements: no confirmation required.")
         elif normalized.startswith("open_"):
             preview.append(
@@ -2512,6 +2583,7 @@ class OperationsService:
         list[OperationsRelationshipEvidence],
         list[str],
     ]:
+        started_at = self._perf_now()
         resolved_media_type, media_id = await self._resolve_asset_media_identity(
             media_type=media_type,
             target_type=target_type,
@@ -2549,6 +2621,8 @@ class OperationsService:
         known_paths: list[tuple[str | None, str, str | None, str]] = []
         applications: list[OperationsApplicationEvidence] = []
         relationships: list[OperationsRelationshipEvidence] = []
+        movie: Movie | None = None
+        series: Series | None = None
 
         if resolved_media_type is MediaType.MOVIE and media_id is not None:
             movie = (
@@ -3364,9 +3438,6 @@ class OperationsService:
         file_count = len([row for row in unique_file_rows if row.path])
         metadata_summary_parts: list[str] = []
         if resolved_media_type is MediaType.MOVIE:
-            movie = (
-                await self.db.execute(select(Movie).where(Movie.id == media_id))
-            ).scalar_one_or_none()
             if movie is not None:
                 metadata_summary_parts.append(
                     "IMDb" if movie.imdb_id else "IMDb unavailable"
@@ -3376,9 +3447,6 @@ class OperationsService:
                 )
                 metadata_summary_parts.append("TVDB unavailable")
         elif resolved_media_type is MediaType.SERIES:
-            series = (
-                await self.db.execute(select(Series).where(Series.id == media_id))
-            ).scalar_one_or_none()
             if series is not None:
                 metadata_summary_parts.append(
                     "IMDb" if series.imdb_id else "IMDb unavailable"
@@ -3570,7 +3638,7 @@ class OperationsService:
         )
 
         case_summary = f"{reason} Next step: {recommendation}."
-        return (
+        evidence = (
             case_summary,
             expected_destination_path,
             filesystem_comparison_summary,
@@ -3579,6 +3647,8 @@ class OperationsService:
             relationships,
             [row.path for row in unique_file_rows if row.path],
         )
+        self._perf_block("filesystem_analysis", started_at)
+        return evidence
 
     def _build_action_manifest(
         self,
@@ -3634,6 +3704,16 @@ class OperationsService:
         actions.extend(
             ["ignore_recommendation", "manual_review", "mark_resolved", "archive"]
         )
+
+        if workflow_outcome == "completed":
+            actions.extend(
+                [
+                    "delete_torrent",
+                    "delete_torrent_and_files",
+                    "refresh_plex",
+                    "verify_library",
+                ]
+            )
 
         deduped: list[str] = []
         seen: set[str] = set()
@@ -4481,6 +4561,8 @@ class OperationsService:
         decision_filter_ids: list[int] | None = None,
         smart_filter_ids: list[int] | None = None,
     ) -> OperationsWorkspaceResponse:
+        self._perf_samples = {}
+        backend_started_at = self._perf_now()
         overview = await self.overview()
         recommendations = await self.recommendations()
         filesystem = await self.filesystem_config()
@@ -4579,6 +4661,17 @@ class OperationsService:
                 reclaim_candidate_targets=reclaim_candidate_targets,
             )
 
+        backend_api_ms = int(round((self._perf_now() - backend_started_at) * 1000))
+        stage_rows: list[OperationsPerformanceStage] = [
+            OperationsPerformanceStage(
+                stage=key,
+                duration_ms=int(round(seconds * 1000)),
+            )
+            for key, seconds in sorted(
+                self._perf_samples.items(), key=lambda row: row[0]
+            )
+        ]
+
         return OperationsWorkspaceResponse(
             overview=overview,
             recommendations=recommendations,
@@ -4609,6 +4702,27 @@ class OperationsService:
             confidence=OperationsConfidenceSummary(
                 score=intelligence.confidence.score,
                 factors=intelligence.confidence.factors,
+            ),
+            performance=OperationsPerformanceSummary(
+                backend_api_ms=backend_api_ms,
+                filesystem_analysis_ms=int(
+                    round(self._perf_samples.get("filesystem_analysis", 0.0) * 1000)
+                ),
+                artwork_loading_ms=int(
+                    round(self._perf_samples.get("artwork_loading", 0.0) * 1000)
+                ),
+                identity_graph_ms=int(
+                    round(self._perf_samples.get("identity_graph", 0.0) * 1000)
+                ),
+                torrent_intelligence_ms=int(
+                    round(self._perf_samples.get("torrent_intelligence", 0.0) * 1000)
+                ),
+                narrative_generation_ms=int(
+                    round(
+                        self._perf_samples.get("narrative_generation", 0.0) * 1000
+                    )
+                ),
+                stages=stage_rows,
             ),
             downloads_health=downloads.summary,
             downloads=downloads.items,

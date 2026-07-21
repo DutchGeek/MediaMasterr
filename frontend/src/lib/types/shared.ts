@@ -325,6 +325,21 @@ export interface OperationsConfidenceSummary {
   factors: string[];
 }
 
+export interface OperationsPerformanceStage {
+  stage: string;
+  duration_ms: number;
+}
+
+export interface OperationsPerformanceSummary {
+  backend_api_ms: number;
+  filesystem_analysis_ms: number;
+  artwork_loading_ms: number;
+  identity_graph_ms: number;
+  torrent_intelligence_ms: number;
+  narrative_generation_ms: number;
+  stages: OperationsPerformanceStage[];
+}
+
 export type DownloadLifecycleState =
   | "metadata_download"
   | "queued"
@@ -644,6 +659,7 @@ export interface MieOperationsResponse {
   graph_summary: OperationsGraphSummary;
   timeline_summary: OperationsTimelineSummary;
   confidence: OperationsConfidenceSummary;
+  performance: OperationsPerformanceSummary;
   downloads_health: DownloadsHealthSummary;
   downloads: DownloadLifecycleObject[];
 }

@@ -72,6 +72,22 @@
       tooltip: null,
     },
     {
+      path: "/qbittorrent",
+      label: "qBittorrent",
+      icon: Download,
+      adminOnly: true,
+      tooltip: "View qBittorrent transfer and torrent status in read-only mode",
+    },
+    {
+      path: "/protection",
+      label: "Protection",
+      icon: Shield,
+      adminOnly: false,
+      page: PageAccess.Protected,
+      tooltip:
+        "Manage MediaMasterr Protection provider, rules, and protected items",
+    },
+    {
       path: "/operations",
       label: "Operations",
       icon: Wrench,
@@ -96,22 +112,6 @@
       page: PageAccess.Identity,
       tooltip:
         "Identity browser and comparison studio for canonical metadata control",
-    },
-    {
-      path: "/qbittorrent",
-      label: "qBittorrent",
-      icon: Download,
-      adminOnly: true,
-      tooltip: "View qBittorrent transfer and torrent status in read-only mode",
-    },
-    {
-      path: "/protection",
-      label: "Protection",
-      icon: Shield,
-      adminOnly: false,
-      page: PageAccess.Protected,
-      tooltip:
-        "Manage MediaMasterr Protection provider, rules, and protected items",
     },
     {
       path: "/settings",

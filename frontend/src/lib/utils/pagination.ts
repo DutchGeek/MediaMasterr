@@ -4,10 +4,10 @@
  * Usage:
  *   const { perPage, setPerPage, PER_PAGE_OPTIONS } = createPerPageState("my_view_per_page");
  */
-export const PER_PAGE_OPTIONS = [12, 24, 48, 96];
-const PER_PAGE_MIN = 12;
-const PER_PAGE_MAX = 96;
-const PER_PAGE_DEFAULT = 24;
+export const PER_PAGE_OPTIONS = [10, 25, 50, 100];
+const PER_PAGE_MIN = 10;
+const PER_PAGE_MAX = 100;
+const PER_PAGE_DEFAULT = 25;
 
 export const createPerPageState = (
   storageKey: string,

@@ -1,8 +1,11 @@
 <script lang="ts">
   import { flip } from "svelte/animate";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { fade, slide } from "svelte/transition";
+  import JSZip from "jszip";
+  import html2canvas from "html2canvas";
   import { get_api, post_api } from "$lib/api";
+  import { VERSION } from "$lib/version";
   import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import type {
     MediaFilterCatalogResponse,
@@ -66,7 +69,9 @@
     selectedMediaType: LocalMediaFilter;
     selectedReadiness: LocalReadinessFilter;
     showCompleted: boolean;
-    visibleAssetLimit: number;
+    pageSize: number;
+    currentPage: number;
+    visibleAssetLimit?: number;
     posterSize: number;
     displayMode: ViewMode;
   };
@@ -113,9 +118,40 @@
   let arrFilterIds = $state<number[]>([]);
   let decisionFilterIds = $state<number[]>([]);
   let smartFilterIds = $state<number[]>([]);
-  let visibleAssetLimit = $state(50);
+  let pageSize = $state(50);
+  let currentPage = $state(1);
   let posterSize = $state(170);
   let displayMode = $state<ViewMode>("grid");
+
+  let frontendRenderingMs = $state(0);
+  let imageLoadingMs = $state(0);
+  let networkLog = $state<
+    Array<{
+      method: string;
+      url: string;
+      status: number;
+      duration_ms: number;
+      started_at: string;
+    }>
+  >([]);
+  let consoleLog = $state<
+    Array<{ level: string; message: string; at: string }>
+  >([]);
+  let exporting = $state<"snapshot" | "bundle" | null>(null);
+
+  const performanceProfile = $derived.by(() => {
+    return (
+      workspace?.performance ?? {
+        backend_api_ms: 0,
+        filesystem_analysis_ms: 0,
+        artwork_loading_ms: 0,
+        identity_graph_ms: 0,
+        torrent_intelligence_ms: 0,
+        narrative_generation_ms: 0,
+        stages: [],
+      }
+    );
+  });
 
   let selectedStage = $state<WorkflowStageKey>("download");
   let selectedFilter = $state<string | null>(null);
@@ -198,8 +234,30 @@
     }) as OperationsWorkflowAsset[];
   });
 
+  const totalPages = $derived.by(() => {
+    return Math.max(
+      1,
+      Math.ceil(filteredAssets.length / Math.max(1, pageSize)),
+    );
+  });
+
+  const currentPageClamped = $derived.by(() => {
+    return Math.min(Math.max(1, currentPage), totalPages);
+  });
+
+  const pageStartIndex = $derived.by(() => {
+    return (currentPageClamped - 1) * Math.max(1, pageSize);
+  });
+
+  const pageEndIndexExclusive = $derived.by(() => {
+    return Math.min(
+      filteredAssets.length,
+      pageStartIndex + Math.max(1, pageSize),
+    );
+  });
+
   const displayedAssets = $derived.by(() => {
-    return filteredAssets.slice(0, Math.max(1, visibleAssetLimit));
+    return filteredAssets.slice(pageStartIndex, pageEndIndexExclusive);
   });
 
   const orderedFilteredIds = $derived.by(() =>
@@ -208,6 +266,22 @@
   const displayedIds = $derived.by(() =>
     displayedAssets.map((asset) => asset.id),
   );
+
+  const pageNumbers = $derived.by(() => {
+    const windowSize = 7;
+    const page = currentPageClamped;
+    const total = totalPages;
+    if (total <= windowSize) {
+      return Array.from({ length: total }, (_, index) => index + 1);
+    }
+    const start = Math.max(1, page - 3);
+    const end = Math.min(total, start + windowSize - 1);
+    const adjustedStart = Math.max(1, end - windowSize + 1);
+    return Array.from(
+      { length: end - adjustedStart + 1 },
+      (_, index) => adjustedStart + index,
+    );
+  });
 
   const selectedIdsInStage = $derived.by(() => {
     const key = activeStage?.key ?? "download";
@@ -661,6 +735,380 @@
     return asset?.narrative?.[key] ?? [];
   }
 
+  function narrativeSummary(
+    asset: OperationsWorkflowAsset | null | undefined,
+  ): string {
+    if (!asset) return "Workflow state unavailable.";
+    if (asset.current_stage === "download") return "Download in progress.";
+    if (asset.current_stage === "import") return "Waiting for import.";
+    if (asset.current_stage === "retention")
+      return "Seeding and retention active.";
+    if (asset.current_stage === "cleanup") return "Ready for cleanup.";
+    if (asset.current_stage === "completed") return "No action required.";
+    return workflowSummary(asset);
+  }
+
+  function confidenceSummary(confidence: number | null | undefined): string {
+    const bucket = confidenceLabel(confidence);
+    if (bucket === "High") {
+      return "MediaMasterr is confident this recommendation is correct.";
+    }
+    if (bucket === "Medium") {
+      return "Some evidence is incomplete. Validate before executing.";
+    }
+    return "Manual review recommended before taking action.";
+  }
+
+  function torrentOperationalState(state: string | null | undefined): {
+    label: string;
+    what: string;
+    action: string;
+  } {
+    const raw = String(state || "")
+      .trim()
+      .toLowerCase();
+    if (!raw) {
+      return {
+        label: "No Activity",
+        what: "No download or upload activity detected.",
+        action: "No immediate action required.",
+      };
+    }
+    if (raw.includes("down") || raw.includes("dl")) {
+      return {
+        label: "Downloading",
+        what: "Receiving data.",
+        action: "No action unless progress remains stalled.",
+      };
+    }
+    if (raw.includes("seed") || raw.includes("upload") || raw.includes("up")) {
+      return {
+        label: "Seeding",
+        what: "Upload requirements are still active.",
+        action: "Keep seeding until retention and ratio goals are complete.",
+      };
+    }
+    if (raw.includes("complete") || raw.includes("finished")) {
+      return {
+        label: "Waiting for Import",
+        what: "Download complete. Waiting for Sonarr or Radarr import.",
+        action: "No action required unless import remains pending.",
+      };
+    }
+    if (raw.includes("stall")) {
+      return {
+        label: "No Activity",
+        what: "No download or upload activity detected.",
+        action: "Run recheck or resume if this persists.",
+      };
+    }
+    if (raw.includes("peer")) {
+      return {
+        label: "Waiting for Peers",
+        what: "Connected but no peers are currently available.",
+        action: "No immediate action required; monitor peer availability.",
+      };
+    }
+    if (raw.includes("queue") || raw.includes("queued")) {
+      return {
+        label: "Queued",
+        what: "Queued and waiting for an active transfer slot.",
+        action: "No action unless queue never progresses.",
+      };
+    }
+    if (raw.includes("pause")) {
+      return {
+        label: "Paused",
+        what: "Transfer is paused.",
+        action: "Resume when transfer should continue.",
+      };
+    }
+    return {
+      label: "No Activity",
+      what: `State reported as ${state}.`,
+      action: "Review transfer state in qBittorrent.",
+    };
+  }
+
+  function setPage(page: number) {
+    currentPage = Math.min(Math.max(1, page), totalPages);
+  }
+
+  function networkSummary() {
+    const byStatus = new Map<number, number>();
+    let totalDuration = 0;
+    for (const row of networkLog) {
+      byStatus.set(row.status, (byStatus.get(row.status) ?? 0) + 1);
+      totalDuration += row.duration_ms;
+    }
+    const status_counts: Record<string, number> = {};
+    for (const [status, count] of byStatus.entries()) {
+      status_counts[String(status)] = count;
+    }
+    return {
+      total_requests: networkLog.length,
+      average_duration_ms:
+        networkLog.length > 0
+          ? Math.round(totalDuration / networkLog.length)
+          : 0,
+      status_counts,
+      requests: networkLog,
+    };
+  }
+
+  async function captureSnapshotPng(): Promise<Blob> {
+    const node = document.querySelector("main") ?? document.body;
+    const canvas = await html2canvas(node as HTMLElement, {
+      backgroundColor: "#0b0d10",
+      useCORS: true,
+      logging: false,
+    });
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Failed to capture snapshot image."));
+          return;
+        }
+        resolve(blob);
+      }, "image/png");
+    });
+  }
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportSnapshot() {
+    if (!workspace) return;
+    exporting = "snapshot";
+    inspectorActionMessage = "Capturing snapshot...";
+    try {
+      const snapshotImage = await captureSnapshotPng();
+      const snapshotState = {
+        schema_version: "mmr.snapshot.v1",
+        generated_at: new Date().toISOString(),
+        route: window.location.hash || window.location.pathname,
+        selected_asset: selectedAsset?.id ?? null,
+        inspector_tab: cockpitTab,
+        cockpit_state: {
+          selected_filter: selectedFilter,
+          selected_stage: selectedStage,
+          selected_media_type: selectedMediaType,
+          selected_readiness: selectedReadiness,
+        },
+        filters: {
+          search,
+          candidates_only: candidatesOnly,
+          arr_filter_ids: arrFilterIds,
+          decision_filter_ids: decisionFilterIds,
+          smart_filter_ids: smartFilterIds,
+        },
+        selected_arr_application:
+          selectedAsset?.media_type === "series"
+            ? "Sonarr"
+            : selectedAsset?.media_type === "movie"
+              ? "Radarr"
+              : null,
+        pagination: {
+          page: currentPageClamped,
+          page_size: pageSize,
+          total_pages: totalPages,
+          total_assets: filteredAssets.length,
+          display_start: filteredAssets.length === 0 ? 0 : pageStartIndex + 1,
+          display_end: pageEndIndexExclusive,
+        },
+      };
+      const zip = new JSZip();
+      zip.file("snapshot.png", snapshotImage);
+      zip.file("snapshot.json", JSON.stringify(snapshotState, null, 2));
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(
+        blob,
+        `mediamasterr-snapshot-${new Date().toISOString().replaceAll(":", "-")}.zip`,
+      );
+      inspectorActionMessage = "Snapshot exported.";
+    } catch (e: any) {
+      inspectorActionMessage = e?.message ?? "Snapshot export failed.";
+    } finally {
+      exporting = null;
+    }
+  }
+
+  async function exportSupportBundle() {
+    if (!workspace) return;
+    exporting = "bundle";
+    inspectorActionMessage = "Building support bundle...";
+    try {
+      const snapshotImage = await captureSnapshotPng();
+      const zip = new JSZip();
+      const generatedAt = new Date().toISOString();
+
+      zip.file("snapshot.png", snapshotImage);
+      zip.file(
+        "selected_asset.json",
+        JSON.stringify(selectedAsset ?? null, null, 2),
+      );
+      zip.file("workflow.json", JSON.stringify(workspace.workflow, null, 2));
+      zip.file(
+        "narrative.json",
+        JSON.stringify(selectedAsset?.narrative ?? null, null, 2),
+      );
+      zip.file(
+        "actions.json",
+        JSON.stringify(selectedAsset?.action_manifest ?? null, null, 2),
+      );
+      zip.file(
+        "evidence.json",
+        JSON.stringify(
+          {
+            file_evidence: selectedAsset?.file_evidence ?? [],
+            application_evidence: selectedAsset?.application_evidence ?? [],
+            relationship_evidence: selectedAsset?.relationship_evidence ?? [],
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "filesystem.json",
+        JSON.stringify(
+          {
+            config: workspace.filesystem,
+            comparison: selectedAsset?.filesystem_comparison_summary ?? null,
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "relationships.json",
+        JSON.stringify(selectedAsset?.relationship_evidence ?? [], null, 2),
+      );
+      zip.file(
+        "timeline.json",
+        JSON.stringify(
+          {
+            selected_asset_timeline: selectedTimeline,
+            workflow_timeline: workspace.timeline_summary,
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "browser-console.log",
+        consoleLog
+          .map((row) => `[${row.at}] [${row.level}] ${row.message}`)
+          .join("\n"),
+      );
+      zip.file(
+        "network-summary.json",
+        JSON.stringify(networkSummary(), null, 2),
+      );
+      zip.file(
+        "performance.json",
+        JSON.stringify(
+          {
+            backend: workspace.performance,
+            frontend: {
+              rendering_ms: frontendRenderingMs,
+              image_loading_ms: imageLoadingMs,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "bundle-manifest.json",
+        JSON.stringify(
+          {
+            schema_version: "mmr.support-bundle.v1",
+            generated_at: generatedAt,
+            files: [
+              "snapshot.png",
+              "selected_asset.json",
+              "workflow.json",
+              "narrative.json",
+              "actions.json",
+              "evidence.json",
+              "filesystem.json",
+              "relationships.json",
+              "timeline.json",
+              "browser-console.log",
+              "network-summary.json",
+              "performance.json",
+              "application-versions.json",
+              "environment.json",
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "application-versions.json",
+        JSON.stringify(
+          {
+            schema_version: "mmr.support-bundle.v1",
+            generated_at: generatedAt,
+            frontend_version: VERSION,
+            backend_api: "/api/mie/operations",
+          },
+          null,
+          2,
+        ),
+      );
+      zip.file(
+        "environment.json",
+        JSON.stringify(
+          {
+            route: window.location.hash || window.location.pathname,
+            user_agent: window.navigator.userAgent,
+            selected_asset_id: selectedAsset?.id ?? null,
+            selected_arr_application:
+              selectedAsset?.media_type === "series"
+                ? "Sonarr"
+                : selectedAsset?.media_type === "movie"
+                  ? "Radarr"
+                  : null,
+            pagination: {
+              page: currentPageClamped,
+              page_size: pageSize,
+              total_pages: totalPages,
+              total_assets: filteredAssets.length,
+            },
+            filters: {
+              search,
+              candidates_only: candidatesOnly,
+              arr_filter_ids: arrFilterIds,
+              decision_filter_ids: decisionFilterIds,
+              smart_filter_ids: smartFilterIds,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(
+        blob,
+        `mediamasterr-support-bundle-${generatedAt.replaceAll(":", "-")}.zip`,
+      );
+      inspectorActionMessage = "Support bundle exported.";
+    } catch (e: any) {
+      inspectorActionMessage = e?.message ?? "Support bundle export failed.";
+    } finally {
+      exporting = null;
+    }
+  }
+
   function normalizeActionId(action: string) {
     const source = String(action || "")
       .trim()
@@ -866,7 +1314,8 @@
       selectedMediaType = prefs.selectedMediaType ?? selectedMediaType;
       selectedReadiness = prefs.selectedReadiness ?? selectedReadiness;
       showCompleted = prefs.showCompleted ?? showCompleted;
-      visibleAssetLimit = prefs.visibleAssetLimit ?? visibleAssetLimit;
+      pageSize = prefs.pageSize ?? prefs.visibleAssetLimit ?? pageSize;
+      currentPage = prefs.currentPage ?? currentPage;
       posterSize = prefs.posterSize ?? posterSize;
       displayMode = prefs.displayMode ?? displayMode;
     } catch {
@@ -889,7 +1338,8 @@
       selectedMediaType,
       selectedReadiness,
       showCompleted,
-      visibleAssetLimit,
+      pageSize,
+      currentPage,
       posterSize,
       displayMode,
     };
@@ -915,24 +1365,80 @@
     }
   }
 
+  async function trackedGet<T>(url: string): Promise<T> {
+    const startedAt = performance.now();
+    const startedIso = new Date().toISOString();
+    try {
+      const response = await get_api<T>(url);
+      networkLog = [
+        ...networkLog.slice(-199),
+        {
+          method: "GET",
+          url,
+          status: 200,
+          duration_ms: Math.round(performance.now() - startedAt),
+          started_at: startedIso,
+        },
+      ];
+      return response;
+    } catch (error: any) {
+      const message = String(error?.message ?? "Request failed");
+      const statusMatch = message.match(/status\s(\d+)/i);
+      const status = statusMatch ? Number(statusMatch[1]) : 0;
+      networkLog = [
+        ...networkLog.slice(-199),
+        {
+          method: "GET",
+          url,
+          status,
+          duration_ms: Math.round(performance.now() - startedAt),
+          started_at: startedIso,
+        },
+      ];
+      throw error;
+    }
+  }
+
   async function loadWorkspace() {
+    const startedAt = performance.now();
     const params = new URLSearchParams();
     params.set("candidates_only", String(candidatesOnly));
     addArrayParams(params, "arr_filter_ids", arrFilterIds);
     addArrayParams(params, "decision_filter_ids", decisionFilterIds);
     addArrayParams(params, "smart_filter_ids", smartFilterIds);
-    const response = await get_api<MieOperationsResponse>(
+    const response = await trackedGet<MieOperationsResponse>(
       `/api/mie/operations?${params.toString()}`,
     );
     workspace = response;
     reconcileSelections(response);
+    await tick();
+    frontendRenderingMs = Math.round(performance.now() - startedAt);
+
+    const imageStartedAt = performance.now();
+    const images = Array.from(
+      document.querySelectorAll("img[loading='lazy']"),
+    ) as HTMLImageElement[];
+    const pending = images.filter((img) => !img.complete);
+    if (pending.length > 0) {
+      await Promise.allSettled(
+        pending.map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              const done = () => resolve();
+              img.addEventListener("load", done, { once: true });
+              img.addEventListener("error", done, { once: true });
+            }),
+        ),
+      );
+    }
+    imageLoadingMs = Math.round(performance.now() - imageStartedAt);
   }
 
   async function loadHistory() {
-    auditTrail = await get_api<OperationAuditListResponse>(
+    auditTrail = await trackedGet<OperationAuditListResponse>(
       "/api/operations/audit",
     );
-    executionHistory = await get_api<OperationExecutionHistoryListResponse>(
+    executionHistory = await trackedGet<OperationExecutionHistoryListResponse>(
       "/api/operations/executions/history",
     );
   }
@@ -1244,14 +1750,73 @@
   });
 
   $effect(() => {
+    if (currentPage !== currentPageClamped) {
+      currentPage = currentPageClamped;
+    }
+  });
+
+  $effect(() => {
+    search;
+    sortBy;
+    sortOrder;
+    selectedFilter;
+    selectedMediaType;
+    selectedReadiness;
+    selectedStage;
+    pageSize;
+    currentPage = 1;
+  });
+
+  $effect(() => {
     if (!selectedAssetId) return;
     void ensureCockpitTabData(cockpitTab);
   });
 
-  onMount(async () => {
+  onMount(() => {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+    const originalInfo = console.info;
+
+    const appendConsole = (level: string, args: any[]) => {
+      const message = args
+        .map((value) =>
+          typeof value === "string" ? value : JSON.stringify(value),
+        )
+        .join(" ");
+      consoleLog = [
+        ...consoleLog.slice(-399),
+        { level, message, at: new Date().toISOString() },
+      ];
+    };
+
+    console.log = (...args: any[]) => {
+      appendConsole("log", args);
+      originalLog(...args);
+    };
+    console.warn = (...args: any[]) => {
+      appendConsole("warn", args);
+      originalWarn(...args);
+    };
+    console.error = (...args: any[]) => {
+      appendConsole("error", args);
+      originalError(...args);
+    };
+    console.info = (...args: any[]) => {
+      appendConsole("info", args);
+      originalInfo(...args);
+    };
+
     loadPrefs();
     applyHashSelection();
-    await load();
+    void load();
+
+    return () => {
+      console.log = originalLog;
+      console.warn = originalWarn;
+      console.error = originalError;
+      console.info = originalInfo;
+    };
   });
 
   onDestroy(() => {
@@ -1303,7 +1868,7 @@
         {decisionFilterIds}
         {smartFilterIds}
         {selectedFilterOptions}
-        perPage={visibleAssetLimit}
+        perPage={pageSize}
         {posterSize}
         viewMode={displayMode}
         viewModes={["grid", "list"]}
@@ -1327,11 +1892,75 @@
         onOpenSmartFilterDialog={() => {}}
         onApplySmartFilter={applySmartFilter}
         onClearAllFilters={clearAllSharedFilters}
-        onPerPageChange={(value) => (visibleAssetLimit = value)}
+        onPerPageChange={(value) => {
+          pageSize = value;
+          currentPage = 1;
+        }}
         onPosterSizeChange={(value) => (posterSize = value)}
         onViewModeChange={(value) => (displayMode = value as ViewMode)}
         onBulkAction={handleToolbarBulkAction}
       />
+
+      <section class="rounded-2xl border border-border/70 bg-card/60 p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-semibold text-foreground">
+            Performance Profile
+          </h2>
+          <span
+            class={`rounded-full border px-2 py-0.5 text-xs ${performanceProfile.backend_api_ms < 5000 ? "border-emerald-500/60 text-emerald-300" : "border-amber-500/60 text-amber-300"}`}
+          >
+            Backend API {performanceProfile.backend_api_ms} ms
+          </span>
+        </div>
+        <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Filesystem Analysis</p>
+            <p class="mt-1 font-medium text-foreground">
+              {performanceProfile.filesystem_analysis_ms} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Artwork Loading</p>
+            <p class="mt-1 font-medium text-foreground">
+              {performanceProfile.artwork_loading_ms} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Identity Graph</p>
+            <p class="mt-1 font-medium text-foreground">
+              {performanceProfile.identity_graph_ms} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Torrent Intelligence</p>
+            <p class="mt-1 font-medium text-foreground">
+              {performanceProfile.torrent_intelligence_ms} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Narrative Generation</p>
+            <p class="mt-1 font-medium text-foreground">
+              {performanceProfile.narrative_generation_ms} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Frontend Rendering</p>
+            <p class="mt-1 font-medium text-foreground">
+              {frontendRenderingMs} ms
+            </p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Image Loading</p>
+            <p class="mt-1 font-medium text-foreground">{imageLoadingMs} ms</p>
+          </div>
+          <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+            <p class="text-muted-foreground">Bundle Schema</p>
+            <p class="mt-1 font-medium text-foreground">
+              mmr.support-bundle.v1
+            </p>
+          </div>
+        </div>
+      </section>
 
       <section class="space-y-3">
         <div class="flex items-center justify-between gap-3">
@@ -1603,10 +2232,73 @@
               Assets in {activeStage?.title ?? "Stage"}
             </h2>
             <p class="text-xs text-muted-foreground">
-              Showing {displayedAssets.length} of {filteredAssets.length} assets in
-              {stageTitle(activeStage?.key)}
+              Displaying {filteredAssets.length === 0 ? 0 : pageStartIndex + 1}
+              -{pageEndIndexExclusive} of {filteredAssets.length} assets in {stageTitle(
+                activeStage?.key,
+              )}
             </p>
           </div>
+
+          {#if filteredAssets.length > 0}
+            <div
+              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/40 px-3 py-2 text-xs"
+            >
+              <div class="text-muted-foreground">
+                Page {currentPageClamped} of {totalPages}
+              </div>
+              <div class="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  class="rounded-full border border-border px-2 py-1 disabled:opacity-50"
+                  onclick={() => setPage(currentPageClamped - 1)}
+                  disabled={currentPageClamped <= 1}
+                >
+                  Previous
+                </button>
+                {#if pageNumbers[0] > 1}
+                  <button
+                    type="button"
+                    class="rounded-full border border-border px-2 py-1"
+                    onclick={() => setPage(1)}
+                  >
+                    1
+                  </button>
+                  {#if pageNumbers[0] > 2}
+                    <span class="px-1 text-muted-foreground">...</span>
+                  {/if}
+                {/if}
+                {#each pageNumbers as page}
+                  <button
+                    type="button"
+                    class={`rounded-full border px-2 py-1 ${page === currentPageClamped ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
+                    onclick={() => setPage(page)}
+                  >
+                    {page}
+                  </button>
+                {/each}
+                {#if pageNumbers[pageNumbers.length - 1] < totalPages}
+                  {#if pageNumbers[pageNumbers.length - 1] < totalPages - 1}
+                    <span class="px-1 text-muted-foreground">...</span>
+                  {/if}
+                  <button
+                    type="button"
+                    class="rounded-full border border-border px-2 py-1"
+                    onclick={() => setPage(totalPages)}
+                  >
+                    {totalPages}
+                  </button>
+                {/if}
+                <button
+                  type="button"
+                  class="rounded-full border border-border px-2 py-1 disabled:opacity-50"
+                  onclick={() => setPage(currentPageClamped + 1)}
+                  disabled={currentPageClamped >= totalPages}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          {/if}
 
           {#if filteredAssets.length === 0}
             <p
@@ -1693,7 +2385,7 @@
                             {asset.title}
                           </h3>
                           <p class="text-xs text-muted-foreground">
-                            {narrativeWhat(asset)}
+                            {narrativeSummary(asset)}
                           </p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -1719,7 +2411,7 @@
                           What
                         </p>
                         <p class="mt-1 text-sm font-semibold text-foreground">
-                          {narrativeWhat(asset)}
+                          {narrativeSummary(asset)}
                         </p>
                         <p class="mt-1 text-xs text-muted-foreground">
                           {workflowSummary(asset)}
@@ -1730,8 +2422,7 @@
                         <div class="flex items-center justify-between text-xs">
                           <span class="text-muted-foreground">Confidence</span>
                           <span class="text-foreground"
-                            >{confidenceLabel(asset.confidence)}
-                            {asset.confidence ?? 0}%</span
+                            >{confidenceLabel(asset.confidence)} confidence</span
                           >
                         </div>
                         <div
@@ -1742,6 +2433,9 @@
                             style={`width:${asset.confidence ?? 0}%`}
                           ></div>
                         </div>
+                        <p class="mt-1 text-[11px] text-muted-foreground">
+                          {confidenceSummary(asset.confidence)}
+                        </p>
                       </div>
                     </div>
                   </button>
@@ -1757,6 +2451,35 @@
           </h2>
           {#if selectedAsset}
             <div class="mt-3 space-y-3 text-sm" in:fade>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-xs text-muted-foreground">
+                  Export operational evidence for support, bugs, and design
+                  review.
+                </p>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    class="rounded-full border border-border px-3 py-1 text-xs text-foreground hover:bg-secondary/40 disabled:opacity-50"
+                    onclick={exportSnapshot}
+                    disabled={exporting !== null}
+                  >
+                    {exporting === "snapshot"
+                      ? "Exporting Snapshot..."
+                      : "Snapshot"}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full border border-primary px-3 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
+                    onclick={exportSupportBundle}
+                    disabled={exporting !== null}
+                  >
+                    {exporting === "bundle"
+                      ? "Exporting Support Bundle..."
+                      : "Support Bundle"}
+                  </button>
+                </div>
+              </div>
+
               <div class="flex flex-wrap gap-2">
                 {#each cockpitTabs as tab}
                   <button
@@ -1802,7 +2525,7 @@
                   >
                     <p class="text-[11px] uppercase tracking-[0.14em]">What</p>
                     <p class="mt-2 text-sm text-foreground">
-                      {narrativeWhat(selectedAsset)}
+                      {narrativeSummary(selectedAsset)}
                     </p>
                     <p class="mt-2">{workflowSummary(selectedAsset)}</p>
                   </div>
@@ -1844,11 +2567,10 @@
                       >
                         Why
                       </p>
-                      <div class="mt-2 space-y-1 text-muted-foreground">
-                        {#each narrativeLines(selectedAsset, "why") as line}
-                          <p>{line}</p>
-                        {/each}
-                      </div>
+                      <p class="mt-2 text-muted-foreground">
+                        {narrativeLines(selectedAsset, "why")[0] ??
+                          "Operational evidence available."}
+                      </p>
                     </div>
                     <div
                       class="rounded-lg border border-border/60 bg-background/60 p-3"
@@ -1858,11 +2580,10 @@
                       >
                         Impact
                       </p>
-                      <div class="mt-2 space-y-1 text-muted-foreground">
-                        {#each narrativeLines(selectedAsset, "impact") as line}
-                          <p>{line}</p>
-                        {/each}
-                      </div>
+                      <p class="mt-2 text-muted-foreground">
+                        {narrativeLines(selectedAsset, "impact")[0] ??
+                          "No action required."}
+                      </p>
                     </div>
                     <div
                       class="rounded-lg border border-border/60 bg-background/60 p-3"
@@ -1872,13 +2593,60 @@
                       >
                         Next
                       </p>
-                      <div class="mt-2 space-y-1 text-muted-foreground">
+                      <p class="mt-2 text-muted-foreground">
+                        {narrativeLines(selectedAsset, "next")[0] ??
+                          "No action required."}
+                      </p>
+                    </div>
+                  </div>
+                  <details
+                    class="rounded-lg border border-border/60 bg-background/60 p-3 text-xs"
+                  >
+                    <summary
+                      class="cursor-pointer text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                    >
+                      Technical Details
+                    </summary>
+                    <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                      <div class="space-y-1 text-muted-foreground">
+                        <p class="font-medium text-foreground">Why</p>
+                        {#each narrativeLines(selectedAsset, "why") as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                      <div class="space-y-1 text-muted-foreground">
+                        <p class="font-medium text-foreground">Impact</p>
+                        {#each narrativeLines(selectedAsset, "impact") as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                      <div class="space-y-1 text-muted-foreground">
+                        <p class="font-medium text-foreground">Next</p>
                         {#each narrativeLines(selectedAsset, "next") as line}
                           <p>{line}</p>
                         {/each}
                       </div>
                     </div>
-                  </div>
+                    <div
+                      class="mt-3 rounded-md border border-border/50 bg-background/70 p-2 text-muted-foreground"
+                    >
+                      <p>Raw stage: {selectedAsset.current_stage}</p>
+                      <p>Raw status: {selectedAsset.current_status}</p>
+                      <p>
+                        Torrent state: {selectedAsset.torrent_state ??
+                          "Unavailable"}
+                      </p>
+                      <p>
+                        Import state: {selectedAsset.import_state ??
+                          "Unavailable"}
+                      </p>
+                      <p>
+                        Retention policy: {selectedAsset.retention_policy ??
+                          "Unavailable"}
+                      </p>
+                      <p>Confidence score: {selectedAsset.confidence ?? 0}%</p>
+                    </div>
+                  </details>
                   <div class="grid grid-cols-2 gap-2 text-xs">
                     <div
                       class="rounded-lg border border-border/60 bg-background/60 p-2"
@@ -1927,7 +2695,10 @@
                     >
                       <p class="text-muted-foreground">Confidence</p>
                       <p class="font-medium text-foreground">
-                        {selectedAsset.confidence ?? 0}%
+                        {confidenceLabel(selectedAsset.confidence)} confidence
+                      </p>
+                      <p class="mt-1 text-muted-foreground">
+                        {confidenceSummary(selectedAsset.confidence)}
                       </p>
                     </div>
                     <div
@@ -1957,13 +2728,30 @@
                   >
                     <p class="text-muted-foreground">What</p>
                     <p class="mt-1 font-medium text-foreground">
-                      {narrativeWhat(selectedAsset)}
+                      {narrativeSummary(selectedAsset)}
                     </p>
                     <p class="mt-2 text-muted-foreground">
                       {workflowSummary(selectedAsset)}
                     </p>
                   </div>
-                  {#each [["Download", selectedAsset.torrent_state || "Unavailable"], ["Import", selectedAsset.import_state || "Unavailable"], ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"], ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"], ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"], ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"], ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"], ["Retention", selectedAsset.retention_policy || "Unavailable"], ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"]] as [label, value]}
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 px-3 py-2"
+                  >
+                    <p class="text-muted-foreground">Torrent</p>
+                    <p class="mt-1 font-medium text-foreground">
+                      {torrentOperationalState(selectedAsset.torrent_state)
+                        .label}
+                    </p>
+                    <p class="mt-1 text-muted-foreground">
+                      {torrentOperationalState(selectedAsset.torrent_state)
+                        .what}
+                    </p>
+                    <p class="mt-1 text-muted-foreground">
+                      {torrentOperationalState(selectedAsset.torrent_state)
+                        .action}
+                    </p>
+                  </div>
+                  {#each [["Import", selectedAsset.import_state || "Unavailable"], ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"], ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"], ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"], ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"], ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"], ["Retention", selectedAsset.retention_policy || "Unavailable"], ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"]] as [label, value]}
                     <div
                       class="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2"
                     >
@@ -2305,7 +3093,7 @@
                               class="mt-2 rounded-md border border-border/40 bg-background/60 p-2 text-muted-foreground"
                             >
                               <p class="font-medium text-foreground">
-                                Why this is recommended
+                                Safety, Outcome, and Reversibility
                               </p>
                               {#if action.impact_preview.length > 0}
                                 <ul class="mt-1 space-y-1">

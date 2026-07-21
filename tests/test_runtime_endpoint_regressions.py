@@ -55,11 +55,29 @@ def test_mie_operations_and_graph_openapi_contracts() -> None:
         "graph_summary",
         "timeline_summary",
         "confidence",
+        "performance",
         "downloads_health",
         "downloads",
         "workflow",
         "media_policies",
     } <= operations_props
+
+    performance_ref = schema["components"]["schemas"][operations_name]["properties"][
+        "performance"
+    ]["$ref"]
+    performance_name = performance_ref.rsplit("/", 1)[-1]
+    performance_props = set(
+        schema["components"]["schemas"][performance_name]["properties"].keys()
+    )
+    assert {
+        "backend_api_ms",
+        "filesystem_analysis_ms",
+        "artwork_loading_ms",
+        "identity_graph_ms",
+        "torrent_intelligence_ms",
+        "narrative_generation_ms",
+        "stages",
+    } <= performance_props
 
     workflow_ref = schema["components"]["schemas"][operations_name]["properties"][
         "workflow"

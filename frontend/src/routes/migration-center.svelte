@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { get_api, post_api } from "$lib/api";
-  import WorkspaceToolbar from "$lib/components/workspace/workspace-toolbar.svelte";
   import type {
     MigrationDiscoveryResponse,
     MigrationPlanResponse,
@@ -19,6 +18,15 @@
   let sourceConfigId = $state<number | null>(null);
   let destinationConfigId = $state<number | null>(null);
   let rootMappings = $state<MigrationRootMapping[]>([]);
+  let recentPlans = $state<
+    Array<{
+      generated_at: string;
+      source: string;
+      destination: string;
+      item_count: number;
+      conflicts: number;
+    }>
+  >([]);
 
   const sourceOptions = $derived(workspace?.available_sources ?? []);
   const destinationOptions = $derived(workspace?.available_destinations ?? []);
@@ -123,6 +131,27 @@
           root_mappings: rootMappings,
         },
       );
+      const sourceName =
+        discovery?.source.instance.name ?? `Source ${sourceConfigId ?? "?"}`;
+      const destinationName =
+        discovery?.destination.instance.name ??
+        `Destination ${destinationConfigId ?? "?"}`;
+      recentPlans = [
+        {
+          generated_at: plan.generated_at,
+          source: sourceName,
+          destination: destinationName,
+          item_count: plan.summary.item_count,
+          conflicts: plan.summary.conflict_count,
+        },
+        ...recentPlans,
+      ].slice(0, 6);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          "migration_center_recent_plans",
+          JSON.stringify(recentPlans),
+        );
+      }
     } catch (e: any) {
       error = e?.message ?? "Failed to build migration plan.";
     } finally {
@@ -158,15 +187,113 @@
   }
 
   onMount(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(
+          "migration_center_recent_plans",
+        );
+        if (raw) {
+          recentPlans = JSON.parse(raw);
+        }
+      } catch {
+        // ignore invalid persisted state
+      }
+    }
     void loadWorkspace();
   });
 </script>
 
 <div class="space-y-6 p-4 md:p-6">
-  <WorkspaceToolbar
-    title="Migration Center"
-    subtitle="Inventory Sonarr and Radarr environments, map root folders, and generate a read-only migration plan."
-  />
+  <header class="rounded-3xl border border-border/70 bg-card/70 p-5">
+    <p class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      Migration Center
+    </p>
+    <h1 class="mt-2 text-2xl font-semibold text-foreground">
+      Planning Workspace
+    </h1>
+    <p class="mt-2 text-sm text-muted-foreground">
+      Inventory Sonarr and Radarr environments, map roots, and generate a
+      read-only migration plan.
+    </p>
+  </header>
+
+  <section class="rounded-3xl border border-border/70 bg-card/70 p-5">
+    <p class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      Purpose
+    </p>
+    <h2 class="mt-2 text-2xl font-semibold text-foreground">
+      Plan migrations safely before execution exists
+    </h2>
+    <p class="mt-2 text-sm text-muted-foreground">
+      Migration Center is intentionally planning-only in this release. Use it to
+      inspect source and destination inventories, build root mappings, identify
+      conflicts, and prepare a validated migration plan.
+    </p>
+    <div class="mt-4 grid gap-3 md:grid-cols-3">
+      <div
+        class="rounded-2xl border border-border/60 bg-background/50 p-3 text-sm"
+      >
+        <p class="text-muted-foreground">Supported Systems</p>
+        <p class="mt-1 font-medium text-foreground">Sonarr and Radarr</p>
+      </div>
+      <div
+        class="rounded-2xl border border-border/60 bg-background/50 p-3 text-sm"
+      >
+        <p class="text-muted-foreground">Current Status</p>
+        <p class="mt-1 font-medium text-foreground">
+          Discovery and planning only
+        </p>
+      </div>
+      <div
+        class="rounded-2xl border border-border/60 bg-background/50 p-3 text-sm"
+      >
+        <p class="text-muted-foreground">Execution</p>
+        <p class="mt-1 font-medium text-foreground">Not enabled in v0.9.5</p>
+      </div>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button
+        type="button"
+        class="rounded-full border border-primary bg-primary/10 px-4 py-2 text-sm text-primary hover:bg-primary/20 disabled:opacity-50"
+        onclick={runDiscovery}
+        disabled={!canDiscover || busy}
+      >
+        Discovery
+      </button>
+      <button
+        type="button"
+        class="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+        onclick={buildPlan}
+        disabled={!discovery || busy}
+      >
+        Create Migration Plan
+      </button>
+    </div>
+    <div class="mt-4 rounded-2xl border border-border/60 bg-background/50 p-3">
+      <p class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        Recent migration plans
+      </p>
+      {#if recentPlans.length === 0}
+        <p class="mt-2 text-sm text-muted-foreground">
+          No plans have been generated yet in this browser session.
+        </p>
+      {:else}
+        <div class="mt-2 space-y-2 text-sm">
+          {#each recentPlans as entry}
+            <div class="rounded-xl border border-border/50 bg-card/50 p-2">
+              <p class="font-medium text-foreground">
+                {entry.source} → {entry.destination}
+              </p>
+              <p class="text-muted-foreground">
+                {new Date(entry.generated_at).toLocaleString()} • Items {entry.item_count}
+                • Conflicts {entry.conflicts}
+              </p>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </section>
 
   {#if loading}
     <div
@@ -269,7 +396,7 @@
           Execution
         </p>
         <h2 class="mt-2 text-xl font-semibold text-foreground">
-          Planning only in v0.9.4
+          Planning only in v0.9.5
         </h2>
         <p class="mt-2 text-sm text-muted-foreground">
           {workspace?.execution_placeholder}

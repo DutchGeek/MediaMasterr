@@ -198,6 +198,21 @@ class OperationsConfidenceSummary(BaseModel):
     factors: list[str] = Field(default_factory=list)
 
 
+class OperationsPerformanceStage(BaseModel):
+    stage: str
+    duration_ms: int = 0
+
+
+class OperationsPerformanceSummary(BaseModel):
+    backend_api_ms: int = 0
+    filesystem_analysis_ms: int = 0
+    artwork_loading_ms: int = 0
+    identity_graph_ms: int = 0
+    torrent_intelligence_ms: int = 0
+    narrative_generation_ms: int = 0
+    stages: list[OperationsPerformanceStage] = Field(default_factory=list)
+
+
 DownloadLifecycleState = Literal[
     "metadata_download",
     "queued",
@@ -556,6 +571,7 @@ class OperationsWorkspaceResponse(BaseModel):
     graph_summary: OperationsGraphSummary = Field(default_factory=OperationsGraphSummary)
     timeline_summary: OperationsTimelineSummary = Field(default_factory=OperationsTimelineSummary)
     confidence: OperationsConfidenceSummary = Field(default_factory=OperationsConfidenceSummary)
+    performance: OperationsPerformanceSummary = Field(default_factory=OperationsPerformanceSummary)
     downloads_health: DownloadsHealthSummary = Field(default_factory=DownloadsHealthSummary)
     downloads: list[DownloadLifecycleObject] = Field(default_factory=list)
 
