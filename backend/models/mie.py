@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,13 @@ ActionManifestCategory = Literal[
     "destructive",
 ]
 ActionManifestRisk = Literal["safe", "medium", "high"]
+ActionPresentation = Literal["required", "recommended", "secondary"]
+WorkflowOutcome = Literal["blocked", "in_progress", "completed"]
+OperationalNarrativeOutcome = Literal[
+    "healthy",
+    "healthy_with_recommendations",
+    "attention_required",
+]
 
 
 class OperationActionManifestAction(BaseModel):
@@ -25,6 +32,7 @@ class OperationActionManifestAction(BaseModel):
     label: str
     category: ActionManifestCategory
     risk: ActionManifestRisk
+    presentation: ActionPresentation = "secondary"
     confirmation: bool = False
     description: str | None = None
     impact_preview: list[str] = Field(default_factory=list)
@@ -42,6 +50,9 @@ class OperationActionManifestAction(BaseModel):
 
 class OperationActionManifest(BaseModel):
     available_actions: list[OperationActionManifestAction] = Field(default_factory=list)
+    workflow_outcome: WorkflowOutcome = "in_progress"
+    workflow_summary: str | None = None
+    primary_action_reasoning: list[str] = Field(default_factory=list)
 
 
 class OperationsFileEvidence(BaseModel):
@@ -450,6 +461,24 @@ class OperationsWorkflowFilter(BaseModel):
     count: int = 0
 
 
+class OperationsNarrativeLocation(BaseModel):
+    current_label: str = "Current Location"
+    current_path: str | None = None
+    expected_label: str = "Expected Location"
+    expected_path: str | None = None
+
+
+class OperationsNarrative(BaseModel):
+    outcome: OperationalNarrativeOutcome = "healthy"
+    what: str
+    where: OperationsNarrativeLocation = Field(
+        default_factory=OperationsNarrativeLocation
+    )
+    why: list[str] = Field(default_factory=list)
+    impact: list[str] = Field(default_factory=list)
+    next: list[str] = Field(default_factory=list)
+
+
 class OperationsWorkflowAsset(BaseModel):
     id: str
     title: str
@@ -483,6 +512,7 @@ class OperationsWorkflowAsset(BaseModel):
     file_evidence: list[OperationsFileEvidence] = Field(default_factory=list)
     application_evidence: list[OperationsApplicationEvidence] = Field(default_factory=list)
     relationship_evidence: list[OperationsRelationshipEvidence] = Field(default_factory=list)
+    narrative: OperationsNarrative | None = None
 
 
 class OperationsWorkflowStage(BaseModel):
@@ -528,6 +558,212 @@ class OperationsWorkspaceResponse(BaseModel):
     confidence: OperationsConfidenceSummary = Field(default_factory=OperationsConfidenceSummary)
     downloads_health: DownloadsHealthSummary = Field(default_factory=DownloadsHealthSummary)
     downloads: list[DownloadLifecycleObject] = Field(default_factory=list)
+
+
+MigrationServiceType = Literal["sonarr", "radarr"]
+MigrationMediaKind = Literal["series", "movie"]
+MigrationConflictResolution = Literal[
+    "keep_destination",
+    "overwrite",
+    "merge_metadata",
+    "compare",
+    "skip",
+]
+
+
+class MigrationInstanceOption(BaseModel):
+    config_id: int
+    service_type: MigrationServiceType
+    name: str
+    base_url: str
+    enabled: bool = True
+    is_available: bool = True
+    version: str | None = None
+    library_count: int = 0
+    root_folder_count: int = 0
+    item_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class MigrationNamedValue(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+
+
+class MigrationRootFolder(BaseModel):
+    id: str
+    path: str
+    free_space: int | None = None
+    total_space: int | None = None
+
+
+class MigrationMediaItem(BaseModel):
+    kind: MigrationMediaKind
+    external_id: str
+    title: str
+    year: int | None = None
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
+    current_path: str | None = None
+    root_folder_path: str | None = None
+    monitored: bool | None = None
+    tags: list[str] = Field(default_factory=list)
+    quality_profile: str | None = None
+    language_profile: str | None = None
+    custom_formats: list[str] = Field(default_factory=list)
+    metadata_profile: str | None = None
+    collections: list[str] = Field(default_factory=list)
+    series_type: str | None = None
+    minimum_availability: str | None = None
+    season_monitoring: str | None = None
+    has_file: bool | None = None
+    size_bytes: int = 0
+    episode_count: int = 0
+    season_count: int = 0
+
+
+class MigrationInventorySummary(BaseModel):
+    root_folder_count: int = 0
+    library_count: int = 0
+    tag_count: int = 0
+    quality_profile_count: int = 0
+    language_profile_count: int = 0
+    custom_format_count: int = 0
+    metadata_profile_count: int = 0
+    collection_count: int = 0
+    media_count: int = 0
+    episode_count: int = 0
+    total_size_bytes: int = 0
+
+
+class MigrationInventory(BaseModel):
+    instance: MigrationInstanceOption
+    roots: list[MigrationRootFolder] = Field(default_factory=list)
+    libraries: list[MigrationNamedValue] = Field(default_factory=list)
+    tags: list[MigrationNamedValue] = Field(default_factory=list)
+    quality_profiles: list[MigrationNamedValue] = Field(default_factory=list)
+    language_profiles: list[MigrationNamedValue] = Field(default_factory=list)
+    custom_formats: list[MigrationNamedValue] = Field(default_factory=list)
+    metadata_profiles: list[MigrationNamedValue] = Field(default_factory=list)
+    collections: list[MigrationNamedValue] = Field(default_factory=list)
+    media_items: list[MigrationMediaItem] = Field(default_factory=list)
+    summary: MigrationInventorySummary = Field(default_factory=MigrationInventorySummary)
+    warnings: list[str] = Field(default_factory=list)
+    discovered_at: datetime | None = None
+
+
+class MigrationRootMapping(BaseModel):
+    source_root: str
+    destination_root: str
+
+
+class MigrationConflict(BaseModel):
+    key: str
+    conflict_type: str
+    title: str
+    description: str
+    source_value: str | None = None
+    destination_value: str | None = None
+    resolutions: list[MigrationConflictResolution] = Field(default_factory=list)
+
+
+class MigrationPlanItem(BaseModel):
+    key: str
+    kind: MigrationMediaKind
+    title: str
+    year: int | None = None
+    source_path: str | None = None
+    destination_path: str | None = None
+    mapped_destination_path: str | None = None
+    status: Literal[
+        "copy_required",
+        "existing",
+        "skipped",
+        "conflict",
+        "manual_decision",
+    ] = "skipped"
+    size_bytes: int = 0
+    episode_count: int = 0
+    conflict_keys: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class MigrationPlanSummary(BaseModel):
+    series_count: int = 0
+    movie_count: int = 0
+    episode_count: int = 0
+    item_count: int = 0
+    files_requiring_copy: int = 0
+    existing_files: int = 0
+    skipped_files: int = 0
+    conflict_count: int = 0
+    manual_decision_count: int = 0
+    total_size_bytes: int = 0
+    estimated_duration_minutes: int | None = None
+
+
+class MigrationMetadataPlan(BaseModel):
+    monitored_state: bool = False
+    tags: bool = False
+    root_folder: bool = False
+    quality_profile: bool = False
+    language_profile: bool = False
+    season_monitoring: bool = False
+    custom_formats: bool = False
+    series_type: bool = False
+    metadata_profile: bool = False
+    minimum_availability: bool = False
+    collections: bool = False
+
+
+class MigrationDiscoveryRequest(BaseModel):
+    source_config_id: int
+    destination_config_id: int
+
+
+class MigrationPlanRequest(BaseModel):
+    source_config_id: int
+    destination_config_id: int
+    root_mappings: list[MigrationRootMapping] = Field(default_factory=list)
+
+
+class MigrationDiscoveryResponse(BaseModel):
+    source: MigrationInventory
+    destination: MigrationInventory
+    compatible: bool = True
+    warnings: list[str] = Field(default_factory=list)
+
+
+class MigrationPlanResponse(BaseModel):
+    source: MigrationInventory
+    destination: MigrationInventory
+    root_mappings: list[MigrationRootMapping] = Field(default_factory=list)
+    items: list[MigrationPlanItem] = Field(default_factory=list)
+    conflicts: list[MigrationConflict] = Field(default_factory=list)
+    summary: MigrationPlanSummary = Field(default_factory=MigrationPlanSummary)
+    metadata_plan: MigrationMetadataPlan = Field(default_factory=MigrationMetadataPlan)
+    execution_ready: bool = False
+    execution_placeholder: str = (
+        "Planning only. Execution will be introduced in a later release."
+    )
+    generated_at: datetime
+
+
+class MigrationWorkspaceResponse(BaseModel):
+    available_sources: list[MigrationInstanceOption] = Field(default_factory=list)
+    available_destinations: list[MigrationInstanceOption] = Field(default_factory=list)
+    supported_services: list[MigrationServiceType] = Field(
+        default_factory=lambda: cast(
+            list[MigrationServiceType], ["sonarr", "radarr"]
+        )
+    )
+    discovery: MigrationDiscoveryResponse | None = None
+    plan: MigrationPlanResponse | None = None
+    execution_placeholder: str = (
+        "Migration Center currently supports discovery and planning only."
+    )
 
 
 class MieHealthFactor(BaseModel):

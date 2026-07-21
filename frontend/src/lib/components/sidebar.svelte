@@ -80,6 +80,15 @@
       tooltip: "Media Intelligence Engine recommendations and cleanup planning",
     },
     {
+      path: "/migration-center",
+      label: "Migration Center",
+      icon: HardDrive,
+      adminOnly: false,
+      page: PageAccess.MigrationCenter,
+      tooltip:
+        "Plan Sonarr and Radarr migrations between roots and instances without copying data yet",
+    },
+    {
       path: "/identity",
       label: "Identity",
       icon: Fingerprint,

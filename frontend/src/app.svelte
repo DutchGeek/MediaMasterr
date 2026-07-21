@@ -18,6 +18,7 @@
   import Series from "./routes/series.svelte";
   import Identity from "./routes/identity.svelte";
   import Operations from "./routes/operations.svelte";
+  import MigrationCenter from "./routes/migration-center.svelte";
   import Protected from "./routes/protected.svelte";
   import Candidates from "./routes/candidates.svelte";
   import History from "./routes/history.svelte";
@@ -53,6 +54,7 @@
     "/series": route(Series),
     "/identity": route(Identity),
     "/operations": route(Operations),
+    "/migration-center": route(MigrationCenter),
     "/protected": route(Protected),
     "/requests": route(Requests),
     "/candidates": route(Candidates),

@@ -21,6 +21,7 @@ class PageAccess(StrEnum):
     SERIES = auto()
     IDENTITY = auto()
     OPERATIONS = auto()
+    MIGRATION_CENTER = auto()
     REQUESTS = auto()
     PROTECTED = auto()
     CANDIDATES = auto()

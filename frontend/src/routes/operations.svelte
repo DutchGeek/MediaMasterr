@@ -355,9 +355,38 @@
       []) as OperationActionManifestAction[];
   });
 
-  const groupedManifestActions = $derived.by(() => {
+  const selectedPrimaryAction = $derived.by(() => {
+    if (!selectedAsset) return null;
+    const primaryId = normalizeActionId(
+      selectedAsset.next_action ?? selectedRecommendation?.action ?? "",
+    );
+    return (
+      selectedManifestActions.find((row) => row.id === primaryId) ??
+      selectedManifestActions.find((row) => row.presentation === "required") ??
+      selectedManifestActions.find(
+        (row) => row.presentation === "recommended",
+      ) ??
+      null
+    );
+  });
+
+  const selectedRequiredActions = $derived.by(() => {
+    return selectedManifestActions.filter(
+      (row) => row.presentation === "required",
+    );
+  });
+
+  const selectedRecommendedActions = $derived.by(() => {
+    return selectedManifestActions.filter(
+      (row) => row.presentation === "recommended",
+    );
+  });
+
+  const groupedSecondaryActions = $derived.by(() => {
     const groups = new Map<string, OperationActionManifestAction[]>();
-    for (const row of selectedManifestActions) {
+    for (const row of selectedManifestActions.filter(
+      (action) => action.presentation === "secondary",
+    )) {
       const key = row.category || "maintenance";
       const current = groups.get(key) ?? [];
       current.push(row);
@@ -511,6 +540,125 @@
         value: row.import_eligibility ?? "Unavailable",
       },
     ];
+  }
+
+  function workflowOutcome(asset: OperationsWorkflowAsset | null | undefined) {
+    return asset?.action_manifest?.workflow_outcome ?? "in_progress";
+  }
+
+  function workflowOutcomeLabel(
+    asset: OperationsWorkflowAsset | null | undefined,
+  ) {
+    const outcome = workflowOutcome(asset);
+    if (outcome === "blocked") return "Blocked";
+    if (outcome === "completed") return "Complete";
+    return "In Progress";
+  }
+
+  function workflowOutcomeClass(
+    asset: OperationsWorkflowAsset | null | undefined,
+  ) {
+    const outcome = workflowOutcome(asset);
+    if (outcome === "blocked") {
+      return "border-destructive/60 bg-destructive/10 text-destructive";
+    }
+    if (outcome === "completed") {
+      return "border-emerald-500/60 bg-emerald-500/10 text-emerald-200";
+    }
+    return "border-primary/50 bg-primary/10 text-primary";
+  }
+
+  function assetPrimaryAction(asset: OperationsWorkflowAsset) {
+    const primaryId = normalizeActionId(asset.next_action ?? "");
+    return (
+      asset.action_manifest.available_actions.find(
+        (row) => row.id === primaryId,
+      ) ??
+      asset.action_manifest.available_actions.find(
+        (row) => row.presentation === "required",
+      ) ??
+      asset.action_manifest.available_actions.find(
+        (row) => row.presentation === "recommended",
+      ) ??
+      null
+    );
+  }
+
+  function assetActionHeading(asset: OperationsWorkflowAsset) {
+    const primary = assetPrimaryAction(asset);
+    if (primary?.presentation === "required") return "Required Action";
+    if (primary?.presentation === "recommended") return "Recommended Action";
+    return "Next Step";
+  }
+
+  function assetActionLabel(asset: OperationsWorkflowAsset) {
+    return (
+      assetPrimaryAction(asset)?.label ?? asset.next_action.replaceAll("_", " ")
+    );
+  }
+
+  function workflowSummary(asset: OperationsWorkflowAsset | null | undefined) {
+    if (!asset) return "Workflow state unavailable.";
+    return (
+      asset.action_manifest.workflow_summary ??
+      asset.case_summary ??
+      asset.reason ??
+      "Workflow state unavailable."
+    );
+  }
+
+  function actionPresentationLabel(action: OperationActionManifestAction) {
+    if (action.presentation === "required") return "Required Action";
+    if (action.presentation === "recommended") return "Recommended Action";
+    return "Additional Action";
+  }
+
+  function actionPresentationClass(action: OperationActionManifestAction) {
+    if (action.presentation === "required") {
+      return "border-destructive/60 bg-destructive/10 text-destructive";
+    }
+    if (action.presentation === "recommended") {
+      return "border-emerald-500/60 bg-emerald-500/10 text-emerald-200";
+    }
+    return "border-border text-muted-foreground";
+  }
+
+  function narrativeOutcomeLabel(
+    asset: OperationsWorkflowAsset | null | undefined,
+  ) {
+    const outcome = asset?.narrative?.outcome;
+    if (outcome === "attention_required") return "Attention Required";
+    if (outcome === "healthy_with_recommendations")
+      return "Healthy With Recommendations";
+    return "Healthy";
+  }
+
+  function narrativeOutcomeClass(
+    asset: OperationsWorkflowAsset | null | undefined,
+  ) {
+    const outcome = asset?.narrative?.outcome;
+    if (outcome === "attention_required") {
+      return "border-destructive/60 bg-destructive/10 text-destructive";
+    }
+    if (outcome === "healthy_with_recommendations") {
+      return "border-amber-400/60 bg-amber-500/10 text-amber-200";
+    }
+    return "border-emerald-500/60 bg-emerald-500/10 text-emerald-200";
+  }
+
+  function narrativeWhat(asset: OperationsWorkflowAsset | null | undefined) {
+    return asset?.narrative?.what ?? workflowSummary(asset);
+  }
+
+  function narrativeWhere(asset: OperationsWorkflowAsset | null | undefined) {
+    return asset?.narrative?.where ?? null;
+  }
+
+  function narrativeLines(
+    asset: OperationsWorkflowAsset | null | undefined,
+    key: "why" | "impact" | "next",
+  ) {
+    return asset?.narrative?.[key] ?? [];
   }
 
   function normalizeActionId(action: string) {
@@ -1545,10 +1693,18 @@
                             {asset.title}
                           </h3>
                           <p class="text-xs text-muted-foreground">
-                            Lifecycle {asset.current_stage}
+                            {narrativeWhat(asset)}
                           </p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-xs">
+                          <span
+                            class={`rounded-full border px-2 py-0.5 ${narrativeOutcomeClass(asset)}`}
+                            >{narrativeOutcomeLabel(asset)}</span
+                          >
+                          <span
+                            class={`rounded-full border px-2 py-0.5 ${workflowOutcomeClass(asset)}`}
+                            >{workflowOutcomeLabel(asset)}</span
+                          >
                           <span
                             class="rounded-full border border-border px-2 py-0.5 text-muted-foreground"
                             >Risk {riskLabel(asset.risk_level)}</span
@@ -1560,10 +1716,13 @@
                         <p
                           class="text-xs uppercase tracking-[0.14em] text-muted-foreground"
                         >
-                          Recommendation
+                          What
                         </p>
                         <p class="mt-1 text-sm font-semibold text-foreground">
-                          {asset.next_action.replaceAll("_", " ")}
+                          {narrativeWhat(asset)}
+                        </p>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                          {workflowSummary(asset)}
                         </p>
                       </div>
 
@@ -1641,16 +1800,84 @@
                   <div
                     class="rounded-lg border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground"
                   >
-                    <p class="text-[11px] uppercase tracking-[0.14em]">
-                      Operational Case Summary
-                    </p>
+                    <p class="text-[11px] uppercase tracking-[0.14em]">What</p>
                     <p class="mt-2 text-sm text-foreground">
-                      {selectedAsset.case_summary ?? selectedAsset.reason}
+                      {narrativeWhat(selectedAsset)}
                     </p>
-                    <p class="mt-2">
-                      Expected destination: {selectedAsset.expected_destination ??
-                        "Unavailable"}
-                    </p>
+                    <p class="mt-2">{workflowSummary(selectedAsset)}</p>
+                  </div>
+                  <div class="grid gap-2 text-xs sm:grid-cols-2">
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Current Location
+                      </p>
+                      <p class="mt-2 break-all font-medium text-foreground">
+                        {narrativeWhere(selectedAsset)?.current_path ??
+                          "Unavailable"}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Expected Location
+                      </p>
+                      <p class="mt-2 break-all font-medium text-foreground">
+                        {narrativeWhere(selectedAsset)?.expected_path ??
+                          selectedAsset.expected_destination ??
+                          "Unavailable"}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="grid gap-2 text-xs sm:grid-cols-3">
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Why
+                      </p>
+                      <div class="mt-2 space-y-1 text-muted-foreground">
+                        {#each narrativeLines(selectedAsset, "why") as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Impact
+                      </p>
+                      <div class="mt-2 space-y-1 text-muted-foreground">
+                        {#each narrativeLines(selectedAsset, "impact") as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Next
+                      </p>
+                      <div class="mt-2 space-y-1 text-muted-foreground">
+                        {#each narrativeLines(selectedAsset, "next") as line}
+                          <p>{line}</p>
+                        {/each}
+                      </div>
+                    </div>
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-xs">
                     <div
@@ -1688,9 +1915,11 @@
                     <div
                       class="rounded-lg border border-border/60 bg-background/60 p-2"
                     >
-                      <p class="text-muted-foreground">Recommendation</p>
+                      <p class="text-muted-foreground">
+                        {assetActionHeading(selectedAsset)}
+                      </p>
                       <p class="font-medium text-foreground">
-                        {selectedAsset.next_action.replaceAll("_", " ")}
+                        {assetActionLabel(selectedAsset)}
                       </p>
                     </div>
                     <div
@@ -1723,6 +1952,17 @@
 
               {#if cockpitTab === "status"}
                 <div class="space-y-2 text-xs">
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 px-3 py-2"
+                  >
+                    <p class="text-muted-foreground">What</p>
+                    <p class="mt-1 font-medium text-foreground">
+                      {narrativeWhat(selectedAsset)}
+                    </p>
+                    <p class="mt-2 text-muted-foreground">
+                      {workflowSummary(selectedAsset)}
+                    </p>
+                  </div>
                   {#each [["Download", selectedAsset.torrent_state || "Unavailable"], ["Import", selectedAsset.import_state || "Unavailable"], ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"], ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"], ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"], ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"], ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"], ["Retention", selectedAsset.retention_policy || "Unavailable"], ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"]] as [label, value]}
                     <div
                       class="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2"
@@ -1890,7 +2130,7 @@
                     </div>
                   {/each}
                   <div class="flex flex-wrap gap-1">
-                    {#each selectedManifestActions.filter((row) => row.category === "external") as action}
+                    {#each selectedManifestActions.filter((row) => row.category === "external" || row.presentation === "secondary") as action}
                       <button
                         type="button"
                         class="rounded-full border border-border px-2 py-1"
@@ -1951,15 +2191,161 @@
 
               {#if cockpitTab === "actions"}
                 <div class="space-y-3 text-xs">
-                  {#if groupedManifestActions.length > 0}
-                    {#each groupedManifestActions as group}
+                  {#if selectedPrimaryAction}
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-3"
+                    >
+                      <div class="flex items-start justify-between gap-2">
+                        <div>
+                          <p
+                            class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                          >
+                            {actionPresentationLabel(selectedPrimaryAction)}
+                          </p>
+                          <p class="mt-1 text-sm font-semibold text-foreground">
+                            {selectedPrimaryAction.label}
+                          </p>
+                        </div>
+                        <span
+                          class={`rounded-full border px-2 py-0.5 ${actionPresentationClass(selectedPrimaryAction)}`}
+                          >{workflowOutcomeLabel(selectedAsset)}</span
+                        >
+                      </div>
+                      {#if selectedAsset.action_manifest.primary_action_reasoning.length > 0}
+                        <div class="mt-3 space-y-2 text-muted-foreground">
+                          {#each selectedAsset.action_manifest.primary_action_reasoning as detail}
+                            <p>{detail}</p>
+                          {/each}
+                        </div>
+                      {/if}
+                      <div class="mt-3 flex items-center justify-between gap-2">
+                        <p class="text-muted-foreground">
+                          {selectedPrimaryAction.description ||
+                            "No description"}
+                        </p>
+                        <button
+                          type="button"
+                          class={`rounded-full border px-3 py-1 ${selectedPrimaryAction.presentation === "required" ? "border-destructive/60 text-destructive" : "border-primary text-primary"}`}
+                          onclick={() =>
+                            runManifestAction(selectedPrimaryAction)}
+                          disabled={inspectorActionBusy}
+                          >{inspectorActionBusy
+                            ? "Running..."
+                            : selectedPrimaryAction.label}</button
+                        >
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if selectedRequiredActions.length > 0}
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Required Actions
+                      </p>
+                      <div class="mt-2 space-y-2">
+                        {#each selectedRequiredActions as action}
+                          <div
+                            class="rounded-md border border-destructive/30 bg-background/70 p-2"
+                          >
+                            <div class="flex items-start justify-between gap-2">
+                              <div>
+                                <p class="font-medium text-foreground">
+                                  {action.label}
+                                </p>
+                                <p class="text-muted-foreground">
+                                  {action.description || "No description"}
+                                </p>
+                              </div>
+                              <span
+                                class="rounded-full border border-destructive/60 px-2 py-0.5 text-destructive"
+                              >
+                                Required
+                              </span>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if selectedRecommendedActions.length > 0}
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p
+                        class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                      >
+                        Recommended Actions
+                      </p>
+                      <div class="mt-2 space-y-2">
+                        {#each selectedRecommendedActions as action}
+                          <div
+                            class="rounded-md border border-border/50 bg-background/70 p-2"
+                          >
+                            <div class="flex items-start justify-between gap-2">
+                              <div>
+                                <p class="font-medium text-foreground">
+                                  {action.label}
+                                </p>
+                                <p class="text-muted-foreground">
+                                  {action.description || "No description"}
+                                </p>
+                              </div>
+                              <span
+                                class="rounded-full border border-emerald-500/60 px-2 py-0.5 text-emerald-200"
+                              >
+                                Recommended
+                              </span>
+                            </div>
+                            <div
+                              class="mt-2 rounded-md border border-border/40 bg-background/60 p-2 text-muted-foreground"
+                            >
+                              <p class="font-medium text-foreground">
+                                Why this is recommended
+                              </p>
+                              {#if action.impact_preview.length > 0}
+                                <ul class="mt-1 space-y-1">
+                                  {#each action.impact_preview as detail}
+                                    <li>{detail}</li>
+                                  {/each}
+                                </ul>
+                              {:else}
+                                <p class="mt-1">
+                                  Supporting recommendation details are
+                                  unavailable.
+                                </p>
+                              {/if}
+                            </div>
+                            <div class="mt-2 flex justify-end">
+                              <button
+                                type="button"
+                                class="rounded-full border border-primary px-2 py-1 text-primary"
+                                onclick={() => runManifestAction(action)}
+                                disabled={inspectorActionBusy}
+                                >{inspectorActionBusy
+                                  ? "Running..."
+                                  : action.label}</button
+                              >
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if groupedSecondaryActions.length > 0}
+                    {#each groupedSecondaryActions as group}
                       <div
                         class="rounded-lg border border-border/60 bg-background/60 p-2"
                       >
                         <p
                           class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
                         >
-                          {group.category}
+                          Additional {group.category}
                         </p>
                         <div class="mt-2 space-y-2">
                           {#each group.actions as action}
@@ -1979,7 +2365,7 @@
                                 </div>
                                 <span
                                   class={`rounded-full border px-2 py-0.5 ${action.risk === "high" ? "border-destructive/60 text-destructive" : action.risk === "medium" ? "border-orange-400/60 text-orange-300" : "border-emerald-500/60 text-emerald-300"}`}
-                                  >Risk {action.risk}</span
+                                  >{actionPresentationLabel(action)}</span
                                 >
                               </div>
                               <div
@@ -2022,7 +2408,7 @@
                         </div>
                       </div>
                     {/each}
-                  {:else}
+                  {:else if !selectedPrimaryAction && selectedRequiredActions.length === 0 && selectedRecommendedActions.length === 0}
                     <p class="text-muted-foreground">No actions available.</p>
                   {/if}
                 </div>

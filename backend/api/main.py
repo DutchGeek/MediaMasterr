@@ -24,6 +24,7 @@ from backend.api.routes.delete_requests import router as delete_requests_router
 from backend.api.routes.info import router as info_router
 from backend.api.routes.media import router as media_router
 from backend.api.routes.mie import router as mie_router
+from backend.api.routes.migration_center import router as migration_center_router
 from backend.api.routes.operations import router as operations_router
 from backend.api.routes.protected import router as protected_router
 from backend.api.routes.qbittorrent import router as qbittorrent_router
@@ -190,6 +191,7 @@ fastapi_app.include_router(info_router)
 fastapi_app.include_router(settings_router)
 fastapi_app.include_router(dashboard_router)
 fastapi_app.include_router(mie_router)
+fastapi_app.include_router(migration_center_router)
 fastapi_app.include_router(auth_router)
 fastapi_app.include_router(rules_router)
 fastapi_app.include_router(account_router)

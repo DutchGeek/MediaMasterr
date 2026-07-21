@@ -7,6 +7,9 @@ def test_operations_workspace_compat_route_exists() -> None:
     paths = set(fastapi_app.openapi().get("paths", {}).keys())
     assert "/api/operations/workspace" in paths
     assert "/api/mie/operations" in paths
+    assert "/api/migration-center/workspace" in paths
+    assert "/api/migration-center/discovery" in paths
+    assert "/api/migration-center/plan" in paths
     assert "/api/operations/executions" in paths
     assert "/api/operations/executions/history" in paths
     assert "/api/operations/executions/{session_id}" in paths
@@ -57,6 +60,36 @@ def test_mie_operations_and_graph_openapi_contracts() -> None:
         "workflow",
         "media_policies",
     } <= operations_props
+
+    workflow_ref = schema["components"]["schemas"][operations_name]["properties"][
+        "workflow"
+    ]["$ref"]
+    workflow_name = workflow_ref.rsplit("/", 1)[-1]
+    asset_ref = schema["components"]["schemas"][workflow_name]["properties"][
+        "stages"
+    ]["items"]["$ref"]
+    stage_name = asset_ref.rsplit("/", 1)[-1]
+    stage_asset_ref = schema["components"]["schemas"][stage_name]["properties"][
+        "assets"
+    ]["items"]["$ref"]
+    asset_name = stage_asset_ref.rsplit("/", 1)[-1]
+    asset_props = set(schema["components"]["schemas"][asset_name]["properties"].keys())
+    assert {"narrative", "action_manifest", "file_evidence"} <= asset_props
+
+    migration_get = schema["paths"]["/api/migration-center/workspace"]["get"]
+    migration_ref = migration_get["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    migration_name = migration_ref.rsplit("/", 1)[-1]
+    migration_props = set(
+        schema["components"]["schemas"][migration_name]["properties"].keys()
+    )
+    assert {
+        "available_sources",
+        "available_destinations",
+        "supported_services",
+        "execution_placeholder",
+    } <= migration_props
 
     execution_post = schema["paths"]["/api/operations/executions"]["post"]
     execution_ref = execution_post["responses"]["200"]["content"][

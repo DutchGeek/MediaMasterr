@@ -16,6 +16,10 @@ from backend.database.models import (
     MovieVersion,
     OperationHistory,
     ReclaimCandidate,
+    Season,
+    Series,
+    SeriesArrRef,
+    SeriesServiceRef,
     ServiceConfig,
 )
 from backend.enums import MediaType, Service
@@ -254,6 +258,69 @@ async def test_operations_workspace_includes_issue_health_and_confidence_section
         assert stage_assets[0].file_evidence is not None
         assert stage_assets[0].application_evidence is not None
         assert stage_assets[0].relationship_evidence is not None
+        assert stage_assets[0].narrative is not None
+        assert stage_assets[0].narrative.what
+
+
+@pytest.mark.anyio
+async def test_action_manifest_distinguishes_required_and_recommended_actions() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        service = OperationsService(db)
+
+        required_manifest = service._build_action_manifest(
+            primary_action="retry_import",
+            stage_key="import",
+            target_type="download_object",
+            media_type=MediaType.MOVIE,
+            summary="Import failed",
+            reason="The library import did not complete cleanly.",
+            expected_destination="/media/movies/korean",
+        )
+        required_primary = required_manifest.available_actions[0]
+
+        recommended_manifest = service._build_action_manifest(
+            primary_action="delete_torrent_and_files",
+            stage_key="cleanup",
+            target_type="download_object",
+            media_type=MediaType.MOVIE,
+            summary="Imported successfully",
+            reason="The files have already been copied into the media library.",
+            expected_destination="/media/movies/korean",
+            estimated_recovery_bytes=18_400_000_000,
+        )
+        recommended_primary = recommended_manifest.available_actions[0]
+
+    await engine.dispose()
+
+    assert required_manifest.workflow_outcome == "blocked"
+    assert required_manifest.workflow_summary is not None
+    assert "Required action" in required_manifest.workflow_summary
+    assert required_primary.presentation == "required"
+    assert any(
+        "cannot continue successfully" in line.lower()
+        for line in required_manifest.primary_action_reasoning
+    )
+
+    assert recommended_manifest.workflow_outcome == "completed"
+    assert recommended_manifest.workflow_summary is not None
+    assert "Workflow completed successfully" in recommended_manifest.workflow_summary
+    assert recommended_primary.presentation == "recommended"
+    assert any(
+        "workflow has completed successfully" in line.lower()
+        for line in recommended_manifest.primary_action_reasoning
+    )
+    assert any(
+        "reclaim" in line.lower() or "remove" in line.lower()
+        for line in recommended_manifest.primary_action_reasoning
+    )
 
 
 @pytest.mark.anyio
@@ -433,3 +500,205 @@ async def test_file_evidence_hierarchy_and_duplicate_detection_is_semantic() -> 
     assert primary_inside is not None
     assert outside_copy is not None
     assert outside_copy.state == "duplicate"
+
+
+@pytest.mark.anyio
+async def test_series_library_root_uses_canonical_managed_folder_parent_with_multi_sonarr_roots() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        series = Series(title="Series Name", tmdb_id=61001)
+        db.add(series)
+        await db.flush()
+
+        sonarr_american = ServiceConfig(
+            service_type=Service.SONARR,
+            base_url="http://sonarr-american.local",
+            api_key="test",
+            name="Sonarr American",
+            enabled=True,
+        )
+        sonarr_korean = ServiceConfig(
+            service_type=Service.SONARR,
+            base_url="http://sonarr-korean.local",
+            api_key="test",
+            name="Sonarr Korean",
+            enabled=True,
+        )
+        sonarr_korean_4k = ServiceConfig(
+            service_type=Service.SONARR,
+            base_url="http://sonarr-korean-4k.local",
+            api_key="test",
+            name="Sonarr Korean 4K",
+            enabled=True,
+        )
+        db.add_all([sonarr_american, sonarr_korean, sonarr_korean_4k])
+        await db.flush()
+
+        db.add_all(
+            [
+                SeriesServiceRef(
+                    series_id=series.id,
+                    service=Service.PLEX,
+                    service_id="plex-series-1",
+                    library_id="plex-korean",
+                    library_name="Korean TV",
+                    path="/media/tv/korean/Series Name",
+                ),
+                Season(
+                    series_id=series.id,
+                    season_number=1,
+                    path="/media/tv/korean/Series Name/Season 01",
+                ),
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=sonarr_american.id,
+                    arr_series_id=101,
+                    arr_series_path="/media/tv/american/Series Name",
+                ),
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=sonarr_korean.id,
+                    arr_series_id=202,
+                    arr_series_path="/media/tv/korean/Series Name",
+                ),
+                SeriesArrRef(
+                    series_id=series.id,
+                    service_config_id=sonarr_korean_4k.id,
+                    arr_series_id=303,
+                    arr_series_path="/media/tv/korean-4k/Series Name",
+                ),
+                ReclaimCandidate(
+                    media_type=MediaType.SERIES,
+                    matched_rule_ids=[77],
+                    matched_criteria={"rule": "multi-root-series"},
+                    series_id=series.id,
+                    reason="Series hierarchy verification",
+                    estimated_space_bytes=0,
+                ),
+            ]
+        )
+        await db.commit()
+
+        workspace = await OperationsService(db).workspace()
+
+    await engine.dispose()
+
+    assets = [asset for stage in workspace.workflow.stages for asset in stage.assets]
+    target = next((asset for asset in assets if asset.title == "Series Name"), None)
+    assert target is not None
+
+    rows = target.file_evidence
+    library_root = next((row for row in rows if row.hierarchy_role == "library_root"), None)
+    managed_folder = next((row for row in rows if row.hierarchy_role == "managed_folder"), None)
+
+    assert managed_folder is not None
+    assert managed_folder.path == "/media/tv/korean/Series Name"
+    assert library_root is not None
+    assert library_root.path == "/media/tv/korean"
+    assert library_root.path != "/media/tv/american"
+
+
+@pytest.mark.anyio
+async def test_movie_library_root_uses_canonical_managed_folder_parent_with_multi_radarr_roots() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as db:
+        movie = Movie(title="Catalog Movie", tmdb_id=62001)
+        db.add(movie)
+        await db.flush()
+
+        radarr_american = ServiceConfig(
+            service_type=Service.RADARR,
+            base_url="http://radarr-american.local",
+            api_key="test",
+            name="Radarr American",
+            enabled=True,
+        )
+        radarr_korean = ServiceConfig(
+            service_type=Service.RADARR,
+            base_url="http://radarr-korean.local",
+            api_key="test",
+            name="Radarr Korean",
+            enabled=True,
+        )
+        radarr_korean_4k = ServiceConfig(
+            service_type=Service.RADARR,
+            base_url="http://radarr-korean-4k.local",
+            api_key="test",
+            name="Radarr Korean 4K",
+            enabled=True,
+        )
+        db.add_all([radarr_american, radarr_korean, radarr_korean_4k])
+        await db.flush()
+
+        db.add_all(
+            [
+                MovieVersion(
+                    movie_id=movie.id,
+                    service=Service.PLEX,
+                    service_item_id="plex-movie-1",
+                    service_media_id="plex-media-1",
+                    library_id="lib-korean-movies",
+                    library_name="Korean Movies",
+                    path="/media/movies/korean/Catalog Movie (2024)/Catalog Movie (2024).mkv",
+                ),
+                MovieArrRef(
+                    movie_id=movie.id,
+                    service_config_id=radarr_american.id,
+                    arr_movie_id=11,
+                    arr_movie_path="/media/movies/american/Catalog Movie (2024)",
+                ),
+                MovieArrRef(
+                    movie_id=movie.id,
+                    service_config_id=radarr_korean.id,
+                    arr_movie_id=22,
+                    arr_movie_path="/media/movies/korean/Catalog Movie (2024)",
+                ),
+                MovieArrRef(
+                    movie_id=movie.id,
+                    service_config_id=radarr_korean_4k.id,
+                    arr_movie_id=33,
+                    arr_movie_path="/media/movies/korean-4k/Catalog Movie (2024)",
+                ),
+                ReclaimCandidate(
+                    media_type=MediaType.MOVIE,
+                    matched_rule_ids=[88],
+                    matched_criteria={"rule": "multi-root-movie"},
+                    movie_id=movie.id,
+                    reason="Movie hierarchy verification",
+                    estimated_space_bytes=0,
+                ),
+            ]
+        )
+        await db.commit()
+
+        workspace = await OperationsService(db).workspace()
+
+    await engine.dispose()
+
+    assets = [asset for stage in workspace.workflow.stages for asset in stage.assets]
+    target = next((asset for asset in assets if asset.title == "Catalog Movie"), None)
+    assert target is not None
+
+    rows = target.file_evidence
+    library_root = next((row for row in rows if row.hierarchy_role == "library_root"), None)
+    managed_folder = next((row for row in rows if row.hierarchy_role == "managed_folder"), None)
+
+    assert managed_folder is not None
+    assert managed_folder.path == "/media/movies/korean/Catalog Movie (2024)"
+    assert library_root is not None
+    assert library_root.path == "/media/movies/korean"
+    assert library_root.path != "/media/movies/american"

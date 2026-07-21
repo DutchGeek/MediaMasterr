@@ -13,6 +13,7 @@ from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.service_manager import service_manager
+from backend.core.utils.file_utils import bytes_to_gb
 from backend.core.utils.filesystem import normalize_fpath
 from backend.database.models import (
     CleanupPlan,
@@ -57,6 +58,8 @@ from backend.models.mie import (
     OperationsHealthSummary,
     OperationsIssue,
     OperationsIssueSummary,
+    OperationsNarrative,
+    OperationsNarrativeLocation,
     OperationsOverviewResponse,
     OperationsRecommendation,
     OperationsRecommendationsResponse,
@@ -84,89 +87,89 @@ from backend.services.mie.request_context import MieRequestContext
 from backend.services.query_engine import QueryEngineSpec, apply_spec
 
 CARD_DEFINITIONS: list[tuple[str, str, str, str]] = [
-    ("downloading", "Downloading", "Active ingest workload currently tracked", "info"),
+    (
+        "downloading",
+        "Downloads In Progress",
+        "Media currently moving through the download workflow.",
+        "info",
+    ),
     (
         "import_pending",
-        "Import Pending",
-        "Media expected from ARR/torrent sources but not indexed",
+        "Waiting For Import",
+        "Completed downloads that are not yet available in the library.",
         "medium",
     ),
     (
         "ready_to_detach",
-        "Ready To Detach",
-        "Imported assets that reached ratio and can safely detach torrent",
+        "Completed And Ready For Cleanup",
+        "Imported media whose seeding requirement has completed.",
         "low",
     ),
     (
         "protected_seeding",
-        "Protected & Seeding",
-        "Assets that remain protected while seeding",
+        "Healthy But Still Seeding",
+        "Imported media that is still protected by an active seeding rule.",
         "info",
     ),
     (
         "detached_media",
-        "Detached Media",
-        "Assets with files present and no active torrent",
+        "Library Healthy",
+        "Media that is available in the library with no active cleanup work.",
         "info",
     ),
     (
         "orphaned_torrents",
-        "Orphaned Torrents",
-        "Torrents without linked media assets",
+        "Downloads Requiring Attention",
+        "Downloads that are no longer linked to a healthy library workflow.",
         "high",
     ),
     (
         "orphaned_files",
-        "Orphaned Files",
-        "Filesystem entries without media correlation",
+        "Unlinked Files",
+        "Filesystem items that are not tied to a known media workflow.",
         "high",
     ),
     (
         "broken_imports",
-        "Broken Imports",
-        "Library entries with missing or stale version files",
+        "Import Failed",
+        "Media that could not be imported cleanly into the library.",
         "high",
     ),
     (
         "unknown_files",
-        "Unknown Files",
-        "Indexed files outside configured media context",
+        "Unknown Library Paths",
+        "Files exist outside the expected managed media structure.",
         "medium",
     ),
     (
         "duplicate_releases",
-        "Duplicate Releases",
-        "Media groups with duplicate versions",
+        "Duplicate Found",
+        "Multiple linked copies are competing to be the canonical library version.",
         "medium",
     ),
     (
         "duplicate_torrents",
-        "Duplicate Torrents",
-        "Multiple torrents resolving to the same payload",
+        "Duplicate Downloads",
+        "More than one download appears to represent the same media payload.",
         "medium",
     ),
     (
         "empty_folders",
-        "Empty Folders",
-        "Candidate directories with no media files",
+        "Empty Media Folders",
+        "Folders exist without any useful media payload remaining.",
         "low",
     ),
     (
         "leftover_files",
-        "Leftover Files",
-        "Sample/RAR/NFO/proof leftovers identified by scanner",
+        "Cleanup Leftovers",
+        "Non-library remnants can be removed after the workflow completes.",
         "low",
     ),
-    (
-        "space_recovery",
-        "Space Recovery",
-        "Bytes recoverable from current cleanup recommendations",
-        "info",
-    ),
+    ("space_recovery", "Reclaim Storage", "Completed workflows with storage recovery opportunities.", "info"),
     (
         "identity_issues",
-        "Identity Issues",
-        "Assets requiring identity review across providers and metadata",
+        "Manual Match Required",
+        "Media identity or provider ownership needs review before the workflow is healthy.",
         "high",
     ),
 ]
@@ -194,6 +197,20 @@ _NOISE_TOKENS = {
     "aac",
     "ac3",
     "yify",
+}
+
+_PRIMARY_REQUIRED_ACTION_IDS = {
+    "retry_download",
+    "resume_download",
+    "retry_import",
+    "repair_identity",
+    "move_files",
+}
+
+_SECONDARY_ACTION_IDS = {
+    "ignore_recommendation",
+    "manual_review",
+    "mark_resolved",
 }
 
 _ACTION_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -1593,10 +1610,16 @@ class OperationsService:
 
         unique_by_id: dict[str, OperationsRecommendation] = {}
         for row in items:
+            stage_key = self._stage_for_recommendation(row)
             row.action_manifest = self._build_action_manifest(
                 primary_action=row.action,
+                stage_key=stage_key,
                 target_type=row.target_type,
                 media_type=row.media_type,
+                summary=row.summary,
+                reason=(row.reasons[0] if row.reasons else row.summary),
+                estimated_recovery_bytes=row.estimated_recovery_bytes,
+                references=row.graph_references,
             )
             unique_by_id[row.id] = row
         items = list(unique_by_id.values())
@@ -1892,10 +1915,403 @@ class OperationsService:
         return _ACTION_ALIASES.get(action_id, action_id)
 
     @staticmethod
+    def _is_required_primary_action(
+        action_id: str,
+        *,
+        stage_key: str,
+        summary: str,
+    ) -> bool:
+        normalized = OperationsService._normalize_action_id(action_id)
+        if stage_key in {"retention", "cleanup", "completed"}:
+            return False
+        if normalized in _PRIMARY_REQUIRED_ACTION_IDS:
+            return True
+        if normalized == "refresh_artwork" and "artwork" in summary.lower():
+            return True
+        return False
+
+    @staticmethod
+    def _action_presentation(
+        action_id: str,
+        *,
+        is_primary: bool,
+        primary_is_required: bool,
+        workflow_outcome: Literal["blocked", "in_progress", "completed"],
+    ) -> Literal["required", "recommended", "secondary"]:
+        normalized = OperationsService._normalize_action_id(action_id)
+        if normalized.startswith("open_") or normalized in _SECONDARY_ACTION_IDS:
+            return "secondary"
+        if is_primary and primary_is_required:
+            return "required"
+        if is_primary and workflow_outcome == "completed":
+            return "recommended"
+        return "secondary"
+
+    @staticmethod
+    def _workflow_outcome(
+        *,
+        stage_key: str,
+        primary_is_required: bool,
+    ) -> Literal["blocked", "in_progress", "completed"]:
+        if primary_is_required:
+            return "blocked"
+        if stage_key in {"retention", "cleanup", "completed"}:
+            return "completed"
+        return "in_progress"
+
+    @staticmethod
+    def _format_recovery_bytes(value: int) -> str | None:
+        if value <= 0:
+            return None
+        gb_value = bytes_to_gb(value)
+        if gb_value >= 1:
+            return f"{gb_value:.1f} GB"
+        mb_value = value / (1024**2)
+        if mb_value >= 1:
+            return f"{mb_value:.1f} MB"
+        kb_value = value / 1024
+        if kb_value >= 1:
+            return f"{kb_value:.1f} KB"
+        return f"{value} bytes"
+
+    def _primary_action_reasoning(
+        self,
+        action_id: str,
+        *,
+        stage_key: str,
+        summary: str,
+        reason: str,
+        expected_destination: str | None,
+        estimated_recovery_bytes: int,
+        workflow_outcome: Literal["blocked", "in_progress", "completed"],
+    ) -> list[str]:
+        normalized = self._normalize_action_id(action_id)
+        reasoning: list[str] = []
+
+        if workflow_outcome == "blocked":
+            reasoning.append(
+                "The workflow cannot continue successfully until this operational problem is resolved."
+            )
+            reasoning.append(reason or summary)
+            blocked_messages = {
+                "retry_download": "Retrying the download should restart acquisition and allow the workflow to continue.",
+                "resume_download": "The download is paused or stalled, so it must be resumed before import can continue.",
+                "retry_import": "The media is not yet imported cleanly into the library, so import must be retried before downstream validation can complete.",
+                "repair_identity": "Provider or ownership links are inconsistent, so identity repair is required before the asset can be treated as healthy.",
+                "refresh_artwork": "Artwork evidence is incomplete or invalid, so artwork repair is required before this workflow is considered healthy.",
+                "move_files": "Files are not in the expected managed location and need to be corrected before the workflow can proceed safely.",
+            }
+            if normalized in blocked_messages:
+                reasoning.append(blocked_messages[normalized])
+            if expected_destination:
+                reasoning.append(
+                    f"Expected managed destination: {expected_destination}."
+                )
+            return reasoning
+
+        if workflow_outcome == "completed":
+            reasoning.append("The workflow has completed successfully.")
+            if stage_key == "retention":
+                reasoning.append(
+                    "Import, library validation, and downstream availability checks are complete."
+                )
+            elif stage_key == "cleanup":
+                reasoning.append(
+                    "The media is already available in the library, and only cleanup or optimisation work remains."
+                )
+            else:
+                reasoning.append(
+                    "The media is already present and available in the managed environment."
+                )
+
+            reclaim_text = self._format_recovery_bytes(estimated_recovery_bytes)
+            recommended_messages = {
+                "delete_torrent": "Removing the torrent will free a slot in qBittorrent and keep the download queue tidy.",
+                "delete_torrent_and_files": (
+                    "The original torrent payload is no longer required."
+                    + (
+                        f" Removing it will reclaim {reclaim_text} of storage."
+                        if reclaim_text
+                        else " Removing it will reclaim storage."
+                    )
+                ),
+                "refresh_metadata": "Refreshing metadata can improve how the media appears across connected libraries.",
+                "refresh_artwork": "Refreshing artwork can improve library presentation without affecting the successful import.",
+                "sync_collections": "Collection sync can improve downstream organisation now that the workflow is complete.",
+                "archive": "Archiving this asset can reduce active storage pressure while keeping long-term retention available.",
+                "pause_torrent": "Pausing the torrent is optional maintenance if active seeding is no longer needed.",
+                "force_recheck": "A recheck is optional maintenance to confirm torrent integrity after the workflow completed.",
+            }
+            if normalized in recommended_messages:
+                reasoning.append(recommended_messages[normalized])
+            elif summary:
+                reasoning.append(summary)
+            return reasoning
+
+        reasoning.append("The workflow is still in progress.")
+        reasoning.append(reason or summary)
+        reasoning.append(
+            "No blocking fault is currently confirmed, but this lifecycle step may still require follow-up as the asset progresses."
+        )
+        return reasoning
+
+    @staticmethod
+    def _workflow_summary(
+        *,
+        workflow_outcome: Literal["blocked", "in_progress", "completed"],
+        primary_label: str,
+    ) -> str:
+        if workflow_outcome == "blocked":
+            return f"Workflow blocked. Required action: {primary_label}."
+        if workflow_outcome == "completed":
+            return f"Workflow completed successfully. Recommended action: {primary_label}."
+        return f"Workflow in progress. Next action: {primary_label}."
+
+    @staticmethod
+    def _format_duration_hours(hours: int | None) -> str | None:
+        if hours is None:
+            return None
+        days, remaining_hours = divmod(max(0, int(hours)), 24)
+        parts: list[str] = []
+        if days:
+            parts.append(f"{days} day{'s' if days != 1 else ''}")
+        if remaining_hours:
+            parts.append(
+                f"{remaining_hours} hour{'s' if remaining_hours != 1 else ''}"
+            )
+        if not parts:
+            return "less than 1 hour"
+        return " and ".join(parts)
+
+    @staticmethod
+    def _current_path_for_narrative(
+        *,
+        stage_key: str,
+        download_location: str | None,
+        library_location: str | None,
+        file_evidence: list[OperationsFileEvidence],
+    ) -> str | None:
+        path_by_role = {
+            row.hierarchy_role: row.path
+            for row in file_evidence
+            if row.path and row.hierarchy_role
+        }
+        if stage_key in {"download", "import", "retention", "cleanup"}:
+            return (
+                download_location
+                or path_by_role.get("download_source")
+                or path_by_role.get("primary_media_file")
+                or path_by_role.get("managed_folder")
+                or library_location
+            )
+        return (
+            path_by_role.get("primary_media_file")
+            or path_by_role.get("managed_folder")
+            or library_location
+            or download_location
+        )
+
+    @staticmethod
+    def _expected_path_for_narrative(
+        *,
+        expected_destination: str | None,
+        library_location: str | None,
+        file_evidence: list[OperationsFileEvidence],
+    ) -> str | None:
+        managed_folder = next(
+            (row.path for row in file_evidence if row.hierarchy_role == "managed_folder" and row.path),
+            None,
+        )
+        return managed_folder or library_location or expected_destination
+
+    @staticmethod
+    def _what_for_narrative(
+        *,
+        media_type: MediaType | None,
+        stage_key: str,
+        action_manifest: OperationActionManifest,
+        primary_action_label: str,
+        has_duplicate: bool,
+    ) -> str:
+        app_name = "Sonarr" if media_type is MediaType.SERIES else "Radarr"
+        if action_manifest.workflow_outcome == "blocked":
+            if "Import" in primary_action_label:
+                return "Import Failed"
+            if "Identity" in primary_action_label or "Match" in primary_action_label:
+                return "Manual Match Required"
+            if has_duplicate:
+                return "Duplicate Found"
+            return "Attention Required"
+        if has_duplicate:
+            return "Duplicate Found"
+        if stage_key == "download":
+            return "Download In Progress"
+        if stage_key == "import":
+            return f"Waiting for {app_name} Import"
+        if stage_key == "organize":
+            return "Library Review"
+        if stage_key == "retention":
+            return "Download Completed"
+        if stage_key == "cleanup":
+            return "Completed and Ready for Cleanup"
+        return "Library Healthy"
+
+    def _build_operational_narrative(
+        self,
+        *,
+        media_type: MediaType | None,
+        stage_key: str,
+        download_location: str | None,
+        library_location: str | None,
+        torrent_state: str | None,
+        import_state: str | None,
+        retention_remaining_hours: int | None,
+        estimated_space_recovery: int,
+        expected_destination: str | None,
+        file_evidence: list[OperationsFileEvidence],
+        action_manifest: OperationActionManifest,
+    ) -> OperationsNarrative:
+        primary_action = next(
+            (
+                action
+                for action in action_manifest.available_actions
+                if action.presentation in {"required", "recommended"}
+            ),
+            action_manifest.available_actions[0]
+            if action_manifest.available_actions
+            else None,
+        )
+        primary_label = primary_action.label if primary_action is not None else "No action"
+        has_duplicate = any(row.state == "duplicate" for row in file_evidence)
+        current_location = self._current_path_for_narrative(
+            stage_key=stage_key,
+            download_location=download_location,
+            library_location=library_location,
+            file_evidence=file_evidence,
+        )
+        expected_location = self._expected_path_for_narrative(
+            expected_destination=expected_destination,
+            library_location=library_location,
+            file_evidence=file_evidence,
+        )
+
+        why: list[str] = []
+        impact: list[str] = []
+        next_steps: list[str] = []
+
+        if action_manifest.workflow_outcome == "blocked":
+            why.extend(action_manifest.primary_action_reasoning)
+            if stage_key == "import":
+                impact.append(
+                    "The media will not appear in Plex until the import completes successfully."
+                )
+            elif has_duplicate:
+                impact.append(
+                    "Keeping both copies in circulation can waste storage and make the canonical library location unclear."
+                )
+            else:
+                impact.append(
+                    "This workflow is blocked until the required action is completed."
+                )
+            next_steps.append(primary_label)
+            outcome = "attention_required"
+        elif stage_key == "import":
+            why.append("The download has completed successfully.")
+            why.append(
+                "The files are waiting to be moved into the managed library location."
+            )
+            if import_state:
+                why.append(
+                    "Import is still being coordinated automatically in the background."
+                )
+            impact.append(
+                "The media may not appear in Plex until the import completes."
+            )
+            next_steps.extend(
+                [
+                    "No action required.",
+                    "Import will begin automatically when the library workflow is ready.",
+                ]
+            )
+            outcome = "healthy"
+        elif stage_key == "retention":
+            why.append("The download completed successfully.")
+            remaining = self._format_duration_hours(retention_remaining_hours)
+            if remaining:
+                why.append(
+                    f"The torrent is configured to continue seeding for another {remaining}."
+                )
+                why.append(
+                    "Cleanup options will unlock automatically after the seeding requirement has been satisfied."
+                )
+            else:
+                why.append(
+                    "The asset is still in a retention window before cleanup actions are offered."
+                )
+            impact.append("No impact. Everything is working normally.")
+            next_steps.extend(
+                [
+                    "No action required.",
+                    "Cleanup will become available automatically when the retention rule completes.",
+                ]
+            )
+            outcome = "healthy"
+        elif action_manifest.workflow_outcome == "completed":
+            why.extend(action_manifest.primary_action_reasoning)
+            impact.append(
+                "No impact. Everything is working normally. Any remaining action is optional maintenance."
+            )
+            next_steps.append(primary_label)
+            outcome = "healthy_with_recommendations"
+        elif has_duplicate:
+            why.append(
+                "More than one copy is linked to this media, so MediaMasterr cannot treat the library location as fully clean yet."
+            )
+            reclaim_text = self._format_recovery_bytes(estimated_space_recovery)
+            if reclaim_text:
+                impact.append(
+                    f"Keeping both copies will consume an additional {reclaim_text}."
+                )
+            else:
+                impact.append(
+                    "Keeping both copies will consume additional storage and may confuse the library workflow."
+                )
+            next_steps.append(primary_label)
+            outcome = "healthy_with_recommendations"
+        else:
+            why.append("The workflow is continuing automatically.")
+            if torrent_state:
+                why.append(
+                    "Download activity is still in progress before the library workflow can move to the next step."
+                )
+            impact.append("No immediate user action is required.")
+            next_steps.append("No action required.")
+            outcome = "healthy"
+
+        return OperationsNarrative(
+            outcome=cast(Any, outcome),
+            what=self._what_for_narrative(
+                media_type=media_type,
+                stage_key=stage_key,
+                action_manifest=action_manifest,
+                primary_action_label=primary_label,
+                has_duplicate=has_duplicate,
+            ),
+            where=OperationsNarrativeLocation(
+                current_path=current_location,
+                expected_path=expected_location,
+            ),
+            why=why,
+            impact=impact,
+            next=next_steps,
+        )
+
+    @staticmethod
     def _manifest_entry(
         action_id: str,
         *,
         impact_preview: list[str] | None = None,
+        presentation: Literal["required", "recommended", "secondary"] = "secondary",
     ) -> OperationActionManifestAction:
         definition = _ACTION_DEFINITIONS.get(action_id)
         if definition is None:
@@ -1904,6 +2320,7 @@ class OperationsService:
                 label=action_id.replace("_", " ").title(),
                 category="maintenance",
                 risk="medium",
+                presentation=presentation,
                 confirmation=False,
                 description="Action metadata unavailable.",
                 impact_preview=list(impact_preview or []),
@@ -1915,6 +2332,7 @@ class OperationsService:
             label=str(definition["label"]),
             category=cast(Any, definition["category"]),
             risk=cast(Any, definition["risk"]),
+            presentation=presentation,
             confirmation=bool(definition.get("confirmation", False)),
             description=str(definition.get("description") or ""),
             impact_preview=list(impact_preview or []),
@@ -2116,6 +2534,17 @@ class OperationsService:
             return normalized_path == normalized_parent or normalized_path.startswith(
                 f"{normalized_parent.rstrip('/')}/"
             )
+
+        def _parent_directory(path: str | None) -> str | None:
+            if not path:
+                return None
+            normalized = normalize_fpath(path, strip_ending_slash=True)
+            if not normalized or normalized in {"/", "."}:
+                return None
+            if "/" not in normalized:
+                return None
+            parent = normalized.rsplit("/", 1)[0]
+            return parent or "/"
 
         known_paths: list[tuple[str | None, str, str | None, str]] = []
         applications: list[OperationsApplicationEvidence] = []
@@ -2711,14 +3140,55 @@ class OperationsService:
         unique_file_rows: list[OperationsFileEvidence] = []
         seen_paths: set[tuple[str, str, str]] = set()
 
-        managed_folder_candidates = [
+        managed_folder_candidates: list[str] = []
+        if library_location:
+            managed_folder_candidates.append(library_location)
+        managed_folder_candidates.extend(
+            [
+                path
+                for path, _, _, role in known_paths
+                if path and role == "managed_folder"
+            ]
+        )
+
+        deduped_managed_folders: list[str] = []
+        seen_managed_folders: set[str] = set()
+        for candidate in managed_folder_candidates:
+            normalized_candidate = _norm_path(candidate)
+            if not normalized_candidate or normalized_candidate in seen_managed_folders:
+                continue
+            seen_managed_folders.add(normalized_candidate)
+            deduped_managed_folders.append(candidate)
+
+        reference_paths = [
             path
             for path, _, _, role in known_paths
-            if path and role == "managed_folder"
+            if path and role in {"primary_media_file", "additional_file"}
         ]
-        canonical_managed_folder = (
-            managed_folder_candidates[0] if managed_folder_candidates else None
-        )
+
+        canonical_managed_folder: str | None = None
+        if deduped_managed_folders:
+            if reference_paths:
+                scored_candidates = [
+                    (
+                        sum(
+                            1
+                            for reference_path in reference_paths
+                            if _is_same_or_child(reference_path, candidate)
+                        ),
+                        index,
+                        candidate,
+                    )
+                    for index, candidate in enumerate(deduped_managed_folders)
+                ]
+                best_score, _, best_candidate = max(scored_candidates)
+                if best_score > 0:
+                    canonical_managed_folder = best_candidate
+            if canonical_managed_folder is None:
+                canonical_managed_folder = deduped_managed_folders[0]
+
+        canonical_library_root = _parent_directory(canonical_managed_folder)
+        expected_destination_path = canonical_library_root or expected_destination
 
         base_rows = [
             (
@@ -2732,7 +3202,7 @@ class OperationsService:
             (
                 "library-root",
                 "Library Root",
-                expected_destination,
+                expected_destination_path,
                 policy_name or "Policy",
                 None,
                 "library_root",
@@ -2740,9 +3210,9 @@ class OperationsService:
             (
                 "managed-folder",
                 "Managed Folder",
-                library_location,
+                canonical_managed_folder,
                 "Media Library",
-                expected_destination,
+                expected_destination_path,
                 "managed_folder",
             ),
         ]
@@ -2771,7 +3241,7 @@ class OperationsService:
                     file_size=details["file_size"],
                     created=details["created"],
                     modified=details["modified"],
-                    expected_destination=expected_destination,
+                    expected_destination=expected_destination_path,
                     known_copy_of=known_copy_of,
                     import_eligibility=details["import_eligibility"],
                     source=source,
@@ -2864,8 +3334,8 @@ class OperationsService:
                     file_size=details["file_size"],
                     created=details["created"],
                     modified=details["modified"],
-                    expected_destination=expected_destination,
-                    known_copy_of=canonical_managed_folder or expected_destination,
+                    expected_destination=expected_destination_path,
+                    known_copy_of=canonical_managed_folder or expected_destination_path,
                     import_eligibility=details["import_eligibility"],
                     source=known_source,
                     state=cast(Any, state),
@@ -3102,7 +3572,7 @@ class OperationsService:
         case_summary = f"{reason} Next step: {recommendation}."
         return (
             case_summary,
-            expected_destination,
+            expected_destination_path,
             filesystem_comparison_summary,
             unique_file_rows,
             applications,
@@ -3114,15 +3584,26 @@ class OperationsService:
         self,
         *,
         primary_action: str,
+        stage_key: str,
         target_type: str,
         media_type: MediaType | None,
         summary: str = "",
+        reason: str = "",
         expected_destination: str | None = None,
         known_paths: list[str] | None = None,
         estimated_recovery_bytes: int = 0,
         references: list[str] | None = None,
     ) -> OperationActionManifest:
         resolved_primary = self._normalize_action_id(primary_action)
+        primary_is_required = self._is_required_primary_action(
+            resolved_primary,
+            stage_key=stage_key,
+            summary=summary,
+        )
+        workflow_outcome = self._workflow_outcome(
+            stage_key=stage_key,
+            primary_is_required=primary_is_required,
+        )
         actions: list[str] = [resolved_primary]
 
         if target_type in {"movie", "series", "season", "episode", "reclaim_candidate"}:
@@ -3162,7 +3643,29 @@ class OperationsService:
             seen.add(action)
             deduped.append(action)
 
+        primary_definition = _ACTION_DEFINITIONS.get(resolved_primary, {})
+        primary_label = str(
+            primary_definition.get(
+                "label", resolved_primary.replace("_", " ").title()
+            )
+        )
+        primary_action_reasoning = self._primary_action_reasoning(
+            resolved_primary,
+            stage_key=stage_key,
+            summary=summary,
+            reason=reason,
+            expected_destination=expected_destination,
+            estimated_recovery_bytes=estimated_recovery_bytes,
+            workflow_outcome=workflow_outcome,
+        )
+
         return OperationActionManifest(
+            workflow_outcome=cast(Any, workflow_outcome),
+            workflow_summary=self._workflow_summary(
+                workflow_outcome=workflow_outcome,
+                primary_label=primary_label,
+            ),
+            primary_action_reasoning=primary_action_reasoning,
             available_actions=[
                 self._manifest_entry(
                     action,
@@ -3173,6 +3676,12 @@ class OperationsService:
                         known_paths=list(known_paths or []),
                         estimated_recovery_bytes=estimated_recovery_bytes,
                         references=list(references or []),
+                    ),
+                    presentation=self._action_presentation(
+                        action,
+                        is_primary=action == resolved_primary,
+                        primary_is_required=primary_is_required,
+                        workflow_outcome=workflow_outcome,
                     ),
                 )
                 for action in deduped
@@ -3234,6 +3743,34 @@ class OperationsService:
                     "filesystem_index_entries.path",
                 ],
             )
+            action_manifest = self._build_action_manifest(
+                primary_action=row.recommendation,
+                stage_key=stage_key,
+                target_type="download_object",
+                media_type=row.media_type,
+                summary=row.cleanup_reason or row.recommendation,
+                reason=row.cleanup_reason or "Download lifecycle classification",
+                expected_destination=expected_destination,
+                known_paths=known_paths,
+                estimated_recovery_bytes=row.recoverable_space_bytes,
+                references=[
+                    "correlation_graph.timeline",
+                    "filesystem_index_entries.path",
+                ],
+            )
+            narrative = self._build_operational_narrative(
+                media_type=row.media_type,
+                stage_key=stage_key,
+                download_location=row.path,
+                library_location=row.library_path,
+                torrent_state=row.torrent_state,
+                import_state=row.import_state,
+                retention_remaining_hours=row.retention_remaining_hours,
+                estimated_space_recovery=row.recoverable_space_bytes,
+                expected_destination=expected_destination,
+                file_evidence=file_evidence,
+                action_manifest=action_manifest,
+            )
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
                     id=f"download:{row.path}",
@@ -3276,25 +3813,14 @@ class OperationsService:
                     ],
                     policy_name=policy_name,
                     filters=["downloads"],
-                    action_manifest=self._build_action_manifest(
-                        primary_action=row.recommendation,
-                        target_type="download_object",
-                        media_type=row.media_type,
-                        summary=row.cleanup_reason or row.recommendation,
-                        expected_destination=expected_destination,
-                        known_paths=known_paths,
-                        estimated_recovery_bytes=row.recoverable_space_bytes,
-                        references=[
-                            "correlation_graph.timeline",
-                            "filesystem_index_entries.path",
-                        ],
-                    ),
+                    action_manifest=action_manifest,
                     case_summary=case_summary,
                     expected_destination=expected_destination,
                     filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
+                    narrative=narrative,
                 )
             )
 
@@ -3350,6 +3876,49 @@ class OperationsService:
                 recommendation=item.explanation or item.summary,
                 estimated_recovery_bytes=item.estimated_recovery_bytes,
                 graph_references=item.graph_references,
+            )
+            action_manifest = self._build_action_manifest(
+                primary_action=item.action,
+                stage_key=stage_key,
+                target_type=item.target_type,
+                media_type=media_type,
+                summary=item.summary,
+                reason=(item.reasons[0] if item.reasons else item.summary),
+                expected_destination=expected_destination,
+                known_paths=known_paths,
+                estimated_recovery_bytes=item.estimated_recovery_bytes,
+                references=item.graph_references,
+            )
+            narrative = self._build_operational_narrative(
+                media_type=media_type,
+                stage_key=stage_key,
+                download_location=(
+                    matched_download.path if matched_download is not None else None
+                ),
+                library_location=(
+                    matched_download.library_path
+                    if matched_download is not None
+                    else None
+                ),
+                torrent_state=(
+                    matched_download.torrent_state
+                    if matched_download is not None
+                    else None
+                ),
+                import_state=(
+                    matched_download.import_state
+                    if matched_download is not None
+                    else None
+                ),
+                retention_remaining_hours=(
+                    matched_download.retention_remaining_hours
+                    if matched_download is not None
+                    else None
+                ),
+                estimated_space_recovery=item.estimated_recovery_bytes,
+                expected_destination=expected_destination,
+                file_evidence=file_evidence,
+                action_manifest=action_manifest,
             )
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
@@ -3411,22 +3980,14 @@ class OperationsService:
                     graph_references=item.graph_references,
                     policy_name=policy_name,
                     filters=self._filters_for_recommendation(item),
-                    action_manifest=self._build_action_manifest(
-                        primary_action=item.action,
-                        target_type=item.target_type,
-                        media_type=media_type,
-                        summary=item.summary,
-                        expected_destination=expected_destination,
-                        known_paths=known_paths,
-                        estimated_recovery_bytes=item.estimated_recovery_bytes,
-                        references=item.graph_references,
-                    ),
+                    action_manifest=action_manifest,
                     case_summary=case_summary,
                     expected_destination=expected_destination,
                     filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
+                    narrative=narrative,
                 )
             )
 
@@ -3459,6 +4020,31 @@ class OperationsService:
                 recommendation=issue.recommendation,
                 estimated_recovery_bytes=0,
                 graph_references=issue.graph_references,
+            )
+            action_manifest = self._build_action_manifest(
+                primary_action=issue.suggested_remediation,
+                stage_key=issue_stage,
+                target_type=issue.media_type.value,
+                media_type=issue.media_type,
+                summary=issue.reason,
+                reason=issue.reason,
+                expected_destination=expected_destination,
+                known_paths=known_paths,
+                estimated_recovery_bytes=0,
+                references=issue.graph_references,
+            )
+            narrative = self._build_operational_narrative(
+                media_type=issue.media_type,
+                stage_key=issue_stage,
+                download_location=None,
+                library_location=None,
+                torrent_state=None,
+                import_state=None,
+                retention_remaining_hours=None,
+                estimated_space_recovery=0,
+                expected_destination=expected_destination,
+                file_evidence=file_evidence,
+                action_manifest=action_manifest,
             )
             stage_assets[issue_stage].append(
                 OperationsWorkflowAsset(
@@ -3493,22 +4079,14 @@ class OperationsService:
                     graph_references=issue.graph_references,
                     policy_name=policy_name,
                     filters=self._filters_for_issue(issue),
-                    action_manifest=self._build_action_manifest(
-                        primary_action=issue.suggested_remediation,
-                        target_type=issue.media_type.value,
-                        media_type=issue.media_type,
-                        summary=issue.reason,
-                        expected_destination=expected_destination,
-                        known_paths=known_paths,
-                        estimated_recovery_bytes=0,
-                        references=issue.graph_references,
-                    ),
+                    action_manifest=action_manifest,
                     case_summary=case_summary,
                     expected_destination=expected_destination,
                     filesystem_comparison_summary=filesystem_comparison_summary,
                     file_evidence=file_evidence,
                     application_evidence=application_evidence,
                     relationship_evidence=relationship_evidence,
+                    narrative=narrative,
                 )
             )
 

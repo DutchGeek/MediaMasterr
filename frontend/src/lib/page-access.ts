@@ -40,6 +40,12 @@ export const PAGE_ACCESS_OPTIONS: PageAccessOption[] = [
     description: "Review Media Intelligence recommendations and plans.",
   },
   {
+    value: PageAccess.MigrationCenter,
+    label: "Migration Center",
+    path: "/migration-center",
+    description: "Discover ARR instances and build read-only migration plans.",
+  },
+  {
     value: PageAccess.Requests,
     label: "Requests",
     path: "/requests",
@@ -86,6 +92,7 @@ const redirectPreference = [
   PageAccess.Series,
   PageAccess.Identity,
   PageAccess.Operations,
+  PageAccess.MigrationCenter,
   PageAccess.Requests,
   PageAccess.Protected,
   PageAccess.History,

@@ -36,6 +36,7 @@ export enum PageAccess {
   Series = "series",
   Identity = "identity",
   Operations = "operations",
+  MigrationCenter = "migration_center",
   Requests = "requests",
   Protected = "protected",
   Candidates = "candidates",
@@ -157,12 +158,19 @@ export type ActionManifestCategory =
   | "destructive";
 
 export type ActionManifestRisk = "safe" | "medium" | "high";
+export type ActionPresentation = "required" | "recommended" | "secondary";
+export type WorkflowOutcome = "blocked" | "in_progress" | "completed";
+export type OperationalNarrativeOutcome =
+  | "healthy"
+  | "healthy_with_recommendations"
+  | "attention_required";
 
 export interface OperationActionManifestAction {
   id: string;
   label: string;
   category: ActionManifestCategory;
   risk: ActionManifestRisk;
+  presentation: ActionPresentation;
   confirmation: boolean;
   description: string | null;
   impact_preview: string[];
@@ -179,6 +187,25 @@ export interface OperationActionManifestAction {
 
 export interface OperationActionManifest {
   available_actions: OperationActionManifestAction[];
+  workflow_outcome: WorkflowOutcome;
+  workflow_summary: string | null;
+  primary_action_reasoning: string[];
+}
+
+export interface OperationsNarrativeLocation {
+  current_label: string;
+  current_path: string | null;
+  expected_label: string;
+  expected_path: string | null;
+}
+
+export interface OperationsNarrative {
+  outcome: OperationalNarrativeOutcome;
+  what: string;
+  where: OperationsNarrativeLocation;
+  why: string[];
+  impact: string[];
+  next: string[];
 }
 
 export interface OperationsFileEvidence {
@@ -573,6 +600,7 @@ export interface OperationsWorkflowAsset {
   file_evidence: OperationsFileEvidence[];
   application_evidence: OperationsApplicationEvidence[];
   relationship_evidence: OperationsRelationshipEvidence[];
+  narrative: OperationsNarrative | null;
 }
 
 export interface OperationsWorkflowStage {
@@ -618,6 +646,201 @@ export interface MieOperationsResponse {
   confidence: OperationsConfidenceSummary;
   downloads_health: DownloadsHealthSummary;
   downloads: DownloadLifecycleObject[];
+}
+
+export type MigrationServiceType = "sonarr" | "radarr";
+export type MigrationMediaKind = "series" | "movie";
+export type MigrationConflictResolution =
+  | "keep_destination"
+  | "overwrite"
+  | "merge_metadata"
+  | "compare"
+  | "skip";
+
+export interface MigrationInstanceOption {
+  config_id: number;
+  service_type: MigrationServiceType;
+  name: string;
+  base_url: string;
+  enabled: boolean;
+  is_available: boolean;
+  version: string | null;
+  library_count: number;
+  root_folder_count: number;
+  item_count: number;
+  warnings: string[];
+}
+
+export interface MigrationNamedValue {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface MigrationRootFolder {
+  id: string;
+  path: string;
+  free_space: number | null;
+  total_space: number | null;
+}
+
+export interface MigrationMediaItem {
+  kind: MigrationMediaKind;
+  external_id: string;
+  title: string;
+  year: number | null;
+  tmdb_id: number | null;
+  tvdb_id: number | null;
+  imdb_id: string | null;
+  current_path: string | null;
+  root_folder_path: string | null;
+  monitored: boolean | null;
+  tags: string[];
+  quality_profile: string | null;
+  language_profile: string | null;
+  custom_formats: string[];
+  metadata_profile: string | null;
+  collections: string[];
+  series_type: string | null;
+  minimum_availability: string | null;
+  season_monitoring: string | null;
+  has_file: boolean | null;
+  size_bytes: number;
+  episode_count: number;
+  season_count: number;
+}
+
+export interface MigrationInventorySummary {
+  root_folder_count: number;
+  library_count: number;
+  tag_count: number;
+  quality_profile_count: number;
+  language_profile_count: number;
+  custom_format_count: number;
+  metadata_profile_count: number;
+  collection_count: number;
+  media_count: number;
+  episode_count: number;
+  total_size_bytes: number;
+}
+
+export interface MigrationInventory {
+  instance: MigrationInstanceOption;
+  roots: MigrationRootFolder[];
+  libraries: MigrationNamedValue[];
+  tags: MigrationNamedValue[];
+  quality_profiles: MigrationNamedValue[];
+  language_profiles: MigrationNamedValue[];
+  custom_formats: MigrationNamedValue[];
+  metadata_profiles: MigrationNamedValue[];
+  collections: MigrationNamedValue[];
+  media_items: MigrationMediaItem[];
+  summary: MigrationInventorySummary;
+  warnings: string[];
+  discovered_at: string | null;
+}
+
+export interface MigrationRootMapping {
+  source_root: string;
+  destination_root: string;
+}
+
+export interface MigrationConflict {
+  key: string;
+  conflict_type: string;
+  title: string;
+  description: string;
+  source_value: string | null;
+  destination_value: string | null;
+  resolutions: MigrationConflictResolution[];
+}
+
+export interface MigrationPlanItem {
+  key: string;
+  kind: MigrationMediaKind;
+  title: string;
+  year: number | null;
+  source_path: string | null;
+  destination_path: string | null;
+  mapped_destination_path: string | null;
+  status:
+    | "copy_required"
+    | "existing"
+    | "skipped"
+    | "conflict"
+    | "manual_decision";
+  size_bytes: number;
+  episode_count: number;
+  conflict_keys: string[];
+  notes: string[];
+}
+
+export interface MigrationPlanSummary {
+  series_count: number;
+  movie_count: number;
+  episode_count: number;
+  item_count: number;
+  files_requiring_copy: number;
+  existing_files: number;
+  skipped_files: number;
+  conflict_count: number;
+  manual_decision_count: number;
+  total_size_bytes: number;
+  estimated_duration_minutes: number | null;
+}
+
+export interface MigrationMetadataPlan {
+  monitored_state: boolean;
+  tags: boolean;
+  root_folder: boolean;
+  quality_profile: boolean;
+  language_profile: boolean;
+  season_monitoring: boolean;
+  custom_formats: boolean;
+  series_type: boolean;
+  metadata_profile: boolean;
+  minimum_availability: boolean;
+  collections: boolean;
+}
+
+export interface MigrationDiscoveryRequest {
+  source_config_id: number;
+  destination_config_id: number;
+}
+
+export interface MigrationPlanRequest {
+  source_config_id: number;
+  destination_config_id: number;
+  root_mappings: MigrationRootMapping[];
+}
+
+export interface MigrationDiscoveryResponse {
+  source: MigrationInventory;
+  destination: MigrationInventory;
+  compatible: boolean;
+  warnings: string[];
+}
+
+export interface MigrationPlanResponse {
+  source: MigrationInventory;
+  destination: MigrationInventory;
+  root_mappings: MigrationRootMapping[];
+  items: MigrationPlanItem[];
+  conflicts: MigrationConflict[];
+  summary: MigrationPlanSummary;
+  metadata_plan: MigrationMetadataPlan;
+  execution_ready: boolean;
+  execution_placeholder: string;
+  generated_at: string;
+}
+
+export interface MigrationWorkspaceResponse {
+  available_sources: MigrationInstanceOption[];
+  available_destinations: MigrationInstanceOption[];
+  supported_services: MigrationServiceType[];
+  discovery: MigrationDiscoveryResponse | null;
+  plan: MigrationPlanResponse | null;
+  execution_placeholder: string;
 }
 
 export type IdentityConflictLevel = "none" | "low" | "medium" | "high";
