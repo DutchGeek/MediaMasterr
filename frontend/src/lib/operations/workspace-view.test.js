@@ -49,9 +49,24 @@ test("selection supports shift range and deselect", () => {
 
 test("stage stats classify ready blocked and needs review", () => {
   const assets = [
-    { confidence: 90, risk_level: "low", reason: "ok", current_status: "healthy" },
-    { confidence: 45, risk_level: "high", reason: "failed import", current_status: "blocked" },
-    { confidence: 65, risk_level: "medium", reason: "needs review", current_status: "pending" },
+    {
+      confidence: 90,
+      risk_level: "low",
+      reason: "ok",
+      current_status: "healthy",
+    },
+    {
+      confidence: 45,
+      risk_level: "high",
+      reason: "failed import",
+      current_status: "blocked",
+    },
+    {
+      confidence: 65,
+      risk_level: "medium",
+      reason: "needs review",
+      current_status: "pending",
+    },
   ];
 
   const stats = stageStats(assets);
@@ -72,7 +87,10 @@ test("bulk action summary aggregates preview and validation", () => {
     },
     {
       preview: { estimated_recovery_bytes: 200 },
-      validation: { valid: false, checks: [{ passed: false }, { passed: false }] },
+      validation: {
+        valid: false,
+        checks: [{ passed: false }, { passed: false }],
+      },
     },
   ]);
 
@@ -123,7 +141,12 @@ test("execution session moves completed cards and preserves moved selection", ()
     ],
   };
 
-  const next = applyExecutionSessionToWorkspace(workspace, session, new Set(), selection);
+  const next = applyExecutionSessionToWorkspace(
+    workspace,
+    session,
+    new Set(),
+    selection,
+  );
   assert.ok(next.workspace?.workflow?.stages);
   const movedStages = next.workspace.workflow.stages;
   assert.ok(movedStages[1]);
@@ -167,7 +190,12 @@ test("failed execution updates asset in place without lane move", () => {
     ],
   };
 
-  const next = applyExecutionSessionToWorkspace(workspace, session, new Set(), {});
+  const next = applyExecutionSessionToWorkspace(
+    workspace,
+    session,
+    new Set(),
+    {},
+  );
   assert.ok(next.workspace?.workflow?.stages);
   const failedStages = next.workspace.workflow.stages;
   assert.ok(failedStages[0]);
@@ -196,10 +224,44 @@ test("execution summary groups completed warnings and failures", () => {
 
 test("filtering and sorting preserves search and confidence semantics", () => {
   const assets = [
-    { id: "a", title: "Spider-Man", confidence: 55, risk_level: "high", current_status: "blocked", reason: "failed import", estimated_space_recovery: 10, media_type: "movie", filters: ["downloads"] },
-    { id: "b", title: "Batman", confidence: 90, risk_level: "low", current_status: "healthy", reason: "ok", estimated_space_recovery: 20, media_type: "movie", filters: ["downloads"] },
+    {
+      id: "a",
+      title: "Spider-Man",
+      confidence: 55,
+      risk_level: "high",
+      current_status: "blocked",
+      reason: "failed import",
+      estimated_space_recovery: 10,
+      media_type: "movie",
+      filters: ["downloads"],
+    },
+    {
+      id: "b",
+      title: "Batman",
+      confidence: 90,
+      risk_level: "low",
+      current_status: "healthy",
+      reason: "ok",
+      estimated_space_recovery: 20,
+      media_type: "movie",
+      filters: ["downloads"],
+    },
   ];
-  const filtered = filterAndSortAssets(assets, { search: "bat", readiness: "all", sortBy: "title", sortOrder: "asc" });
-  assert.deepEqual(filtered.map((row) => row.id), ["b"]);
-  assert.equal(predictNextWorkflowStage({ current_stage: "cleanup", next_action: "delete_files" }), "completed");
+  const filtered = filterAndSortAssets(assets, {
+    search: "bat",
+    readiness: "all",
+    sortBy: "title",
+    sortOrder: "asc",
+  });
+  assert.deepEqual(
+    filtered.map((row) => row.id),
+    ["b"],
+  );
+  assert.equal(
+    predictNextWorkflowStage({
+      current_stage: "cleanup",
+      next_action: "delete_files",
+    }),
+    "completed",
+  );
 });

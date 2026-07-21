@@ -101,7 +101,9 @@
   let error = $state("");
   let workspace = $state<MieOperationsResponse | null>(null);
   let auditTrail = $state<OperationAuditListResponse | null>(null);
-  let executionHistory = $state<OperationExecutionHistoryListResponse | null>(null);
+  let executionHistory = $state<OperationExecutionHistoryListResponse | null>(
+    null,
+  );
   let filterCatalog = $state<MediaFilterCatalogResponse | null>(null);
 
   let search = $state("");
@@ -172,11 +174,15 @@
   });
 
   const allWorkflowAssets = $derived.by(() => {
-    return (workspace?.workflow?.stages ?? []).flatMap((stage) => stage.assets ?? []);
+    return (workspace?.workflow?.stages ?? []).flatMap(
+      (stage) => stage.assets ?? [],
+    );
   });
 
   const activeStage = $derived.by(() => {
-    return stageRows.find((row) => row.key === selectedStage) ?? stageRows[0] ?? null;
+    return (
+      stageRows.find((row) => row.key === selectedStage) ?? stageRows[0] ?? null
+    );
   });
 
   const activeStageAssets = $derived.by(() => activeStage?.assets ?? []);
@@ -196,8 +202,12 @@
     return filteredAssets.slice(0, Math.max(1, visibleAssetLimit));
   });
 
-  const orderedFilteredIds = $derived.by(() => filteredAssets.map((asset) => asset.id));
-  const displayedIds = $derived.by(() => displayedAssets.map((asset) => asset.id));
+  const orderedFilteredIds = $derived.by(() =>
+    filteredAssets.map((asset) => asset.id),
+  );
+  const displayedIds = $derived.by(() =>
+    displayedAssets.map((asset) => asset.id),
+  );
 
   const selectedIdsInStage = $derived.by(() => {
     const key = activeStage?.key ?? "download";
@@ -221,23 +231,35 @@
   });
 
   const totalSelectedCount = $derived.by(() => {
-    return Object.values(stageSelections).reduce((count, ids) => count + ids.size, 0);
+    return Object.values(stageSelections).reduce(
+      (count, ids) => count + ids.size,
+      0,
+    );
   });
 
   const displayedSelectedCount = $derived.by(() => {
-    return displayedAssets.filter((asset) => selectedIdsInStage.has(asset.id)).length;
+    return displayedAssets.filter((asset) => selectedIdsInStage.has(asset.id))
+      .length;
   });
 
   const allDisplayedSelected = $derived.by(() => {
-    return displayedAssets.length > 0 && displayedSelectedCount === displayedAssets.length;
+    return (
+      displayedAssets.length > 0 &&
+      displayedSelectedCount === displayedAssets.length
+    );
   });
 
   const someDisplayedSelected = $derived.by(() => {
-    return displayedSelectedCount > 0 && displayedSelectedCount < displayedAssets.length;
+    return (
+      displayedSelectedCount > 0 &&
+      displayedSelectedCount < displayedAssets.length
+    );
   });
 
   const selectableRecommendationIds = $derived.by(() => {
-    return new Set((workspace?.recommendations.items ?? []).map((row) => row.id));
+    return new Set(
+      (workspace?.recommendations.items ?? []).map((row) => row.id),
+    );
   });
 
   const selectedRecommendationIds = $derived.by(() => {
@@ -252,7 +274,9 @@
 
   const selectedAsset = $derived.by(() => {
     if (!selectedAssetId) return null;
-    return allWorkflowAssets.find((asset) => asset.id === selectedAssetId) ?? null;
+    return (
+      allWorkflowAssets.find((asset) => asset.id === selectedAssetId) ?? null
+    );
   });
 
   const stageFilterRows = $derived.by(() => {
@@ -277,25 +301,37 @@
   const bulkSummary = $derived.by(() => summarizeBulkAction(workflowResults));
   const workflowProgressPercent = $derived.by(() => {
     if (!workflowProgress.total) return 0;
-    return Math.round((workflowProgress.completed / workflowProgress.total) * 100);
+    return Math.round(
+      (workflowProgress.completed / workflowProgress.total) * 100,
+    );
   });
 
   const executionActive = $derived.by(() => {
-    return !!executionSession && ["queued", "running"].includes(executionSession.status);
+    return (
+      !!executionSession &&
+      ["queued", "running"].includes(executionSession.status)
+    );
   });
 
   const executionProgressPercent = $derived.by(() => {
     if (!executionSession?.total) return 0;
-    return Math.round((executionSession.completed / executionSession.total) * 100);
+    return Math.round(
+      (executionSession.completed / executionSession.total) * 100,
+    );
   });
 
   const executionSummary = $derived.by(() => {
-    return executionSession ? summarizeExecutionSession(executionSession) : null;
+    return executionSession
+      ? summarizeExecutionSession(executionSession)
+      : null;
   });
 
   const executionItemsByRecommendation = $derived.by(() => {
     return new Map(
-      (executionSession?.items ?? []).map((item) => [item.recommendation_id, item]),
+      (executionSession?.items ?? []).map((item) => [
+        item.recommendation_id,
+        item,
+      ]),
     );
   });
 
@@ -307,16 +343,16 @@
   const selectedRecommendation = $derived.by(() => {
     if (!selectedAssetId) return null;
     return (
-      workspace?.recommendations.items.find((item) => item.id === selectedAssetId) ?? null
+      workspace?.recommendations.items.find(
+        (item) => item.id === selectedAssetId,
+      ) ?? null
     );
   });
 
   const selectedManifestActions = $derived.by(() => {
-    return (
-      selectedAsset?.action_manifest?.available_actions ??
+    return (selectedAsset?.action_manifest?.available_actions ??
       selectedRecommendation?.action_manifest?.available_actions ??
-      []
-    ) as OperationActionManifestAction[];
+      []) as OperationActionManifestAction[];
   });
 
   const groupedManifestActions = $derived.by(() => {
@@ -336,12 +372,22 @@
   const selectedTimeline = $derived.by(() => {
     if (!selectedAsset) return [];
     const mediaType = selectedAsset.media_type ?? null;
-    const targetId = selectedAsset.target_id ? Number(selectedAsset.target_id) : null;
+    const targetId = selectedAsset.target_id
+      ? Number(selectedAsset.target_id)
+      : null;
     return (workspace?.timeline_summary?.highlights ?? []).filter((event) => {
-      if (event.media_type && mediaType && event.media_type !== mediaType) return false;
-      if (event.media_id !== null && targetId !== null && event.media_id !== targetId) return false;
-      return event.title.toLowerCase().includes(selectedAsset.title.toLowerCase()) ||
-        event.media_id === targetId;
+      if (event.media_type && mediaType && event.media_type !== mediaType)
+        return false;
+      if (
+        event.media_id !== null &&
+        targetId !== null &&
+        event.media_id !== targetId
+      )
+        return false;
+      return (
+        event.title.toLowerCase().includes(selectedAsset.title.toLowerCase()) ||
+        event.media_id === targetId
+      );
     });
   });
 
@@ -349,14 +395,19 @@
     if (!selectedAsset) return [];
     const targetId = selectedAsset.target_id;
     return (executionHistory?.items ?? []).filter((row) =>
-      row.items.some((item) => item.recommendation_id === selectedAsset.id || item.target_id === targetId),
+      row.items.some(
+        (item) =>
+          item.recommendation_id === selectedAsset.id ||
+          item.target_id === targetId,
+      ),
     );
   });
 
   const selectedAuditRows = $derived.by(() => {
     if (!selectedAsset) return [];
     return (auditTrail?.items ?? []).filter((row) => {
-      if (selectedAsset.target_id && row.target_id === selectedAsset.target_id) return true;
+      if (selectedAsset.target_id && row.target_id === selectedAsset.target_id)
+        return true;
       return row.target_type === selectedAsset.target_type;
     });
   });
@@ -389,10 +440,47 @@
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
   }
 
-  function fileEvidenceFields(row: OperationsFileEvidence) {
+  function filePathDisplay(row: OperationsFileEvidence) {
+    return row.absolute_path ?? row.path ?? "Unavailable";
+  }
+
+  function fileOperationalStatus(row: OperationsFileEvidence) {
+    if (row.state === "duplicate") return "Needs Action";
+    if (row.state === "missing") return "Needs Action";
+    if (row.state === "unavailable") return "Needs Attention";
+    if (row.import_eligibility === "eligible" && row.state === "available")
+      return "Correct";
+    if (row.import_eligibility === "review required") return "Needs Review";
+    if (row.state === "partial") return "Needs Review";
+    return "Review";
+  }
+
+  function fileRecommendedAction(row: OperationsFileEvidence) {
+    if (row.state === "duplicate") {
+      return "Another primary media copy exists outside the canonical managed folder. Review and remove or reconcile the extra copy.";
+    }
+    if (row.state === "missing") {
+      return "The expected filesystem object is missing. Verify path mapping or restore the file.";
+    }
+    if (row.state === "unavailable") {
+      return "Provider path evidence is unavailable. Link or refresh the owning application metadata.";
+    }
+    if (row.import_eligibility === "eligible" && row.state === "available") {
+      return "No action required. This location is currently correct.";
+    }
+    if (row.import_eligibility === "review required") {
+      return "File is present but placement needs review against the managed destination.";
+    }
+    return "Review this path with the linked evidence and take the recommended lifecycle action.";
+  }
+
+  function fileEvidenceAdvancedFields(row: OperationsFileEvidence) {
     return [
       { label: "Hierarchy Role", value: row.hierarchy_role ?? "unknown" },
-      { label: "Absolute Path", value: row.absolute_path ?? row.path ?? "Unavailable" },
+      {
+        label: "Absolute Path",
+        value: row.absolute_path ?? row.path ?? "Unavailable",
+      },
       { label: "Filename", value: row.filename ?? "Unavailable" },
       { label: "Dataset", value: row.dataset ?? "Unavailable" },
       { label: "Pool", value: row.pool ?? "Unavailable" },
@@ -413,14 +501,22 @@
       },
       { label: "Created", value: formatEvidenceDate(row.created) },
       { label: "Modified", value: formatEvidenceDate(row.modified) },
-      { label: "Expected Destination", value: row.expected_destination ?? "Unavailable" },
+      {
+        label: "Expected Destination",
+        value: row.expected_destination ?? "Unavailable",
+      },
       { label: "Known Copy Of", value: row.known_copy_of ?? "Unavailable" },
-      { label: "Import Eligibility", value: row.import_eligibility ?? "Unavailable" },
+      {
+        label: "Import Eligibility",
+        value: row.import_eligibility ?? "Unavailable",
+      },
     ];
   }
 
   function normalizeActionId(action: string) {
-    const source = String(action || "").trim().toLowerCase();
+    const source = String(action || "")
+      .trim()
+      .toLowerCase();
     const aliases: Record<string, string> = {
       repair_import: "retry_import",
       review_identity: "repair_identity",
@@ -462,7 +558,8 @@
       }
       loadedCockpitKeys = new Set([...loadedCockpitKeys, key]);
     } catch (e: any) {
-      inspectorActionMessage = e?.message ?? "Failed to load inspector tab data";
+      inspectorActionMessage =
+        e?.message ?? "Failed to load inspector tab data";
     } finally {
       inspectorTabBusy = false;
     }
@@ -510,12 +607,19 @@
           open_plex: "#/operations",
         };
         const target = routes[action.id] ?? "#/settings";
-        window.open(`${window.location.origin}/${target}`, "_blank", "noopener,noreferrer");
+        window.open(
+          `${window.location.origin}/${target}`,
+          "_blank",
+          "noopener,noreferrer",
+        );
         inspectorActionMessage = `${action.label} launched.`;
         return;
       }
 
-      if (action.id === "ignore_recommendation" || action.id === "manual_review") {
+      if (
+        action.id === "ignore_recommendation" ||
+        action.id === "manual_review"
+      ) {
         inspectorActionMessage = `${action.label} recorded for manual workflow.`;
         return;
       }
@@ -537,23 +641,33 @@
         {},
       );
       workflowResults = [result, ...workflowResults].slice(0, 10);
-      inspectorActionMessage = result.execution.message || `${action.label} completed.`;
+      inspectorActionMessage =
+        result.execution.message || `${action.label} completed.`;
       await Promise.all([loadWorkspace(), loadHistory()]);
     } catch (e: any) {
-      inspectorActionMessage = e?.message ?? `Failed to execute ${action.label}`;
+      inspectorActionMessage =
+        e?.message ?? `Failed to execute ${action.label}`;
     } finally {
       inspectorActionBusy = false;
     }
   }
 
-  function addArrayParams(params: URLSearchParams, key: string, values: number[]) {
+  function addArrayParams(
+    params: URLSearchParams,
+    key: string,
+    values: number[],
+  ) {
     for (const value of values) {
       params.append(key, String(value));
     }
   }
 
-  function isExecutionTerminal(session: OperationExecutionSessionResponse | null): boolean {
-    return !!session && ["completed", "failed", "partial"].includes(session.status);
+  function isExecutionTerminal(
+    session: OperationExecutionSessionResponse | null,
+  ): boolean {
+    return (
+      !!session && ["completed", "failed", "partial"].includes(session.status)
+    );
   }
 
   function reconcileSelections(nextWorkspace: MieOperationsResponse | null) {
@@ -569,7 +683,8 @@
       for (const id of ids) {
         const stageKey = assetStageById.get(id);
         if (!stageKey) continue;
-        if (!nextSelections[stageKey]) nextSelections[stageKey] = new Set<string>();
+        if (!nextSelections[stageKey])
+          nextSelections[stageKey] = new Set<string>();
         nextSelections[stageKey].add(id);
       }
     }
@@ -589,7 +704,9 @@
       sortBy = prefs.sortBy ?? sortBy;
       sortOrder = prefs.sortOrder ?? sortOrder;
       candidatesOnly = prefs.candidatesOnly ?? candidatesOnly;
-      arrFilterIds = Array.isArray(prefs.arrFilterIds) ? prefs.arrFilterIds : arrFilterIds;
+      arrFilterIds = Array.isArray(prefs.arrFilterIds)
+        ? prefs.arrFilterIds
+        : arrFilterIds;
       decisionFilterIds = Array.isArray(prefs.decisionFilterIds)
         ? prefs.decisionFilterIds
         : decisionFilterIds;
@@ -656,13 +773,17 @@
     addArrayParams(params, "arr_filter_ids", arrFilterIds);
     addArrayParams(params, "decision_filter_ids", decisionFilterIds);
     addArrayParams(params, "smart_filter_ids", smartFilterIds);
-    const response = await get_api<MieOperationsResponse>(`/api/mie/operations?${params.toString()}`);
+    const response = await get_api<MieOperationsResponse>(
+      `/api/mie/operations?${params.toString()}`,
+    );
     workspace = response;
     reconcileSelections(response);
   }
 
   async function loadHistory() {
-    auditTrail = await get_api<OperationAuditListResponse>("/api/operations/audit");
+    auditTrail = await get_api<OperationAuditListResponse>(
+      "/api/operations/audit",
+    );
     executionHistory = await get_api<OperationExecutionHistoryListResponse>(
       "/api/operations/executions/history",
     );
@@ -760,7 +881,10 @@
         );
         results.push(response);
       } catch (e: any) {
-        workflowProgress = { ...workflowProgress, failed: workflowProgress.failed + 1 };
+        workflowProgress = {
+          ...workflowProgress,
+          failed: workflowProgress.failed + 1,
+        };
         results.push({
           recommendation_id: id,
           preview: {
@@ -963,7 +1087,10 @@
   });
 
   $effect(() => {
-    if (selectedFilter && !stageFilterRows.some((row) => row.key === selectedFilter)) {
+    if (
+      selectedFilter &&
+      !stageFilterRows.some((row) => row.key === selectedFilter)
+    ) {
       selectedFilter = null;
     }
   });
@@ -988,7 +1115,9 @@
 
 <div class="p-2.5 md:p-8">
   <div class="mx-auto max-w-[1520px] space-y-6">
-    <header class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10">
+    <header
+      class="rounded-[2rem] border border-border/70 bg-gradient-to-br from-card via-background to-secondary/20 p-6 shadow-xl shadow-black/10"
+    >
       <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">
         Operations Workspace
       </p>
@@ -996,16 +1125,21 @@
         Media Lifecycle Console
       </h1>
       <p class="mt-2 max-w-3xl text-sm text-muted-foreground">
-        Execute lifecycle work without losing context. Preview, validate, and run bulk actions while the workspace stays live.
+        Execute lifecycle work without losing context. Preview, validate, and
+        run bulk actions while the workspace stays live.
       </p>
     </header>
 
     {#if loading}
-      <div class="rounded-xl border border-border bg-card p-6 text-muted-foreground">
+      <div
+        class="rounded-xl border border-border bg-card p-6 text-muted-foreground"
+      >
         Loading operations workspace...
       </div>
     {:else if error}
-      <div class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive">
+      <div
+        class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 text-destructive"
+      >
         {error}
       </div>
     {:else}
@@ -1083,10 +1217,20 @@
                 selectedStage = stage.key;
               }}
             >
-              <p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">{stage.title}</p>
-              <p class="mt-2 text-2xl font-black text-foreground">{stage.count}</p>
-              <p class="mt-1 text-xs text-muted-foreground">{stage.description}</p>
-              <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+              <p
+                class="text-xs uppercase tracking-[0.18em] text-muted-foreground"
+              >
+                {stage.title}
+              </p>
+              <p class="mt-2 text-2xl font-black text-foreground">
+                {stage.count}
+              </p>
+              <p class="mt-1 text-xs text-muted-foreground">
+                {stage.description}
+              </p>
+              <div
+                class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground"
+              >
                 <span>Ready {stats.ready}</span>
                 <span>Blocked {stats.blocked}</span>
                 <span>Needs Review {stats.needsReview}</span>
@@ -1126,20 +1270,15 @@
               class={`rounded-full border px-3 py-1.5 text-xs ${selectedMediaType === option ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
               onclick={() => (selectedMediaType = option as LocalMediaFilter)}
             >
-              {option === "all" ? "All Media" : option[0].toUpperCase() + option.slice(1)}
+              {option === "all"
+                ? "All Media"
+                : option[0].toUpperCase() + option.slice(1)}
             </button>
           {/each}
         </div>
 
         <div class="flex flex-wrap gap-2">
-          {#each [
-            ["all", "All"],
-            ["ready", "Ready"],
-            ["blocked", "Blocked"],
-            ["needs_review", "Needs Review"],
-            ["high_confidence", "High Confidence"],
-            ["low_confidence", "Low Confidence"],
-          ] as [key, label]}
+          {#each [["all", "All"], ["ready", "Ready"], ["blocked", "Blocked"], ["needs_review", "Needs Review"], ["high_confidence", "High Confidence"], ["low_confidence", "Low Confidence"]] as [key, label]}
             <button
               type="button"
               class={`rounded-full border px-3 py-1.5 text-xs ${selectedReadiness === key ? "border-primary text-primary" : "border-border text-muted-foreground"}`}
@@ -1151,41 +1290,96 @@
         </div>
       </section>
 
-      <section class="sticky top-2 z-20 rounded-2xl border border-border/70 bg-background/95 p-3 shadow backdrop-blur">
+      <section
+        class="sticky top-2 z-20 rounded-2xl border border-border/70 bg-background/95 p-3 shadow backdrop-blur"
+      >
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="font-semibold text-foreground">Selected:</span>
-          <span class="rounded-full border border-border px-2 py-1 text-xs text-foreground">{selectedAssets.length} Visible</span>
-          <span class="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">Recommendation-backed: {selectedRecommendationIds.length}</span>
-          <span class="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">Lane: {activeStage?.title ?? "Workflow"}</span>
+          <span
+            class="rounded-full border border-border px-2 py-1 text-xs text-foreground"
+            >{selectedAssets.length} Visible</span
+          >
+          <span
+            class="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"
+            >Recommendation-backed: {selectedRecommendationIds.length}</span
+          >
+          <span
+            class="rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"
+            >Lane: {activeStage?.title ?? "Workflow"}</span
+          >
 
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40" onclick={selectAllFiltered}>Select All</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40" onclick={clearSelection}>Clear Selection</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40" onclick={() => bulkAction("preview")} disabled={workflowBusy || executionActive}>Preview</button>
-          <button type="button" class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40" onclick={() => bulkAction("validate")} disabled={workflowBusy || executionActive}>Validate</button>
-          <button type="button" class="rounded-full border border-primary bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20" onclick={beginExecution} disabled={workflowBusy || executionActive}>Execute</button>
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+            onclick={selectAllFiltered}>Select All</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+            onclick={clearSelection}>Clear Selection</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+            onclick={() => bulkAction("preview")}
+            disabled={workflowBusy || executionActive}>Preview</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/40"
+            onclick={() => bulkAction("validate")}
+            disabled={workflowBusy || executionActive}>Validate</button
+          >
+          <button
+            type="button"
+            class="rounded-full border border-primary bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/20"
+            onclick={beginExecution}
+            disabled={workflowBusy || executionActive}>Execute</button
+          >
         </div>
 
         {#if workflowBusy || workflowResults.length > 0 || workflowError || executionSession || executionError}
-          <div class="mt-3 rounded-xl border border-border/60 bg-card/60 p-3 text-xs" transition:slide>
+          <div
+            class="mt-3 rounded-xl border border-border/60 bg-card/60 p-3 text-xs"
+            transition:slide
+          >
             {#if workflowResults.length > 0}
-              <div class="flex flex-wrap items-center gap-2 text-muted-foreground">
+              <div
+                class="flex flex-wrap items-center gap-2 text-muted-foreground"
+              >
                 <span>Assets Selected {selectedRecommendationIds.length}</span>
                 <span>Validated {bulkSummary.validated}</span>
                 <span>Blocked {bulkSummary.blocked}</span>
                 <span>Warnings {bulkSummary.warnings}</span>
                 <span>Expected Success {bulkSummary.expectedSuccess}</span>
-                <span>Estimated Recovery {formatFileSize(bulkSummary.estimatedRecovery)}</span>
+                <span
+                  >Estimated Recovery {formatFileSize(
+                    bulkSummary.estimatedRecovery,
+                  )}</span
+                >
               </div>
             {/if}
 
             {#if workflowBusy}
               <div class="mt-3 space-y-1">
-                <p class="text-muted-foreground">{workflowMode === "preview" ? "Building preview..." : "Running validation..."}</p>
-                <div class="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                  <div class="h-full bg-primary transition-all" style={`width:${workflowProgressPercent}%`}></div>
+                <p class="text-muted-foreground">
+                  {workflowMode === "preview"
+                    ? "Building preview..."
+                    : "Running validation..."}
+                </p>
+                <div
+                  class="h-2 w-full overflow-hidden rounded-full bg-secondary/50"
+                >
+                  <div
+                    class="h-full bg-primary transition-all"
+                    style={`width:${workflowProgressPercent}%`}
+                  ></div>
                 </div>
                 <p class="text-muted-foreground">
-                  Completed {workflowProgress.completed} • Remaining {Math.max(0, workflowProgress.total - workflowProgress.completed)} • Failed {workflowProgress.failed}
+                  Completed {workflowProgress.completed} • Remaining {Math.max(
+                    0,
+                    workflowProgress.total - workflowProgress.completed,
+                  )} • Failed {workflowProgress.failed}
                 </p>
               </div>
             {/if}
@@ -1201,27 +1395,45 @@
                           ? "Execution Complete With Warnings"
                           : executionSession.status === "failed"
                             ? "Execution Failed"
-                            : executionSession.current_step_label || "Executing..."}
+                            : executionSession.current_step_label ||
+                              "Executing..."}
                     </p>
                     <p class="text-muted-foreground">
-                      {executionSession.current_asset_title || "Workspace remains live while operations continue."}
+                      {executionSession.current_asset_title ||
+                        "Workspace remains live while operations continue."}
                     </p>
                   </div>
                   <div class="flex flex-wrap gap-2 text-muted-foreground">
-                    <span>{executionSession.completed} / {executionSession.total} Assets</span>
-                    <span>Elapsed {formatDuration(executionSession.elapsed_ms)}</span>
+                    <span
+                      >{executionSession.completed} / {executionSession.total} Assets</span
+                    >
+                    <span
+                      >Elapsed {formatDuration(
+                        executionSession.elapsed_ms,
+                      )}</span
+                    >
                     {#if executionSession.estimated_remaining_ms !== null}
-                      <span>ETA {formatDuration(executionSession.estimated_remaining_ms)}</span>
+                      <span
+                        >ETA {formatDuration(
+                          executionSession.estimated_remaining_ms,
+                        )}</span
+                      >
                     {/if}
                   </div>
                 </div>
 
-                <div class="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                  <div class="h-full bg-primary transition-all duration-300" style={`width:${executionProgressPercent}%`}></div>
+                <div
+                  class="h-2 w-full overflow-hidden rounded-full bg-secondary/50"
+                >
+                  <div
+                    class="h-full bg-primary transition-all duration-300"
+                    style={`width:${executionProgressPercent}%`}
+                  ></div>
                 </div>
 
                 <p class="text-muted-foreground">
-                  Completed {executionSession.completed} • Remaining {executionSession.remaining} • Failed {executionSession.failed} • Warnings {executionSession.warnings}
+                  Completed {executionSession.completed} • Remaining {executionSession.remaining}
+                  • Failed {executionSession.failed} • Warnings {executionSession.warnings}
                 </p>
               </div>
             {/if}
@@ -1239,18 +1451,27 @@
       <section class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div class="space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <h2 class="text-lg font-semibold text-foreground">Assets in {activeStage?.title ?? "Stage"}</h2>
+            <h2 class="text-lg font-semibold text-foreground">
+              Assets in {activeStage?.title ?? "Stage"}
+            </h2>
             <p class="text-xs text-muted-foreground">
-              Showing {displayedAssets.length} of {filteredAssets.length} assets in {stageTitle(activeStage?.key)}
+              Showing {displayedAssets.length} of {filteredAssets.length} assets in
+              {stageTitle(activeStage?.key)}
             </p>
           </div>
 
           {#if filteredAssets.length === 0}
-            <p class="rounded-2xl border border-border/70 bg-card/60 p-4 text-sm text-muted-foreground">
+            <p
+              class="rounded-2xl border border-border/70 bg-card/60 p-4 text-sm text-muted-foreground"
+            >
               No assets for this stage/filter combination.
             </p>
           {:else}
-            <div class={displayMode === "list" ? "space-y-3" : "grid gap-3 md:grid-cols-2 2xl:grid-cols-3"}>
+            <div
+              class={displayMode === "list"
+                ? "space-y-3"
+                : "grid gap-3 md:grid-cols-2 2xl:grid-cols-3"}
+            >
               {#each displayedAssets as asset, index (`${asset.id}:${asset.current_stage ?? ""}:${index}`)}
                 {@const hasPoster = !!asset.poster_url}
                 <article
@@ -1258,7 +1479,9 @@
                   class={`rounded-2xl border bg-card/60 p-3 transition ${selectedAssetId === asset.id ? "border-primary shadow-lg shadow-primary/10" : "border-border/70 hover:bg-card"}`}
                 >
                   <div class="mb-2 flex items-start justify-between gap-2">
-                    <label class="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <label
+                      class="inline-flex items-center gap-2 text-xs text-muted-foreground"
+                    >
                       <input
                         type="checkbox"
                         aria-label={`Select ${asset.title}`}
@@ -1283,7 +1506,9 @@
 
                   <button
                     type="button"
-                    class={displayMode === "list" ? "grid w-full gap-3 text-left md:grid-cols-[140px_minmax(0,1fr)]" : "w-full text-left"}
+                    class={displayMode === "list"
+                      ? "grid w-full gap-3 text-left md:grid-cols-[140px_minmax(0,1fr)]"
+                      : "w-full text-left"}
                     onclick={() => inspectAsset(asset.id)}
                     aria-label={`Open inspector for ${asset.title}`}
                   >
@@ -1300,34 +1525,63 @@
                         class="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/30 px-3 text-center"
                         style={`height:${Math.max(180, Math.round(posterSize * 1.6))}px`}
                       >
-                        <p class="text-sm font-semibold text-foreground">Missing Artwork</p>
-                        <p class="mt-1 text-xs text-muted-foreground">Artwork Repair Available</p>
+                        <p class="text-sm font-semibold text-foreground">
+                          Missing Artwork
+                        </p>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                          Artwork Repair Available
+                        </p>
                       </div>
                     {/if}
 
                     <div class="mt-3 space-y-2 md:mt-0">
-                      <div class="flex flex-wrap items-start justify-between gap-2">
+                      <div
+                        class="flex flex-wrap items-start justify-between gap-2"
+                      >
                         <div>
-                          <h3 class="line-clamp-2 text-base font-semibold text-foreground">{asset.title}</h3>
-                          <p class="text-xs text-muted-foreground">Lifecycle {asset.current_stage}</p>
+                          <h3
+                            class="line-clamp-2 text-base font-semibold text-foreground"
+                          >
+                            {asset.title}
+                          </h3>
+                          <p class="text-xs text-muted-foreground">
+                            Lifecycle {asset.current_stage}
+                          </p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 text-xs">
-                          <span class="rounded-full border border-border px-2 py-0.5 text-muted-foreground">Risk {riskLabel(asset.risk_level)}</span>
+                          <span
+                            class="rounded-full border border-border px-2 py-0.5 text-muted-foreground"
+                            >Risk {riskLabel(asset.risk_level)}</span
+                          >
                         </div>
                       </div>
 
                       <div class="rounded-lg bg-background/70 p-2">
-                        <p class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Recommendation</p>
-                        <p class="mt-1 text-sm font-semibold text-foreground">{asset.next_action.replaceAll("_", " ")}</p>
+                        <p
+                          class="text-xs uppercase tracking-[0.14em] text-muted-foreground"
+                        >
+                          Recommendation
+                        </p>
+                        <p class="mt-1 text-sm font-semibold text-foreground">
+                          {asset.next_action.replaceAll("_", " ")}
+                        </p>
                       </div>
 
                       <div>
                         <div class="flex items-center justify-between text-xs">
                           <span class="text-muted-foreground">Confidence</span>
-                          <span class="text-foreground">{confidenceLabel(asset.confidence)} {asset.confidence ?? 0}%</span>
+                          <span class="text-foreground"
+                            >{confidenceLabel(asset.confidence)}
+                            {asset.confidence ?? 0}%</span
+                          >
                         </div>
-                        <div class="mt-1 h-2 overflow-hidden rounded-full bg-secondary/50">
-                          <div class={`h-full ${confidenceBarClass(asset.confidence)}`} style={`width:${asset.confidence ?? 0}%`}></div>
+                        <div
+                          class="mt-1 h-2 overflow-hidden rounded-full bg-secondary/50"
+                        >
+                          <div
+                            class={`h-full ${confidenceBarClass(asset.confidence)}`}
+                            style={`width:${asset.confidence ?? 0}%`}
+                          ></div>
                         </div>
                       </div>
                     </div>
@@ -1339,7 +1593,9 @@
         </div>
 
         <aside class="rounded-2xl border border-border/70 bg-card/60 p-4">
-          <h2 class="text-lg font-semibold text-foreground">Operational Cockpit</h2>
+          <h2 class="text-lg font-semibold text-foreground">
+            Operational Cockpit
+          </h2>
           {#if selectedAsset}
             <div class="mt-3 space-y-3 text-sm" in:fade>
               <div class="flex flex-wrap gap-2">
@@ -1355,7 +1611,9 @@
               </div>
 
               {#if inspectorActionMessage}
-                <p class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                <p
+                  class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-xs text-muted-foreground"
+                >
                   {inspectorActionMessage}
                 </p>
               {/if}
@@ -1374,42 +1632,101 @@
                       loading="lazy"
                     />
                   {:else}
-                    <div class="flex h-72 w-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground">
+                    <div
+                      class="flex h-72 w-full items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground"
+                    >
                       Artwork unavailable
                     </div>
                   {/if}
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground">
-                    <p class="text-[11px] uppercase tracking-[0.14em]">Operational Case Summary</p>
-                    <p class="mt-2 text-sm text-foreground">{selectedAsset.case_summary ?? selectedAsset.reason}</p>
-                    <p class="mt-2">Expected destination: {selectedAsset.expected_destination ?? "Unavailable"}</p>
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground"
+                  >
+                    <p class="text-[11px] uppercase tracking-[0.14em]">
+                      Operational Case Summary
+                    </p>
+                    <p class="mt-2 text-sm text-foreground">
+                      {selectedAsset.case_summary ?? selectedAsset.reason}
+                    </p>
+                    <p class="mt-2">
+                      Expected destination: {selectedAsset.expected_destination ??
+                        "Unavailable"}
+                    </p>
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-xs">
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Title</p><p class="font-medium text-foreground">{selectedAsset.title}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Year</p><p class="font-medium text-foreground">{selectedAsset.year ?? "Unknown"}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Media Type</p><p class="font-medium text-foreground">{selectedAsset.media_type ?? "Unknown"}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Lifecycle</p><p class="font-medium text-foreground">{selectedAsset.current_stage}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Recommendation</p><p class="font-medium text-foreground">{selectedAsset.next_action.replaceAll("_", " ")}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Confidence</p><p class="font-medium text-foreground">{selectedAsset.confidence ?? 0}%</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Health Status</p><p class="font-medium text-foreground">{selectedAsset.current_status}</p></div>
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2"><p class="text-muted-foreground">Current Owner</p><p class="font-medium text-foreground">{selectedAsset.policy_name ?? "Unavailable"}</p></div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Title</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.title}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Year</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.year ?? "Unknown"}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Media Type</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.media_type ?? "Unknown"}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Lifecycle</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.current_stage}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Recommendation</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.next_action.replaceAll("_", " ")}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Confidence</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.confidence ?? 0}%
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Health Status</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.current_status}
+                      </p>
+                    </div>
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
+                      <p class="text-muted-foreground">Current Owner</p>
+                      <p class="font-medium text-foreground">
+                        {selectedAsset.policy_name ?? "Unavailable"}
+                      </p>
+                    </div>
                   </div>
                 </div>
               {/if}
 
               {#if cockpitTab === "status"}
                 <div class="space-y-2 text-xs">
-                  {#each [
-                    ["Download", selectedAsset.torrent_state || "Unavailable"],
-                    ["Import", selectedAsset.import_state || "Unavailable"],
-                    ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"],
-                    ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"],
-                    ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"],
-                    ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"],
-                    ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"],
-                    ["Retention", selectedAsset.retention_policy || "Unavailable"],
-                    ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"],
-                  ] as [label, value]}
-                    <div class="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  {#each [["Download", selectedAsset.torrent_state || "Unavailable"], ["Import", selectedAsset.import_state || "Unavailable"], ["Filesystem", selectedLocations.some((row) => row.path) ? "Healthy" : "Unavailable"], ["Identity", selectedAsset.graph_references.length > 0 ? "Healthy" : "Unavailable"], ["Metadata", selectedRecommendation ? "Pending" : "Unavailable"], ["Artwork", selectedAsset.poster_url ? "Healthy" : "Warning"], ["Collections", selectedAsset.policy_name ? "Pending" : "Unavailable"], ["Retention", selectedAsset.retention_policy || "Unavailable"], ["Cleanup", selectedAsset.current_stage === "cleanup" ? "Running" : "Pending"]] as [label, value]}
+                    <div
+                      class="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2"
+                    >
                       <span class="text-muted-foreground">{label}</span>
                       <span class="font-medium text-foreground">{value}</span>
                     </div>
@@ -1419,53 +1736,167 @@
 
               {#if cockpitTab === "files"}
                 <div class="space-y-2 text-xs">
-                  {#if selectedLocations.length > 0}
-                    {#each selectedLocations as row}
-                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
-                        <div class="flex items-center justify-between gap-2">
-                          <p class="font-medium text-foreground">{row.label}</p>
-                          <span class="text-muted-foreground">{row.state}</span>
-                        </div>
-                        <div class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {#each fileEvidenceFields(row) as field}
-                            <div class="rounded-md border border-border/40 bg-background/70 p-2">
-                              <p class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{field.label}</p>
-                              <p class="mt-1 break-all font-medium text-foreground">{field.value}</p>
-                            </div>
-                          {/each}
-                        </div>
-                        <p class="mt-2 text-muted-foreground">{row.explanation ?? "No additional filesystem explanation is available."}</p>
-                        <p class="mt-1 text-muted-foreground">Source: {row.source ?? "Unavailable"}</p>
-                        <div class="mt-2 flex flex-wrap gap-1">
-                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Open Folder</button>
-                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => copyPath(row.path)}>Copy Path</button>
-                          <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => openFilesystemPath(row.path)}>Reveal File</button>
-                        </div>
-                      </div>
-                    {/each}
-                  {:else}
-                    <p class="text-muted-foreground">No filesystem evidence is currently indexed for this asset.</p>
-                  {/if}
-                  <div class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left text-muted-foreground">
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left text-muted-foreground"
+                  >
                     <p class="font-medium text-foreground">Compare Files</p>
                     <p class="mt-1">{fileComparisonSummary}</p>
                   </div>
+
+                  {#if selectedLocations.length > 0}
+                    {#each selectedLocations as row}
+                      <div
+                        class="rounded-lg border border-border/60 bg-background/60 p-3"
+                      >
+                        <div class="flex items-center justify-between gap-2">
+                          <p class="font-medium text-foreground">{row.label}</p>
+                          <span
+                            class="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+                            >{fileOperationalStatus(row)}</span
+                          >
+                        </div>
+
+                        <div
+                          class="mt-2 rounded-md border border-border/50 bg-background/70 p-2"
+                        >
+                          <p
+                            class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+                          >
+                            Location
+                          </p>
+                          <p class="mt-1 break-all font-medium text-foreground">
+                            {filePathDisplay(row)}
+                          </p>
+                        </div>
+
+                        <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                          <div
+                            class="rounded-md border border-border/40 bg-background/70 p-2"
+                          >
+                            <p
+                              class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+                            >
+                              Expected Destination
+                            </p>
+                            <p
+                              class="mt-1 break-all font-medium text-foreground"
+                            >
+                              {row.expected_destination ?? "Unavailable"}
+                            </p>
+                          </div>
+                          <div
+                            class="rounded-md border border-border/40 bg-background/70 p-2"
+                          >
+                            <p
+                              class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+                            >
+                              Import Eligibility
+                            </p>
+                            <p class="mt-1 font-medium text-foreground">
+                              {row.import_eligibility ?? "Unavailable"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <p class="mt-2 text-muted-foreground">
+                          {fileRecommendedAction(row)}
+                        </p>
+                        <p class="mt-1 text-muted-foreground">
+                          {row.explanation ??
+                            "No additional filesystem explanation is available."}
+                        </p>
+                        <p class="mt-1 text-muted-foreground">
+                          Source: {row.source ?? "Unavailable"}
+                        </p>
+
+                        <div class="mt-2 flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            class="rounded-full border border-border px-2 py-1"
+                            onclick={() => openFilesystemPath(row.path)}
+                            >Open Folder</button
+                          >
+                          <button
+                            type="button"
+                            class="rounded-full border border-border px-2 py-1"
+                            onclick={() => copyPath(row.path)}>Copy Path</button
+                          >
+                          <button
+                            type="button"
+                            class="rounded-full border border-border px-2 py-1"
+                            onclick={() => openFilesystemPath(row.path)}
+                            >Reveal File</button
+                          >
+                        </div>
+
+                        <details
+                          class="mt-2 rounded-md border border-border/40 bg-background/70 p-2"
+                        >
+                          <summary
+                            class="cursor-pointer text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground"
+                          >
+                            Advanced Details
+                          </summary>
+                          <div
+                            class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                          >
+                            {#each fileEvidenceAdvancedFields(row) as field}
+                              <div
+                                class="rounded-md border border-border/40 bg-background/80 p-2"
+                              >
+                                <p
+                                  class="text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+                                >
+                                  {field.label}
+                                </p>
+                                <p
+                                  class="mt-1 break-all font-medium text-foreground"
+                                >
+                                  {field.value}
+                                </p>
+                              </div>
+                            {/each}
+                          </div>
+                        </details>
+                      </div>
+                    {/each}
+                  {:else}
+                    <p class="text-muted-foreground">
+                      No filesystem evidence is currently indexed for this
+                      asset.
+                    </p>
+                  {/if}
                 </div>
               {/if}
 
               {#if cockpitTab === "applications"}
                 <div class="space-y-2 text-xs">
                   {#each selectedApplications as row}
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
                       <p class="text-muted-foreground">{row.role}</p>
-                      <p class="font-medium text-foreground">{row.application}</p>
-                      <p class="mt-1 text-muted-foreground">{row.status === "linked" ? row.reference ?? "Linked" : "Unavailable"}</p>
-                      <p class="mt-1 text-muted-foreground">{row.explanation}</p>
+                      <p class="font-medium text-foreground">
+                        {row.application}
+                      </p>
+                      <p class="mt-1 text-muted-foreground">
+                        {row.status === "linked"
+                          ? (row.reference ?? "Linked")
+                          : "Unavailable"}
+                      </p>
+                      <p class="mt-1 text-muted-foreground">
+                        {row.explanation}
+                      </p>
                     </div>
                   {/each}
                   <div class="flex flex-wrap gap-1">
                     {#each selectedManifestActions.filter((row) => row.category === "external") as action}
-                      <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{action.label}</button>
+                      <button
+                        type="button"
+                        class="rounded-full border border-border px-2 py-1"
+                        onclick={() => runManifestAction(action)}
+                        disabled={inspectorActionBusy}>{action.label}</button
+                      >
                     {/each}
                   </div>
                 </div>
@@ -1474,10 +1905,16 @@
               {#if cockpitTab === "relationships"}
                 <div class="space-y-2 text-xs">
                   {#each selectedRelationships as row}
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
                       <p class="text-muted-foreground">{row.label}</p>
-                      <p class="font-medium text-foreground">{row.value ?? "Unavailable"}</p>
-                      <p class="mt-1 text-muted-foreground">{row.explanation}</p>
+                      <p class="font-medium text-foreground">
+                        {row.value ?? "Unavailable"}
+                      </p>
+                      <p class="mt-1 text-muted-foreground">
+                        {row.explanation}
+                      </p>
                     </div>
                   {/each}
                 </div>
@@ -1487,15 +1924,27 @@
                 <div class="space-y-2 text-xs">
                   {#if selectedTimeline.length > 0}
                     {#each selectedTimeline as event}
-                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <div
+                        class="rounded-lg border border-border/60 bg-background/60 p-2"
+                      >
                         <p class="font-medium text-foreground">{event.title}</p>
-                        <p class="text-muted-foreground">{new Date(event.happened_at).toLocaleString()} • {event.origin}</p>
-                        <p class="mt-1 text-muted-foreground">{event.summary}</p>
-                        <p class="mt-1 text-muted-foreground">This event explains how the asset reached its current operational state.</p>
+                        <p class="text-muted-foreground">
+                          {new Date(event.happened_at).toLocaleString()} • {event.origin}
+                        </p>
+                        <p class="mt-1 text-muted-foreground">
+                          {event.summary}
+                        </p>
+                        <p class="mt-1 text-muted-foreground">
+                          This event explains how the asset reached its current
+                          operational state.
+                        </p>
                       </div>
                     {/each}
                   {:else}
-                    <p class="text-muted-foreground">Timeline is unavailable because no lifecycle events are currently linked for this asset.</p>
+                    <p class="text-muted-foreground">
+                      Timeline is unavailable because no lifecycle events are
+                      currently linked for this asset.
+                    </p>
                   {/if}
                 </div>
               {/if}
@@ -1504,24 +1953,57 @@
                 <div class="space-y-3 text-xs">
                   {#if groupedManifestActions.length > 0}
                     {#each groupedManifestActions as group}
-                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
-                        <p class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{group.category}</p>
+                      <div
+                        class="rounded-lg border border-border/60 bg-background/60 p-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
+                        >
+                          {group.category}
+                        </p>
                         <div class="mt-2 space-y-2">
                           {#each group.actions as action}
-                            <div class="rounded-md border border-border/50 bg-background/70 p-2">
-                              <div class="flex items-start justify-between gap-2">
+                            <div
+                              class="rounded-md border border-border/50 bg-background/70 p-2"
+                            >
+                              <div
+                                class="flex items-start justify-between gap-2"
+                              >
                                 <div>
-                                  <p class="font-medium text-foreground">{action.label}</p>
-                                  <p class="text-muted-foreground">{action.description || "No description"}</p>
+                                  <p class="font-medium text-foreground">
+                                    {action.label}
+                                  </p>
+                                  <p class="text-muted-foreground">
+                                    {action.description || "No description"}
+                                  </p>
                                 </div>
-                                <span class={`rounded-full border px-2 py-0.5 ${action.risk === "high" ? "border-destructive/60 text-destructive" : action.risk === "medium" ? "border-orange-400/60 text-orange-300" : "border-emerald-500/60 text-emerald-300"}`}>Risk {action.risk}</span>
+                                <span
+                                  class={`rounded-full border px-2 py-0.5 ${action.risk === "high" ? "border-destructive/60 text-destructive" : action.risk === "medium" ? "border-orange-400/60 text-orange-300" : "border-emerald-500/60 text-emerald-300"}`}
+                                  >Risk {action.risk}</span
+                                >
                               </div>
-                              <div class="mt-2 flex items-center justify-between gap-2">
-                                <p class="text-muted-foreground">{action.kind} • {action.automation}</p>
-                                <button type="button" class="rounded-full border border-border px-2 py-1" onclick={() => runManifestAction(action)} disabled={inspectorActionBusy}>{inspectorActionBusy ? "Running..." : "Run"}</button>
+                              <div
+                                class="mt-2 flex items-center justify-between gap-2"
+                              >
+                                <p class="text-muted-foreground">
+                                  {action.kind} • {action.automation}
+                                </p>
+                                <button
+                                  type="button"
+                                  class="rounded-full border border-border px-2 py-1"
+                                  onclick={() => runManifestAction(action)}
+                                  disabled={inspectorActionBusy}
+                                  >{inspectorActionBusy
+                                    ? "Running..."
+                                    : "Run"}</button
+                                >
                               </div>
-                              <div class="mt-2 rounded-md border border-border/40 bg-background/60 p-2 text-muted-foreground">
-                                <p class="font-medium text-foreground">Impact Preview</p>
+                              <div
+                                class="mt-2 rounded-md border border-border/40 bg-background/60 p-2 text-muted-foreground"
+                              >
+                                <p class="font-medium text-foreground">
+                                  Impact Preview
+                                </p>
                                 {#if action.impact_preview.length > 0}
                                   <ul class="mt-1 space-y-1">
                                     {#each action.impact_preview as detail}
@@ -1529,7 +2011,10 @@
                                     {/each}
                                   </ul>
                                 {:else}
-                                  <p class="mt-1">Impact preview unavailable because no supporting evidence is currently linked.</p>
+                                  <p class="mt-1">
+                                    Impact preview unavailable because no
+                                    supporting evidence is currently linked.
+                                  </p>
                                 {/if}
                               </div>
                             </div>
@@ -1545,9 +2030,16 @@
 
               {#if cockpitTab === "execution"}
                 <div class="space-y-2 text-xs">
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 p-2"
+                  >
                     <p class="text-muted-foreground">Execution Preview</p>
-                    <p class="font-medium text-foreground">Expected Recovery {formatFileSize(inspectorPreview?.preview?.estimated_recovery_bytes ?? 0)}</p>
+                    <p class="font-medium text-foreground">
+                      Expected Recovery {formatFileSize(
+                        inspectorPreview?.preview?.estimated_recovery_bytes ??
+                          0,
+                      )}
+                    </p>
                     {#if inspectorPreview?.preview?.details?.length}
                       <ul class="mt-2 space-y-1 text-muted-foreground">
                         {#each inspectorPreview.preview.details as detail}
@@ -1557,26 +2049,44 @@
                     {/if}
                   </div>
 
-                  <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                  <div
+                    class="rounded-lg border border-border/60 bg-background/60 p-2"
+                  >
                     <p class="text-muted-foreground">Validation</p>
                     {#if inspectorValidation?.validation?.checks?.length}
                       <div class="mt-2 space-y-1">
                         {#each inspectorValidation.validation.checks as check}
-                          <p class={check.passed ? "text-emerald-300" : "text-destructive"}>{check.passed ? "✓" : "✕"} {check.label} • {check.detail}</p>
+                          <p
+                            class={check.passed
+                              ? "text-emerald-300"
+                              : "text-destructive"}
+                          >
+                            {check.passed ? "✓" : "✕"}
+                            {check.label} • {check.detail}
+                          </p>
                         {/each}
                       </div>
                     {:else}
-                      <p class="text-muted-foreground">Validation unavailable.</p>
+                      <p class="text-muted-foreground">
+                        Validation unavailable.
+                      </p>
                     {/if}
                   </div>
 
                   {#if selectedExecutionItem}
-                    <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                    <div
+                      class="rounded-lg border border-border/60 bg-background/60 p-2"
+                    >
                       <p class="text-muted-foreground">Execution Monitor</p>
-                      <p class="font-medium text-foreground">{selectedExecutionItem.message || selectedExecutionItem.status}</p>
+                      <p class="font-medium text-foreground">
+                        {selectedExecutionItem.message ||
+                          selectedExecutionItem.status}
+                      </p>
                       <div class="mt-2 space-y-1">
                         {#each selectedExecutionItem.stages as stage}
-                          <p class="text-muted-foreground">{stage.label}: {stage.status}</p>
+                          <p class="text-muted-foreground">
+                            {stage.label}: {stage.status}
+                          </p>
                         {/each}
                       </div>
                     </div>
@@ -1588,14 +2098,24 @@
                 <div class="space-y-2 text-xs">
                   {#if selectedHistoryRows.length > 0}
                     {#each selectedHistoryRows as row}
-                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <div
+                        class="rounded-lg border border-border/60 bg-background/60 p-2"
+                      >
                         <p class="font-medium text-foreground">{row.action}</p>
-                        <p class="text-muted-foreground">{row.status} • {new Date(row.created_at).toLocaleString()}</p>
-                        <p class="text-muted-foreground">Recovered {formatFileSize(row.recovered_space_bytes)}</p>
+                        <p class="text-muted-foreground">
+                          {row.status} • {new Date(
+                            row.created_at,
+                          ).toLocaleString()}
+                        </p>
+                        <p class="text-muted-foreground">
+                          Recovered {formatFileSize(row.recovered_space_bytes)}
+                        </p>
                       </div>
                     {/each}
                   {:else}
-                    <p class="text-muted-foreground">No history for this asset yet.</p>
+                    <p class="text-muted-foreground">
+                      No history for this asset yet.
+                    </p>
                   {/if}
                 </div>
               {/if}
@@ -1604,87 +2124,150 @@
                 <div class="space-y-2 text-xs">
                   {#if selectedAuditRows.length > 0}
                     {#each selectedAuditRows.slice(0, 30) as row}
-                      <div class="rounded-lg border border-border/60 bg-background/60 p-2">
+                      <div
+                        class="rounded-lg border border-border/60 bg-background/60 p-2"
+                      >
                         <p class="font-medium text-foreground">{row.action}</p>
-                        <p class="text-muted-foreground">{row.result} • {new Date(row.created_at).toLocaleString()}</p>
-                        <p class="text-muted-foreground">{row.target_type}#{row.target_id ?? "n/a"} • {formatFileSize(row.recovery_bytes)}</p>
+                        <p class="text-muted-foreground">
+                          {row.result} • {new Date(
+                            row.created_at,
+                          ).toLocaleString()}
+                        </p>
+                        <p class="text-muted-foreground">
+                          {row.target_type}#{row.target_id ?? "n/a"} • {formatFileSize(
+                            row.recovery_bytes,
+                          )}
+                        </p>
                       </div>
                     {/each}
                   {:else}
-                    <p class="text-muted-foreground">No diagnostic logs available for this asset.</p>
+                    <p class="text-muted-foreground">
+                      No diagnostic logs available for this asset.
+                    </p>
                   {/if}
                 </div>
               {/if}
             </div>
           {:else}
             <p class="mt-2 text-sm text-muted-foreground">
-              Select an asset card to inspect why it happened, where files are, which apps own it, and what you can do next.
+              Select an asset card to inspect why it happened, where files are,
+              which apps own it, and what you can do next.
             </p>
           {/if}
         </aside>
       </section>
 
       {#if executionSession && isExecutionTerminal(executionSession) && executionSummary}
-        <section class="rounded-2xl border border-border/70 bg-card/60 p-4" in:slide>
+        <section
+          class="rounded-2xl border border-border/70 bg-card/60 p-4"
+          in:slide
+        >
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 class="text-lg font-semibold text-foreground">Execution Summary</h2>
+              <h2 class="text-lg font-semibold text-foreground">
+                Execution Summary
+              </h2>
               <p class="text-sm text-muted-foreground">
-                {executionSummary.successfulCount} successful • {executionSummary.warningCount} warnings • {executionSummary.failedCount} failed
+                {executionSummary.successfulCount} successful • {executionSummary.warningCount}
+                warnings • {executionSummary.failedCount} failed
               </p>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-sm text-muted-foreground md:grid-cols-4">
-              <div class="rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+            <div
+              class="grid grid-cols-2 gap-2 text-sm text-muted-foreground md:grid-cols-4"
+            >
+              <div
+                class="rounded-xl border border-border/60 bg-background/60 px-3 py-2"
+              >
                 <p>Successful</p>
-                <p class="mt-1 text-lg font-semibold text-foreground">{executionSummary.successfulCount}</p>
+                <p class="mt-1 text-lg font-semibold text-foreground">
+                  {executionSummary.successfulCount}
+                </p>
               </div>
-              <div class="rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+              <div
+                class="rounded-xl border border-border/60 bg-background/60 px-3 py-2"
+              >
                 <p>Warnings</p>
-                <p class="mt-1 text-lg font-semibold text-foreground">{executionSummary.warningCount}</p>
+                <p class="mt-1 text-lg font-semibold text-foreground">
+                  {executionSummary.warningCount}
+                </p>
               </div>
-              <div class="rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+              <div
+                class="rounded-xl border border-border/60 bg-background/60 px-3 py-2"
+              >
                 <p>Failed</p>
-                <p class="mt-1 text-lg font-semibold text-foreground">{executionSummary.failedCount}</p>
+                <p class="mt-1 text-lg font-semibold text-foreground">
+                  {executionSummary.failedCount}
+                </p>
               </div>
-              <div class="rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+              <div
+                class="rounded-xl border border-border/60 bg-background/60 px-3 py-2"
+              >
                 <p>Recovered Space</p>
-                <p class="mt-1 text-lg font-semibold text-foreground">{formatFileSize(executionSummary.recoveredSpace)}</p>
-                <p class="text-xs">{formatDuration(executionSummary.elapsedMs)}</p>
+                <p class="mt-1 text-lg font-semibold text-foreground">
+                  {formatFileSize(executionSummary.recoveredSpace)}
+                </p>
+                <p class="text-xs">
+                  {formatDuration(executionSummary.elapsedMs)}
+                </p>
               </div>
             </div>
           </div>
 
           <div class="mt-4 grid gap-3 lg:grid-cols-3">
-            <details class="rounded-xl border border-border/60 bg-background/50 p-3">
-              <summary class="cursor-pointer font-medium text-foreground">Successful ({executionSummary.successfulCount})</summary>
+            <details
+              class="rounded-xl border border-border/60 bg-background/50 p-3"
+            >
+              <summary class="cursor-pointer font-medium text-foreground"
+                >Successful ({executionSummary.successfulCount})</summary
+              >
               <div class="mt-3 space-y-2 text-sm text-muted-foreground">
                 {#each executionSummary.successful as item}
-                  <div class="rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                    <p class="font-medium text-foreground">{item.title || item.recommendation_id}</p>
+                  <div
+                    class="rounded-lg border border-border/50 bg-background/70 px-3 py-2"
+                  >
+                    <p class="font-medium text-foreground">
+                      {item.title || item.recommendation_id}
+                    </p>
                     <p>{item.message || "Completed"}</p>
                   </div>
                 {/each}
               </div>
             </details>
 
-            <details class="rounded-xl border border-border/60 bg-background/50 p-3">
-              <summary class="cursor-pointer font-medium text-foreground">Warnings ({executionSummary.warningCount})</summary>
+            <details
+              class="rounded-xl border border-border/60 bg-background/50 p-3"
+            >
+              <summary class="cursor-pointer font-medium text-foreground"
+                >Warnings ({executionSummary.warningCount})</summary
+              >
               <div class="mt-3 space-y-2 text-sm text-muted-foreground">
                 {#each executionSummary.warnings as item}
-                  <div class="rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                    <p class="font-medium text-foreground">{item.title || item.recommendation_id}</p>
+                  <div
+                    class="rounded-lg border border-border/50 bg-background/70 px-3 py-2"
+                  >
+                    <p class="font-medium text-foreground">
+                      {item.title || item.recommendation_id}
+                    </p>
                     <p>{item.message || "Blocked"}</p>
                   </div>
                 {/each}
               </div>
             </details>
 
-            <details class="rounded-xl border border-border/60 bg-background/50 p-3">
-              <summary class="cursor-pointer font-medium text-foreground">Failures ({executionSummary.failedCount})</summary>
+            <details
+              class="rounded-xl border border-border/60 bg-background/50 p-3"
+            >
+              <summary class="cursor-pointer font-medium text-foreground"
+                >Failures ({executionSummary.failedCount})</summary
+              >
               <div class="mt-3 space-y-2 text-sm text-muted-foreground">
                 {#each executionSummary.failed as item}
-                  <div class="rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                    <p class="font-medium text-foreground">{item.title || item.recommendation_id}</p>
+                  <div
+                    class="rounded-lg border border-border/50 bg-background/70 px-3 py-2"
+                  >
+                    <p class="font-medium text-foreground">
+                      {item.title || item.recommendation_id}
+                    </p>
                     <p>{item.message || "Failed"}</p>
                   </div>
                 {/each}
@@ -1696,17 +2279,29 @@
 
       <section class="grid gap-4 xl:grid-cols-2">
         <div class="rounded-2xl border border-border/70 bg-card/60 p-4">
-          <h2 class="text-lg font-semibold text-foreground">Execution History</h2>
+          <h2 class="text-lg font-semibold text-foreground">
+            Execution History
+          </h2>
           {#if executionHistory && executionHistory.items.length > 0}
             <div class="mt-3 space-y-2 text-sm">
               {#each executionHistory.items.slice(0, 8) as row}
-                <details class="rounded-xl border border-border/50 bg-background/70 px-3 py-3">
+                <details
+                  class="rounded-xl border border-border/50 bg-background/70 px-3 py-3"
+                >
                   <summary class="cursor-pointer list-none">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div
+                      class="flex flex-wrap items-center justify-between gap-2"
+                    >
                       <div>
-                        <p class="font-medium text-foreground">{row.action === "bulk_execute" ? "Operations Execution" : row.action}</p>
+                        <p class="font-medium text-foreground">
+                          {row.action === "bulk_execute"
+                            ? "Operations Execution"
+                            : row.action}
+                        </p>
                         <p class="text-xs text-muted-foreground">
-                          {row.selected_count} assets • {row.status} • {formatDuration(row.elapsed_ms)}
+                          {row.selected_count} assets • {row.status} • {formatDuration(
+                            row.elapsed_ms,
+                          )}
                         </p>
                       </div>
                       <div class="text-xs text-muted-foreground">
@@ -1717,9 +2312,13 @@
                   </summary>
                   <div class="mt-3 space-y-2 text-xs text-muted-foreground">
                     {#each row.items as item}
-                      <div class="rounded-lg border border-border/40 bg-background/60 px-3 py-2">
+                      <div
+                        class="rounded-lg border border-border/40 bg-background/60 px-3 py-2"
+                      >
                         <div class="flex items-center justify-between gap-2">
-                          <span class="font-medium text-foreground">{item.title}</span>
+                          <span class="font-medium text-foreground"
+                            >{item.title}</span
+                          >
                           <span>{item.status}</span>
                         </div>
                         <p class="mt-1">{item.message}</p>
@@ -1730,7 +2329,9 @@
               {/each}
             </div>
           {:else}
-            <p class="mt-2 text-sm text-muted-foreground">No execution history yet.</p>
+            <p class="mt-2 text-sm text-muted-foreground">
+              No execution history yet.
+            </p>
           {/if}
         </div>
 
@@ -1739,14 +2340,23 @@
           {#if auditTrail && auditTrail.items.length > 0}
             <div class="mt-3 space-y-2 text-xs">
               {#each auditTrail.items.slice(0, 10) as row}
-                <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2">
-                  <span class="text-foreground">{row.action} • {row.target_type}#{row.target_id ?? "n/a"}</span>
-                  <span class="text-muted-foreground">{row.result} • {formatFileSize(row.recovery_bytes)}</span>
+                <div
+                  class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2"
+                >
+                  <span class="text-foreground"
+                    >{row.action} • {row.target_type}#{row.target_id ??
+                      "n/a"}</span
+                  >
+                  <span class="text-muted-foreground"
+                    >{row.result} • {formatFileSize(row.recovery_bytes)}</span
+                  >
                 </div>
               {/each}
             </div>
           {:else}
-            <p class="mt-2 text-sm text-muted-foreground">No operation history yet.</p>
+            <p class="mt-2 text-sm text-muted-foreground">
+              No operation history yet.
+            </p>
           {/if}
         </div>
       </section>

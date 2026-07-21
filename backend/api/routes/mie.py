@@ -65,7 +65,9 @@ async def get_mie_operations(
     decision_filter_ids: list[int] = Query(default_factory=list),
     smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> OperationsWorkspaceResponse:
-    return await OperationsService(db, request_context=request_context).workspace_filtered(
+    return await OperationsService(
+        db, request_context=request_context
+    ).workspace_filtered(
         candidates_only=candidates_only,
         imported_filter_ids=arr_filter_ids,
         decision_filter_ids=decision_filter_ids,
@@ -102,9 +104,9 @@ async def get_mie_timeline(
     request_context: MieRequestContext = Depends(get_mie_request_context),
     limit: int = 80,
 ) -> MieTimelineResponse:
-    return await MediaIntelligenceService(
-        db, request_context=request_context
-    ).timeline(limit=limit)
+    return await MediaIntelligenceService(db, request_context=request_context).timeline(
+        limit=limit
+    )
 
 
 @router.get(
@@ -118,7 +120,9 @@ async def get_mie_relationship_graph(
     db: AsyncSession = Depends(get_db),
     request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> MieRelationshipGraphResponse:
-    return await MediaIntelligenceService(db, request_context=request_context).relationships(
+    return await MediaIntelligenceService(
+        db, request_context=request_context
+    ).relationships(
         media_type=media_type,
         media_id=media_id,
     )
@@ -365,9 +369,9 @@ async def start_identity_sync(
     db: AsyncSession = Depends(get_db),
     request_context: MieRequestContext = Depends(get_mie_request_context),
 ) -> IdentitySyncJobResponse:
-    return await IdentityCenterService(
-        db, request_context=request_context
-    ).start_sync(user_id=current_user.id)
+    return await IdentityCenterService(db, request_context=request_context).start_sync(
+        user_id=current_user.id
+    )
 
 
 @router.get("/identity/sync-history", response_model=IdentitySyncHistoryResponse)

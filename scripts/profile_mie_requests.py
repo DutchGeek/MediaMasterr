@@ -101,11 +101,7 @@ async def _profile_once(kind: str, use_context: bool) -> Metrics:
     try:
         async with async_db() as db:
             user = (
-                (
-                    await db.execute(
-                        select(User).order_by(User.id.asc()).limit(1)
-                    )
-                )
+                (await db.execute(select(User).order_by(User.id.asc()).limit(1)))
                 .scalars()
                 .first()
             )
@@ -140,7 +136,9 @@ async def _profile_once(kind: str, use_context: bool) -> Metrics:
             )
             if context is not None:
                 metrics.graph_build_count = int(
-                    context.telemetry.get("graph_build_count", metrics.graph_build_count)
+                    context.telemetry.get(
+                        "graph_build_count", metrics.graph_build_count
+                    )
                 )
                 metrics.provider_execution_count = int(
                     context.telemetry.get(
@@ -149,11 +147,14 @@ async def _profile_once(kind: str, use_context: bool) -> Metrics:
                 )
                 metrics.downloads_intelligence_runs = int(
                     context.telemetry.get(
-                        "downloads_intelligence_runs", metrics.downloads_intelligence_runs
+                        "downloads_intelligence_runs",
+                        metrics.downloads_intelligence_runs,
                     )
                 )
                 metrics.filesystem_scan_count = int(
-                    context.telemetry.get("filesystem_scan_count", metrics.filesystem_scan_count)
+                    context.telemetry.get(
+                        "filesystem_scan_count", metrics.filesystem_scan_count
+                    )
                 )
             return metrics
     finally:

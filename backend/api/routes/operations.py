@@ -52,7 +52,9 @@ async def get_operations_workspace_compat(
     smart_filter_ids: list[int] = Query(default_factory=list),
 ) -> OperationsWorkspaceResponse:
     """Compatibility endpoint for legacy clients expecting /api/operations/workspace."""
-    return await OperationsService(db, request_context=request_context).workspace_filtered(
+    return await OperationsService(
+        db, request_context=request_context
+    ).workspace_filtered(
         candidates_only=candidates_only,
         imported_filter_ids=arr_filter_ids,
         decision_filter_ids=decision_filter_ids,
@@ -200,14 +202,18 @@ async def get_execution_history(
     return await operations_execution_manager.list_history(db)
 
 
-@router.get("/executions/{session_id}", response_model=OperationExecutionSessionResponse)
+@router.get(
+    "/executions/{session_id}", response_model=OperationExecutionSessionResponse
+)
 async def get_execution_session(
     session_id: str,
     _user: Annotated[User, Depends(require_page_access(PageAccess.OPERATIONS))],
 ) -> OperationExecutionSessionResponse:
     session = await operations_execution_manager.get_session(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail=f"Unknown execution session '{session_id}'")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown execution session '{session_id}'"
+        )
     return session
 
 

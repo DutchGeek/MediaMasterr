@@ -38,7 +38,9 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _elapsed_ms(started_at: datetime | None, completed_at: datetime | None = None) -> int:
+def _elapsed_ms(
+    started_at: datetime | None, completed_at: datetime | None = None
+) -> int:
     if started_at is None:
         return 0
     end_time = completed_at or _utcnow()
@@ -121,7 +123,9 @@ class OperationsExecutionManager:
             service = service_factory(db)
             recommendations = await service.recommendations()
             by_id = {row.id: row for row in recommendations.items}
-            selected = [by_id[row_id] for row_id in recommendation_ids if row_id in by_id]
+            selected = [
+                by_id[row_id] for row_id in recommendation_ids if row_id in by_id
+            ]
             if not selected:
                 raise ValueError("No matching recommendations found for execution")
 
@@ -144,7 +148,9 @@ class OperationsExecutionManager:
                 target_id=session_id,
                 result="running",
                 safety_level="mixed",
-                recovery_bytes=sum(int(row.estimated_recovery_bytes or 0) for row in selected),
+                recovery_bytes=sum(
+                    int(row.estimated_recovery_bytes or 0) for row in selected
+                ),
                 created_by_user_id=created_by_user_id,
                 metadata_json={
                     "session_id": session_id,
@@ -184,7 +190,9 @@ class OperationsExecutionManager:
         )
         return self._to_response(state)
 
-    async def get_session(self, session_id: str) -> OperationExecutionSessionResponse | None:
+    async def get_session(
+        self, session_id: str
+    ) -> OperationExecutionSessionResponse | None:
         async with self._lock:
             state = self._sessions.get(session_id)
             if state is None:
@@ -223,7 +231,9 @@ class OperationsExecutionManager:
                     completed_at = None
             items.append(
                 OperationExecutionHistoryEntry(
-                    session_id=str(metadata.get("session_id") or row.target_id or row.id),
+                    session_id=str(
+                        metadata.get("session_id") or row.target_id or row.id
+                    ),
                     history_id=int(row.id),
                     action=row.action,
                     status=str(metadata.get("status") or row.result),
@@ -259,37 +269,69 @@ class OperationsExecutionManager:
                 state.current_asset_title = item.title
                 try:
                     await self._advance_step(state, item, 0, "Scanning filesystem...")
-                    preview = await service.recommendation_preview(item.recommendation_id)
-                    await self._complete_step(item, 0, preview.preview.details[0] if preview.preview.details else "Filesystem scan complete")
+                    preview = await service.recommendation_preview(
+                        item.recommendation_id
+                    )
+                    await self._complete_step(
+                        item,
+                        0,
+                        preview.preview.details[0]
+                        if preview.preview.details
+                        else "Filesystem scan complete",
+                    )
 
                     validation_index = 1 if len(item.stages) > 1 else 0
-                    await self._advance_step(state, item, validation_index, "Matching identity...")
-                    validated = await service.recommendation_validate(item.recommendation_id)
+                    await self._advance_step(
+                        state, item, validation_index, "Matching identity..."
+                    )
+                    validated = await service.recommendation_validate(
+                        item.recommendation_id
+                    )
                     if not validated.validation.valid:
-                        await self._fail_step(item, validation_index, "Validation blocked execution")
+                        await self._fail_step(
+                            item, validation_index, "Validation blocked execution"
+                        )
                         item.status = "blocked"
                         item.message = "Validation blocked execution"
                         state.failed += 1
-                        state.warnings += sum(1 for check in validated.validation.checks if not check.passed)
+                        state.warnings += sum(
+                            1
+                            for check in validated.validation.checks
+                            if not check.passed
+                        )
                         await self._skip_remaining_steps(item, validation_index + 1)
                         continue
-                    await self._complete_step(item, validation_index, "Identity matched")
+                    await self._complete_step(
+                        item, validation_index, "Identity matched"
+                    )
 
-                    execute_index = min(validation_index + 1, max(0, len(item.stages) - 1))
+                    execute_index = min(
+                        validation_index + 1, max(0, len(item.stages) - 1)
+                    )
                     execute_label = self._execution_label_for_item(item)
                     await self._advance_step(state, item, execute_index, execute_label)
-                    executed = await service.recommendation_execute(item.recommendation_id)
+                    executed = await service.recommendation_execute(
+                        item.recommendation_id
+                    )
                     item.operation_history_id = executed.execution.operation_history_id
                     item.message = executed.execution.message
-                    state.warnings += sum(1 for check in executed.validation.checks if not check.passed)
+                    state.warnings += sum(
+                        1 for check in executed.validation.checks if not check.passed
+                    )
                     if executed.execution.executed:
-                        await self._complete_step(item, execute_index, executed.execution.message)
+                        await self._complete_step(
+                            item, execute_index, executed.execution.message
+                        )
                         await self._complete_remaining_steps(item, execute_index + 1)
                         item.status = "completed"
                         state.completed += 1
-                        state.recovered_space_bytes += int(item.estimated_recovery_bytes or 0)
+                        state.recovered_space_bytes += int(
+                            item.estimated_recovery_bytes or 0
+                        )
                     else:
-                        await self._fail_step(item, execute_index, executed.execution.message)
+                        await self._fail_step(
+                            item, execute_index, executed.execution.message
+                        )
                         await self._skip_remaining_steps(item, execute_index + 1)
                         item.status = "failed"
                         state.failed += 1
@@ -300,7 +342,9 @@ class OperationsExecutionManager:
                     await self._fail_first_open_step(item, str(exc))
                 finally:
                     state.current_asset_title = item.title
-                    state.current_step_label = item.message or self._execution_label_for_item(item)
+                    state.current_step_label = (
+                        item.message or self._execution_label_for_item(item)
+                    )
 
             state.completed_at = _utcnow()
             elapsed_ms = max(0, int((perf_counter() - started_timer) * 1000))
@@ -327,13 +371,19 @@ class OperationsExecutionManager:
                     "warnings": state.warnings,
                     "failed": state.failed,
                     "elapsed_ms": elapsed_ms,
-                    "completed_at": state.completed_at.isoformat() if state.completed_at else None,
+                    "completed_at": state.completed_at.isoformat()
+                    if state.completed_at
+                    else None,
                     "items": [item.model_dump(mode="json") for item in state.items],
                 }
                 await db.commit()
 
     async def _advance_step(
-        self, state: _SessionState, item: OperationExecutionItemProgress, index: int, label: str
+        self,
+        state: _SessionState,
+        item: OperationExecutionItemProgress,
+        index: int,
+        label: str,
     ) -> None:
         if 0 <= index < len(item.stages):
             item.stages[index].status = "running"
@@ -354,12 +404,16 @@ class OperationsExecutionManager:
             item.stages[index].status = "failed"
             item.stages[index].detail = detail
 
-    async def _skip_remaining_steps(self, item: OperationExecutionItemProgress, start: int) -> None:
+    async def _skip_remaining_steps(
+        self, item: OperationExecutionItemProgress, start: int
+    ) -> None:
         for stage in item.stages[start:]:
             if stage.status == "pending":
                 stage.status = "skipped"
 
-    async def _complete_remaining_steps(self, item: OperationExecutionItemProgress, start: int) -> None:
+    async def _complete_remaining_steps(
+        self, item: OperationExecutionItemProgress, start: int
+    ) -> None:
         for stage in item.stages[start:]:
             if stage.status == "pending":
                 stage.status = "completed"
@@ -376,7 +430,11 @@ class OperationsExecutionManager:
         await self._skip_remaining_steps(
             item,
             next(
-                (index + 1 for index, stage in enumerate(item.stages) if stage.status == "failed"),
+                (
+                    index + 1
+                    for index, stage in enumerate(item.stages)
+                    if stage.status == "failed"
+                ),
                 len(item.stages),
             ),
         )
@@ -395,8 +453,16 @@ class OperationsExecutionManager:
 
     def _to_response(self, state: _SessionState) -> OperationExecutionSessionResponse:
         total = len(state.items)
-        completed_count = sum(1 for item in state.items if item.status in {"completed", "failed", "blocked"})
-        average_per_item = _elapsed_ms(state.started_at) / completed_count if state.started_at and completed_count else 0
+        completed_count = sum(
+            1
+            for item in state.items
+            if item.status in {"completed", "failed", "blocked"}
+        )
+        average_per_item = (
+            _elapsed_ms(state.started_at) / completed_count
+            if state.started_at and completed_count
+            else 0
+        )
         remaining = max(0, total - completed_count)
         estimated_remaining_ms = (
             int(average_per_item * remaining)
@@ -423,7 +489,9 @@ class OperationsExecutionManager:
             summary=OperationExecutionSummary(
                 successful=sum(1 for item in state.items if item.status == "completed"),
                 warnings=state.warnings,
-                failed=sum(1 for item in state.items if item.status in {"failed", "blocked"}),
+                failed=sum(
+                    1 for item in state.items if item.status in {"failed", "blocked"}
+                ),
                 recovered_space_bytes=state.recovered_space_bytes,
                 elapsed_ms=elapsed_ms,
             ),

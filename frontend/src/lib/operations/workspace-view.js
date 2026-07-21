@@ -76,14 +76,21 @@ export function inferCategory(asset) {
 
 /** @param {WorkspaceAsset} asset */
 export function isReadyAsset(asset) {
-  return ["low", "safe"].includes(String(asset?.risk_level || "").toLowerCase()) &&
-    Number(asset?.confidence || 0) >= 70;
+  return (
+    ["low", "safe"].includes(String(asset?.risk_level || "").toLowerCase()) &&
+    Number(asset?.confidence || 0) >= 70
+  );
 }
 
 /** @param {WorkspaceAsset} asset */
 export function isBlockedAsset(asset) {
-  const text = `${asset?.reason || ""} ${asset?.current_status || ""}`.toLowerCase();
-  return text.includes("failed") || text.includes("blocked") || text.includes("missing");
+  const text =
+    `${asset?.reason || ""} ${asset?.current_status || ""}`.toLowerCase();
+  return (
+    text.includes("failed") ||
+    text.includes("blocked") ||
+    text.includes("missing")
+  );
 }
 
 /** @param {WorkspaceAsset} asset */
@@ -113,7 +120,12 @@ export function stageStats(assets) {
  * @param {string} clickedId
  * @param {{shift?: boolean; lastClickedId?: string | null; checked?: boolean}=} opts
  */
-export function toggleAssetSelection(selectedIds, orderedIds, clickedId, opts = {}) {
+export function toggleAssetSelection(
+  selectedIds,
+  orderedIds,
+  clickedId,
+  opts = {},
+) {
   const next = new Set(selectedIds || []);
   const ids = Array.isArray(orderedIds) ? orderedIds : [];
   const { shift = false, lastClickedId = null, checked = true } = opts;
@@ -163,8 +175,12 @@ export function summarizeBulkAction(results) {
     } else {
       out.blocked += 1;
     }
-    out.estimatedRecovery += Number(row?.preview?.estimated_recovery_bytes || 0);
-    out.warnings += (row?.validation?.checks || []).filter((c) => !c.passed).length;
+    out.estimatedRecovery += Number(
+      row?.preview?.estimated_recovery_bytes || 0,
+    );
+    out.warnings += (row?.validation?.checks || []).filter(
+      (c) => !c.passed,
+    ).length;
   }
   return out;
 }
@@ -192,30 +208,46 @@ export function filterAndSortAssets(assets, opts = {}) {
     sortBy = "recovery",
     sortOrder = "desc",
   } = opts;
-  const query = String(search || "").trim().toLowerCase();
+  const query = String(search || "")
+    .trim()
+    .toLowerCase();
   const rows = (assets || []).filter((asset) => {
     if (filterKey && !(asset?.filters || []).includes(filterKey)) return false;
     if (query) {
-      const haystack = `${asset?.title || ""} ${asset?.reason || ""} ${asset?.current_status || ""}`.toLowerCase();
+      const haystack =
+        `${asset?.title || ""} ${asset?.reason || ""} ${asset?.current_status || ""}`.toLowerCase();
       if (!haystack.includes(query)) return false;
     }
     if (mediaType !== "all" && inferCategory(asset) !== mediaType) return false;
     if (readiness === "ready" && !isReadyAsset(asset)) return false;
     if (readiness === "blocked" && !isBlockedAsset(asset)) return false;
-    if (readiness === "needs_review" && !isNeedsReviewAsset(asset)) return false;
-    if (readiness === "high_confidence" && Number(asset?.confidence || 0) < 85) return false;
-    if (readiness === "low_confidence" && Number(asset?.confidence || 0) >= 60) return false;
+    if (readiness === "needs_review" && !isNeedsReviewAsset(asset))
+      return false;
+    if (readiness === "high_confidence" && Number(asset?.confidence || 0) < 85)
+      return false;
+    if (readiness === "low_confidence" && Number(asset?.confidence || 0) >= 60)
+      return false;
     return true;
   });
   const direction = sortOrder === "asc" ? 1 : -1;
   return rows.slice().sort((left, right) => {
     if (sortBy === "title") {
-      return String(left?.title || "").localeCompare(String(right?.title || "")) * direction;
+      return (
+        String(left?.title || "").localeCompare(String(right?.title || "")) *
+        direction
+      );
     }
     if (sortBy === "confidence") {
-      return (Number(left?.confidence || 0) - Number(right?.confidence || 0)) * direction;
+      return (
+        (Number(left?.confidence || 0) - Number(right?.confidence || 0)) *
+        direction
+      );
     }
-    return (Number(left?.estimated_space_recovery || 0) - Number(right?.estimated_space_recovery || 0)) * direction;
+    return (
+      (Number(left?.estimated_space_recovery || 0) -
+        Number(right?.estimated_space_recovery || 0)) *
+      direction
+    );
   });
 }
 
@@ -240,7 +272,11 @@ export function predictNextWorkflowStage(asset) {
   if (current === "download") return "import";
   if (current === "import") return "organize";
   if (current === "organize") {
-    if (action.includes("delete") || action.includes("remove") || action.includes("cleanup")) {
+    if (
+      action.includes("delete") ||
+      action.includes("remove") ||
+      action.includes("cleanup")
+    ) {
       return "cleanup";
     }
     if (action.includes("protect") || action.includes("seed")) {
@@ -317,12 +353,16 @@ export function applyExecutionSessionToWorkspace(
         next_action: item.message || asset.next_action,
       };
       if (destinationStage) {
-        destinationStage.assets = [movedAsset, ...(destinationStage.assets || [])];
+        destinationStage.assets = [
+          movedAsset,
+          ...(destinationStage.assets || []),
+        ];
         destinationStage.count = destinationStage.assets.length;
       }
       if (nextSelections[sourceStage.key]?.has(asset.id)) {
         nextSelections[sourceStage.key].delete(asset.id);
-        if (!nextSelections[destinationKey]) nextSelections[destinationKey] = new Set();
+        if (!nextSelections[destinationKey])
+          nextSelections[destinationKey] = new Set();
         nextSelections[destinationKey].add(asset.id);
       }
       alreadyApplied.add(item.recommendation_id);
@@ -342,7 +382,11 @@ export function applyExecutionSessionToWorkspace(
   }
 
   if (!changed) {
-    return { workspace, appliedIds: alreadyApplied, stageSelections: nextSelections };
+    return {
+      workspace,
+      appliedIds: alreadyApplied,
+      stageSelections: nextSelections,
+    };
   }
 
   const filterCounts = new Map();

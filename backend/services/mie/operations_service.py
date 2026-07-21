@@ -516,7 +516,9 @@ class OperationsService:
         else:
             rows = (
                 await self.db.execute(
-                    select(MediaAsset.media_type, MediaAsset.movie_id, MediaAsset.series_id)
+                    select(
+                        MediaAsset.media_type, MediaAsset.movie_id, MediaAsset.series_id
+                    )
                     .order_by(MediaAsset.id.asc())
                     .limit(250)
                 )
@@ -532,9 +534,7 @@ class OperationsService:
                 self._request_context.graph_subjects = list(subjects)
 
         graphs: list[Any] = []
-        correlation = CorrelationService(
-            self.db, request_context=self._request_context
-        )
+        correlation = CorrelationService(self.db, request_context=self._request_context)
         for media_type, media_id in subjects:
             try:
                 graph = await correlation.media_graph(
@@ -613,7 +613,10 @@ class OperationsService:
         return summary
 
     async def _graph_intelligence(self) -> tuple[list[Any], Any]:
-        if self._request_context is not None and self._request_context.graph_intelligence:
+        if (
+            self._request_context is not None
+            and self._request_context.graph_intelligence
+        ):
             return self._request_context.graph_intelligence
         if self._graph_intelligence_cache is not None:
             return self._graph_intelligence_cache
@@ -701,7 +704,9 @@ class OperationsService:
             states = [row.computed_state for row in graph.torrent_intelligence.torrents]
             if not states:
                 continue
-            if not any(state in {"completed", "seeding", "imported"} for state in states):
+            if not any(
+                state in {"completed", "seeding", "imported"} for state in states
+            ):
                 continue
             if graph.file_intelligence.missing_files > 0:
                 continue
@@ -1762,7 +1767,13 @@ class OperationsService:
         cleanup = str(getattr(item, "cleanup_classification", "") or "")
         retention = str(getattr(item, "retention_policy", "") or "")
 
-        if state in {"metadata_download", "queued", "downloading", "checking", "moving"}:
+        if state in {
+            "metadata_download",
+            "queued",
+            "downloading",
+            "checking",
+            "moving",
+        }:
             return "download"
         if state == "failed" or cleanup == "failed_import":
             return "import"
@@ -1812,7 +1823,12 @@ class OperationsService:
             return "organize"
         if card in {"ready_to_detach", "protected_seeding"}:
             return "retention"
-        if card in {"space_recovery", "orphaned_torrents", "leftover_files", "empty_folders"}:
+        if card in {
+            "space_recovery",
+            "orphaned_torrents",
+            "leftover_files",
+            "empty_folders",
+        }:
             return "cleanup"
         if card in {"detached_media"}:
             return "completed"
@@ -1840,7 +1856,12 @@ class OperationsService:
         if card.startswith("artwork_"):
             filters.add("artwork_issues")
             filters.add("missing_artwork")
-        if card in {"unknown_files", "orphaned_files", "leftover_files", "empty_folders"}:
+        if card in {
+            "unknown_files",
+            "orphaned_files",
+            "leftover_files",
+            "empty_folders",
+        }:
             filters.add("filesystem_issues")
             filters.add("unknown_files")
         if card in {"orphaned_torrents", "space_recovery"}:
@@ -1921,7 +1942,9 @@ class OperationsService:
             preview.append(f"Source path: {known_paths[0]}")
             preview.append(f"Primary path: {known_paths[0]}")
         if estimated_recovery_bytes > 0:
-            preview.append(f"Estimated work: {estimated_recovery_bytes} bytes of recovery potential")
+            preview.append(
+                f"Estimated work: {estimated_recovery_bytes} bytes of recovery potential"
+            )
         if references:
             preview.append(f"Supporting evidence: {references[0]}")
 
@@ -1930,35 +1953,73 @@ class OperationsService:
         reversible = True
         if normalized in {"delete_torrent", "delete_torrent_and_files", "archive"}:
             preview.append("Reversibility: limited or manual rollback only.")
-            preview.append("Confirmation requirements: explicit confirmation is required.")
+            preview.append(
+                "Confirmation requirements: explicit confirmation is required."
+            )
             reversible = False
-        elif normalized in {"retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+        elif normalized in {
+            "retry_import",
+            "repair_identity",
+            "refresh_metadata",
+            "refresh_artwork",
+        }:
             preview.append("Reversibility: generally safe to rerun or refresh.")
             preview.append("Confirmation requirements: no confirmation required.")
         elif normalized.startswith("open_"):
-            preview.append("Reversibility: fully reversible because no MediaMasterr data is mutated.")
+            preview.append(
+                "Reversibility: fully reversible because no MediaMasterr data is mutated."
+            )
             preview.append("Confirmation requirements: no confirmation required.")
         else:
-            preview.append("Reversibility: review the preview before committing changes.")
-            preview.append("Confirmation requirements: confirm if the action mutates files or imports.")
+            preview.append(
+                "Reversibility: review the preview before committing changes."
+            )
+            preview.append(
+                "Confirmation requirements: confirm if the action mutates files or imports."
+            )
 
-        if normalized in {"open_radarr", "retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+        if normalized in {
+            "open_radarr",
+            "retry_import",
+            "repair_identity",
+            "refresh_metadata",
+            "refresh_artwork",
+        }:
             applications.append("Radarr")
         if normalized in {"open_sonarr"}:
             applications.append("Sonarr")
-        if normalized in {"open_qbittorrent", "resume_download", "pause_torrent", "force_recheck", "delete_torrent", "delete_torrent_and_files"}:
+        if normalized in {
+            "open_qbittorrent",
+            "resume_download",
+            "pause_torrent",
+            "force_recheck",
+            "delete_torrent",
+            "delete_torrent_and_files",
+        }:
             applications.append("qBittorrent")
-        if normalized in {"retry_import", "repair_identity", "refresh_metadata", "refresh_artwork"}:
+        if normalized in {
+            "retry_import",
+            "repair_identity",
+            "refresh_metadata",
+            "refresh_artwork",
+        }:
             applications.append("Plex")
         if normalized in {"refresh_metadata", "repair_identity"}:
             applications.append("Identity Engine")
         if normalized in {"refresh_artwork"}:
             applications.append("Artwork pipeline")
-        if normalized in {"ignore_recommendation", "manual_review", "mark_resolved", "archive"}:
+        if normalized in {
+            "ignore_recommendation",
+            "manual_review",
+            "mark_resolved",
+            "archive",
+        }:
             applications.append("Operations Engine")
 
         if applications:
-            preview.append(f"Applications affected: {', '.join(dict.fromkeys(applications))}")
+            preview.append(
+                f"Applications affected: {', '.join(dict.fromkeys(applications))}"
+            )
 
         return preview[:8]
 
@@ -1985,7 +2046,11 @@ class OperationsService:
     ) -> tuple[MediaType | None, int | None]:
         if target_type == "movie" and target_id and target_id.isdigit():
             return MediaType.MOVIE, int(target_id)
-        if target_type in {"series", "season", "episode"} and target_id and target_id.isdigit():
+        if (
+            target_type in {"series", "season", "episode"}
+            and target_id
+            and target_id.isdigit()
+        ):
             return MediaType.SERIES, int(target_id)
         if target_type == "reclaim_candidate" and target_id and target_id.isdigit():
             row = (
@@ -2034,7 +2099,9 @@ class OperationsService:
             target_type=target_type,
             target_id=target_id,
         )
-        expected_destination = self._destination_for_policy(policy_name, resolved_media_type)
+        expected_destination = self._destination_for_policy(
+            policy_name, resolved_media_type
+        )
 
         def _norm_path(value: str | None) -> str:
             return normalize_fpath(value or "", strip_ending_slash=True, lower=True)
@@ -2059,28 +2126,28 @@ class OperationsService:
                 await self.db.execute(select(Movie).where(Movie.id == media_id))
             ).scalar_one_or_none()
             versions = (
-                (
-                    await self.db.execute(
-                        select(
-                            MovieVersion.path,
-                            MovieVersion.library_name,
-                            MovieVersion.service,
-                            MovieVersion.service_item_id,
-                        ).where(MovieVersion.movie_id == media_id)
-                    )
+                await self.db.execute(
+                    select(
+                        MovieVersion.path,
+                        MovieVersion.library_name,
+                        MovieVersion.service,
+                        MovieVersion.service_item_id,
+                    ).where(MovieVersion.movie_id == media_id)
                 )
-                .all()
-            )
+            ).all()
             arr_refs = (
-                (
-                    await self.db.execute(
-                        select(ServiceConfig.name, MovieArrRef.arr_movie_id, MovieArrRef.arr_movie_path)
-                        .join(ServiceConfig, ServiceConfig.id == MovieArrRef.service_config_id)
-                        .where(MovieArrRef.movie_id == media_id)
+                await self.db.execute(
+                    select(
+                        ServiceConfig.name,
+                        MovieArrRef.arr_movie_id,
+                        MovieArrRef.arr_movie_path,
                     )
+                    .join(
+                        ServiceConfig, ServiceConfig.id == MovieArrRef.service_config_id
+                    )
+                    .where(MovieArrRef.movie_id == media_id)
                 )
-                .all()
-            )
+            ).all()
             for path, library_name, service, _ in versions:
                 if path:
                     known_paths.append(
@@ -2120,13 +2187,17 @@ class OperationsService:
                         explanation="No Radarr relationship is currently linked for this movie.",
                     )
                 )
-            plex_version = next((row for row in versions if row.service == Service.PLEX), None)
+            plex_version = next(
+                (row for row in versions if row.service == Service.PLEX), None
+            )
             applications.append(
                 OperationsApplicationEvidence(
                     role="Managed By",
                     application="Plex",
                     status="linked" if plex_version is not None else "unavailable",
-                    reference=plex_version.service_item_id if plex_version is not None else None,
+                    reference=plex_version.service_item_id
+                    if plex_version is not None
+                    else None,
                     explanation=(
                         "Plex library ownership is linked for this movie."
                         if plex_version is not None
@@ -2140,7 +2211,9 @@ class OperationsService:
                         key="imdb",
                         label="IMDb",
                         value=movie.imdb_id if movie is not None else None,
-                        status="linked" if movie is not None and movie.imdb_id else "unavailable",
+                        status="linked"
+                        if movie is not None and movie.imdb_id
+                        else "unavailable",
                         explanation=(
                             "IMDb identity is linked."
                             if movie is not None and movie.imdb_id
@@ -2168,24 +2241,32 @@ class OperationsService:
                     OperationsRelationshipEvidence(
                         key="collection",
                         label="Collection",
-                        value=(movie.tmdb_collection_name if movie is not None else None)
+                        value=(
+                            movie.tmdb_collection_name if movie is not None else None
+                        )
                         or policy_name,
                         status=(
                             "linked"
-                            if (movie is not None and movie.tmdb_collection_name) or policy_name
+                            if (movie is not None and movie.tmdb_collection_name)
+                            or policy_name
                             else "unavailable"
                         ),
                         explanation=(
                             "Collection context is available."
-                            if (movie is not None and movie.tmdb_collection_name) or policy_name
+                            if (movie is not None and movie.tmdb_collection_name)
+                            or policy_name
                             else "No collection relationship is currently linked."
                         ),
                     ),
                     OperationsRelationshipEvidence(
                         key="duplicates",
                         label="Duplicate Assets",
-                        value=str(max(0, len([row for row in versions if row.path]) - 1)),
-                        status="linked" if len([row for row in versions if row.path]) > 1 else "unavailable",
+                        value=str(
+                            max(0, len([row for row in versions if row.path]) - 1)
+                        ),
+                        status="linked"
+                        if len([row for row in versions if row.path]) > 1
+                        else "unavailable",
                         explanation=(
                             "Multiple known copies are tracked for this movie."
                             if len([row for row in versions if row.path]) > 1
@@ -2200,33 +2281,36 @@ class OperationsService:
                 await self.db.execute(select(Series).where(Series.id == media_id))
             ).scalar_one_or_none()
             service_refs = (
-                (
-                    await self.db.execute(
-                        select(
-                            SeriesServiceRef.path,
-                            SeriesServiceRef.library_name,
-                            SeriesServiceRef.service,
-                            SeriesServiceRef.service_id,
-                            SeriesServiceRef.media_server_collection_names,
-                        ).where(SeriesServiceRef.series_id == media_id)
-                    )
+                await self.db.execute(
+                    select(
+                        SeriesServiceRef.path,
+                        SeriesServiceRef.library_name,
+                        SeriesServiceRef.service,
+                        SeriesServiceRef.service_id,
+                        SeriesServiceRef.media_server_collection_names,
+                    ).where(SeriesServiceRef.series_id == media_id)
                 )
-                .all()
-            )
+            ).all()
             arr_refs = (
-                (
-                    await self.db.execute(
-                        select(ServiceConfig.name, SeriesArrRef.arr_series_id, SeriesArrRef.arr_series_path)
-                        .join(ServiceConfig, ServiceConfig.id == SeriesArrRef.service_config_id)
-                        .where(SeriesArrRef.series_id == media_id)
+                await self.db.execute(
+                    select(
+                        ServiceConfig.name,
+                        SeriesArrRef.arr_series_id,
+                        SeriesArrRef.arr_series_path,
                     )
+                    .join(
+                        ServiceConfig,
+                        ServiceConfig.id == SeriesArrRef.service_config_id,
+                    )
+                    .where(SeriesArrRef.series_id == media_id)
                 )
-                .all()
-            )
+            ).all()
             season_paths = (
                 (
                     await self.db.execute(
-                        select(Season.path).where(Season.series_id == media_id, Season.path.is_not(None))
+                        select(Season.path).where(
+                            Season.series_id == media_id, Season.path.is_not(None)
+                        )
                     )
                 )
                 .scalars()
@@ -2281,7 +2365,9 @@ class OperationsService:
                         explanation="No Sonarr relationship is currently linked for this series.",
                     )
                 )
-            plex_ref = next((row for row in service_refs if row.service == Service.PLEX), None)
+            plex_ref = next(
+                (row for row in service_refs if row.service == Service.PLEX), None
+            )
             applications.append(
                 OperationsApplicationEvidence(
                     role="Managed By",
@@ -2306,7 +2392,9 @@ class OperationsService:
                         key="imdb",
                         label="IMDb",
                         value=series.imdb_id if series is not None else None,
-                        status="linked" if series is not None and series.imdb_id else "unavailable",
+                        status="linked"
+                        if series is not None and series.imdb_id
+                        else "unavailable",
                         explanation=(
                             "IMDb identity is linked."
                             if series is not None and series.imdb_id
@@ -2328,7 +2416,9 @@ class OperationsService:
                         key="tvdb",
                         label="TVDB",
                         value=series.tvdb_id if series is not None else None,
-                        status="linked" if series is not None and series.tvdb_id else "unavailable",
+                        status="linked"
+                        if series is not None and series.tvdb_id
+                        else "unavailable",
                         explanation=(
                             "TVDB identity is linked."
                             if series is not None and series.tvdb_id
@@ -2339,7 +2429,9 @@ class OperationsService:
                         key="collection",
                         label="Collection",
                         value=collection_name or policy_name,
-                        status="linked" if collection_name or policy_name else "unavailable",
+                        status="linked"
+                        if collection_name or policy_name
+                        else "unavailable",
                         explanation=(
                             "Collection context is available."
                             if collection_name or policy_name
@@ -2353,7 +2445,9 @@ class OperationsService:
             OperationsApplicationEvidence(
                 role="Download Client",
                 application="qBittorrent",
-                status="linked" if torrent_state or download_location else "unavailable",
+                status="linked"
+                if torrent_state or download_location
+                else "unavailable",
                 reference=torrent_state,
                 explanation=(
                     "A download client relationship is present for this asset."
@@ -2413,7 +2507,9 @@ class OperationsService:
                     parsed = datetime.fromisoformat(value)
                 except ValueError:
                     return None
-                return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+                return (
+                    parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+                )
             return None
 
         def _match_root(path: str | None) -> FilesystemRoot | None:
@@ -2424,7 +2520,9 @@ class OperationsService:
                 normalized_root = _norm_path(root.path)
                 if not normalized_root:
                     continue
-                if normalized_path == normalized_root or normalized_path.startswith(f"{normalized_root.rstrip('/')}/"):
+                if normalized_path == normalized_root or normalized_path.startswith(
+                    f"{normalized_root.rstrip('/')}/"
+                ):
                     return root
             return None
 
@@ -2452,7 +2550,11 @@ class OperationsService:
             indexed_entry = filesystem_entries.get(_norm_path(path))
             entry = indexed_entry[0] if indexed_entry is not None else None
             root = indexed_entry[1] if indexed_entry is not None else _match_root(path)
-            metadata = entry.metadata_json if entry is not None and isinstance(entry.metadata_json, dict) else {}
+            metadata = (
+                entry.metadata_json
+                if entry is not None and isinstance(entry.metadata_json, dict)
+                else {}
+            )
             local_path = Path(path)
             stat_result = None
             try:
@@ -2471,7 +2573,9 @@ class OperationsService:
             if details["file_size"] is None and stat_result is not None:
                 details["file_size"] = max(0, int(stat_result.st_size))
             if details["modified"] is None and stat_result is not None:
-                details["modified"] = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
+                details["modified"] = datetime.fromtimestamp(
+                    stat_result.st_mtime, tz=UTC
+                )
 
             details["dataset"] = (
                 str(metadata.get("dataset")).strip() or None
@@ -2480,20 +2584,27 @@ class OperationsService:
             )
             details["pool"] = (
                 str(metadata.get("pool") or metadata.get("pool_name")).strip() or None
-                if metadata.get("pool") is not None or metadata.get("pool_name") is not None
+                if metadata.get("pool") is not None
+                or metadata.get("pool_name") is not None
                 else None
             )
             filesystem_value = metadata.get("filesystem")
             if filesystem_value is None and root is not None:
                 filesystem_value = root.name
-            details["filesystem"] = str(filesystem_value).strip() or None if filesystem_value is not None else None
+            details["filesystem"] = (
+                str(filesystem_value).strip() or None
+                if filesystem_value is not None
+                else None
+            )
 
             if metadata.get("owner") is not None:
                 details["owner"] = str(metadata.get("owner")).strip() or None
             if metadata.get("group") is not None:
                 details["group"] = str(metadata.get("group")).strip() or None
             if metadata.get("permissions") is not None:
-                details["permissions"] = str(metadata.get("permissions")).strip() or None
+                details["permissions"] = (
+                    str(metadata.get("permissions")).strip() or None
+                )
 
             if stat_result is not None:
                 if details["permissions"] is None:
@@ -2507,9 +2618,13 @@ class OperationsService:
                         grp_module = cast(Any, grp)
 
                         if details["owner"] is None:
-                            details["owner"] = pwd_module.getpwuid(stat_result.st_uid).pw_name
+                            details["owner"] = pwd_module.getpwuid(
+                                stat_result.st_uid
+                            ).pw_name
                         if details["group"] is None:
-                            details["group"] = grp_module.getgrgid(stat_result.st_gid).gr_name
+                            details["group"] = grp_module.getgrgid(
+                                stat_result.st_gid
+                            ).gr_name
                     except Exception:
                         pass
                 created = _parse_datetime_value(metadata.get("created"))
@@ -2544,20 +2659,30 @@ class OperationsService:
 
             if details["exists"] is False:
                 details["state"] = "missing"
-                details["explanation"] = "The file path is linked but the filesystem entry could not be found."
+                details["explanation"] = (
+                    "The file path is linked but the filesystem entry could not be found."
+                )
             elif details["exists"] is True:
                 details["state"] = "available"
-                details["explanation"] = "Filesystem evidence is available from the indexed path and local filesystem probe."
+                details["explanation"] = (
+                    "Filesystem evidence is available from the indexed path and local filesystem probe."
+                )
             else:
                 details["state"] = "partial"
-                details["explanation"] = "The filesystem path is linked, but availability could not be confirmed." 
+                details["explanation"] = (
+                    "The filesystem path is linked, but availability could not be confirmed."
+                )
             return details
 
         filesystem_roots = (
-            await self.db.execute(
-                select(FilesystemRoot).where(FilesystemRoot.enabled.is_(True))
+            (
+                await self.db.execute(
+                    select(FilesystemRoot).where(FilesystemRoot.enabled.is_(True))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         all_file_paths = [
             path
@@ -2574,7 +2699,10 @@ class OperationsService:
             for entry, root in (
                 await self.db.execute(
                     select(FilesystemIndexEntry, FilesystemRoot)
-                    .join(FilesystemRoot, FilesystemRoot.id == FilesystemIndexEntry.root_id)
+                    .join(
+                        FilesystemRoot,
+                        FilesystemRoot.id == FilesystemIndexEntry.root_id,
+                    )
                     .where(FilesystemIndexEntry.path.in_(sorted(set(all_file_paths))))
                 )
             ).all():
@@ -2588,7 +2716,9 @@ class OperationsService:
             for path, _, _, role in known_paths
             if path and role == "managed_folder"
         ]
-        canonical_managed_folder = managed_folder_candidates[0] if managed_folder_candidates else None
+        canonical_managed_folder = (
+            managed_folder_candidates[0] if managed_folder_candidates else None
+        )
 
         base_rows = [
             (
@@ -2673,19 +2803,27 @@ class OperationsService:
 
             hierarchy_role = known_role
             state = cast(str, details["state"])
-            explanation = f"{known_label} is linked from {known_source or 'provider evidence'}."
+            explanation = (
+                f"{known_label} is linked from {known_source or 'provider evidence'}."
+            )
 
             if known_role == "primary_media_file":
-                in_canonical = _is_same_or_child(known_path_value, canonical_managed_folder)
+                in_canonical = _is_same_or_child(
+                    known_path_value, canonical_managed_folder
+                )
                 if canonical_managed_folder and in_canonical:
                     primary_inside_canonical += 1
                     if canonical_primary_seen:
                         hierarchy_role = "additional_file"
-                        explanation = "Additional media file inside the canonical managed folder."
+                        explanation = (
+                            "Additional media file inside the canonical managed folder."
+                        )
                     else:
                         canonical_primary_seen = True
                         hierarchy_role = "primary_media_file"
-                        explanation = "Primary media file is inside the canonical managed folder."
+                        explanation = (
+                            "Primary media file is inside the canonical managed folder."
+                        )
                 elif canonical_managed_folder:
                     primary_outside_canonical += 1
                     hierarchy_role = "additional_copy"
@@ -2695,12 +2833,18 @@ class OperationsService:
                     hierarchy_role = "primary_media_file"
                     explanation = "Primary media file is linked, but canonical managed folder is unavailable."
             elif known_role == "managed_folder":
-                if canonical_managed_folder and _norm_path(known_path_value) == _norm_path(canonical_managed_folder):
+                if canonical_managed_folder and _norm_path(
+                    known_path_value
+                ) == _norm_path(canonical_managed_folder):
                     explanation = "Managed folder matches the canonical destination for this asset."
                 else:
-                    explanation = "Managed folder is linked as filesystem hierarchy context."
+                    explanation = (
+                        "Managed folder is linked as filesystem hierarchy context."
+                    )
             elif known_role == "additional_file":
-                explanation = "Additional related files or folders are linked for this asset."
+                explanation = (
+                    "Additional related files or folders are linked for this asset."
+                )
 
             unique_file_rows.append(
                 OperationsFileEvidence(
@@ -2741,17 +2885,11 @@ class OperationsService:
                     f"y media file{'s' if primary_outside_canonical != 1 else ''} exist outside the canonical managed folder."
                 )
             elif primary_inside_canonical == 0 and primary_outside_canonical > 0:
-                filesystem_comparison_summary = (
-                    "Primary media file exists, but only outside the canonical managed folder."
-                )
+                filesystem_comparison_summary = "Primary media file exists, but only outside the canonical managed folder."
             else:
-                filesystem_comparison_summary = (
-                    "Canonical managed folder is linked, but no primary media file is currently linked."
-                )
+                filesystem_comparison_summary = "Canonical managed folder is linked, but no primary media file is currently linked."
         else:
-            filesystem_comparison_summary = (
-                "No canonical managed folder is linked yet, so duplicate detection is limited to known primary files only."
-            )
+            filesystem_comparison_summary = "No canonical managed folder is linked yet, so duplicate detection is limited to known primary files only."
 
         file_count = len([row for row in unique_file_rows if row.path])
         metadata_summary_parts: list[str] = []
@@ -2760,17 +2898,27 @@ class OperationsService:
                 await self.db.execute(select(Movie).where(Movie.id == media_id))
             ).scalar_one_or_none()
             if movie is not None:
-                metadata_summary_parts.append("IMDb" if movie.imdb_id else "IMDb unavailable")
-                metadata_summary_parts.append("TMDB" if movie.tmdb_id else "TMDB unavailable")
+                metadata_summary_parts.append(
+                    "IMDb" if movie.imdb_id else "IMDb unavailable"
+                )
+                metadata_summary_parts.append(
+                    "TMDB" if movie.tmdb_id else "TMDB unavailable"
+                )
                 metadata_summary_parts.append("TVDB unavailable")
         elif resolved_media_type is MediaType.SERIES:
             series = (
                 await self.db.execute(select(Series).where(Series.id == media_id))
             ).scalar_one_or_none()
             if series is not None:
-                metadata_summary_parts.append("IMDb" if series.imdb_id else "IMDb unavailable")
-                metadata_summary_parts.append("TMDB" if series.tmdb_id else "TMDB unavailable")
-                metadata_summary_parts.append("TVDB" if series.tvdb_id else "TVDB unavailable")
+                metadata_summary_parts.append(
+                    "IMDb" if series.imdb_id else "IMDb unavailable"
+                )
+                metadata_summary_parts.append(
+                    "TMDB" if series.tmdb_id else "TMDB unavailable"
+                )
+                metadata_summary_parts.append(
+                    "TVDB" if series.tvdb_id else "TVDB unavailable"
+                )
 
         artwork_summary = "Unavailable"
         if media_asset is not None and media_asset.poster_url:
@@ -2793,7 +2941,9 @@ class OperationsService:
                 OperationsRelationshipEvidence(
                     key="files",
                     label="Files",
-                    value=f"{file_count} indexed path(s)" if file_count else "Unavailable",
+                    value=f"{file_count} indexed path(s)"
+                    if file_count
+                    else "Unavailable",
                     status="linked" if file_count else "unavailable",
                     explanation=(
                         "Filesystem evidence is linked to this asset and is summarized in the Files tab."
@@ -2804,23 +2954,76 @@ class OperationsService:
                 OperationsRelationshipEvidence(
                     key="plex",
                     label="Plex",
-                    value="Linked" if any(row.application == "Plex" and row.status == "linked" for row in applications) else "Unavailable",
-                    status="linked" if any(row.application == "Plex" and row.status == "linked" for row in applications) else "unavailable",
+                    value="Linked"
+                    if any(
+                        row.application == "Plex" and row.status == "linked"
+                        for row in applications
+                    )
+                    else "Unavailable",
+                    status="linked"
+                    if any(
+                        row.application == "Plex" and row.status == "linked"
+                        for row in applications
+                    )
+                    else "unavailable",
                     explanation=(
                         "Plex ownership is linked for this asset."
-                        if any(row.application == "Plex" and row.status == "linked" for row in applications)
+                        if any(
+                            row.application == "Plex" and row.status == "linked"
+                            for row in applications
+                        )
                         else "No Plex relationship is currently linked for this asset."
                     ),
                 ),
                 OperationsRelationshipEvidence(
                     key="arr",
-                    label="Radarr" if resolved_media_type is MediaType.MOVIE else "Sonarr",
-                    value=("Linked" if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications) else "Unavailable"),
-                    status="linked" if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications) else "unavailable",
+                    label="Radarr"
+                    if resolved_media_type is MediaType.MOVIE
+                    else "Sonarr",
+                    value=(
+                        "Linked"
+                        if any(
+                            (
+                                row.application == "Radarr"
+                                if resolved_media_type is MediaType.MOVIE
+                                else row.application == "Sonarr"
+                            )
+                            and row.status == "linked"
+                            for row in applications
+                        )
+                        else "Unavailable"
+                    ),
+                    status="linked"
+                    if any(
+                        (
+                            row.application == "Radarr"
+                            if resolved_media_type is MediaType.MOVIE
+                            else row.application == "Sonarr"
+                        )
+                        and row.status == "linked"
+                        for row in applications
+                    )
+                    else "unavailable",
                     explanation=(
-                        ("Radarr ownership is linked for this asset." if resolved_media_type is MediaType.MOVIE else "Sonarr ownership is linked for this asset.")
-                        if any((row.application == "Radarr" if resolved_media_type is MediaType.MOVIE else row.application == "Sonarr") and row.status == "linked" for row in applications)
-                        else ("No Radarr relationship is currently linked for this asset." if resolved_media_type is MediaType.MOVIE else "No Sonarr relationship is currently linked for this asset.")
+                        (
+                            "Radarr ownership is linked for this asset."
+                            if resolved_media_type is MediaType.MOVIE
+                            else "Sonarr ownership is linked for this asset."
+                        )
+                        if any(
+                            (
+                                row.application == "Radarr"
+                                if resolved_media_type is MediaType.MOVIE
+                                else row.application == "Sonarr"
+                            )
+                            and row.status == "linked"
+                            for row in applications
+                        )
+                        else (
+                            "No Radarr relationship is currently linked for this asset."
+                            if resolved_media_type is MediaType.MOVIE
+                            else "No Sonarr relationship is currently linked for this asset."
+                        )
                     ),
                 ),
                 OperationsRelationshipEvidence(
@@ -2837,7 +3040,9 @@ class OperationsService:
                 OperationsRelationshipEvidence(
                     key="metadata",
                     label="Metadata",
-                    value=", ".join(metadata_summary_parts) if metadata_summary_parts else "Unavailable",
+                    value=", ".join(metadata_summary_parts)
+                    if metadata_summary_parts
+                    else "Unavailable",
                     status="linked" if metadata_summary_parts else "unavailable",
                     explanation=(
                         "Metadata providers are linked for this asset."
@@ -2849,7 +3054,9 @@ class OperationsService:
                     key="artwork",
                     label="Artwork",
                     value=artwork_summary,
-                    status="linked" if artwork_summary != "Unavailable" else "unavailable",
+                    status="linked"
+                    if artwork_summary != "Unavailable"
+                    else "unavailable",
                     explanation=(
                         "Artwork evidence is linked for this asset."
                         if artwork_summary != "Unavailable"
@@ -2919,27 +3126,33 @@ class OperationsService:
         actions: list[str] = [resolved_primary]
 
         if target_type in {"movie", "series", "season", "episode", "reclaim_candidate"}:
-            actions.extend([
-                "refresh_metadata",
-                "refresh_artwork",
-                "sync_collections",
-                "repair_identity",
-                "refresh_plex",
-            ])
+            actions.extend(
+                [
+                    "refresh_metadata",
+                    "refresh_artwork",
+                    "sync_collections",
+                    "repair_identity",
+                    "refresh_plex",
+                ]
+            )
             if media_type is MediaType.MOVIE:
                 actions.append("open_radarr")
             if media_type is MediaType.SERIES:
                 actions.append("open_sonarr")
 
         if target_type in {"torrent", "download_object"}:
-            actions.extend([
-                "force_recheck",
-                "resume_download",
-                "pause_torrent",
-                "open_qbittorrent",
-            ])
+            actions.extend(
+                [
+                    "force_recheck",
+                    "resume_download",
+                    "pause_torrent",
+                    "open_qbittorrent",
+                ]
+            )
 
-        actions.extend(["ignore_recommendation", "manual_review", "mark_resolved", "archive"])
+        actions.extend(
+            ["ignore_recommendation", "manual_review", "mark_resolved", "archive"]
+        )
 
         deduped: list[str] = []
         seen: set[str] = set()
@@ -3016,7 +3229,10 @@ class OperationsService:
                 reason=row.cleanup_reason or "Download lifecycle classification",
                 recommendation=row.recommendation,
                 estimated_recovery_bytes=row.recoverable_space_bytes,
-                graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
+                graph_references=[
+                    "correlation_graph.timeline",
+                    "filesystem_index_entries.path",
+                ],
             )
             stage_assets[stage_key].append(
                 OperationsWorkflowAsset(
@@ -3027,10 +3243,15 @@ class OperationsService:
                     poster_url=None,
                     risk_level=(
                         "high"
-                        if row.cleanup_classification in {"failed_import", "needs_investigation"}
+                        if row.cleanup_classification
+                        in {"failed_import", "needs_investigation"}
                         else "medium"
                         if row.cleanup_classification
-                        in {"duplicate_download", "abandoned_download", "safe_to_archive"}
+                        in {
+                            "duplicate_download",
+                            "abandoned_download",
+                            "safe_to_archive",
+                        }
                         else "low"
                     ),
                     target_type="download_object",
@@ -3049,7 +3270,10 @@ class OperationsService:
                     estimated_space_recovery=row.recoverable_space_bytes,
                     reason=row.cleanup_reason or "Download lifecycle classification",
                     after_action="Asset progresses to next lifecycle stage after successful operation.",
-                    graph_references=["correlation_graph.timeline", "filesystem_index_entries.path"],
+                    graph_references=[
+                        "correlation_graph.timeline",
+                        "filesystem_index_entries.path",
+                    ],
                     policy_name=policy_name,
                     filters=["downloads"],
                     action_manifest=self._build_action_manifest(
@@ -3060,7 +3284,10 @@ class OperationsService:
                         expected_destination=expected_destination,
                         known_paths=known_paths,
                         estimated_recovery_bytes=row.recoverable_space_bytes,
-                        references=["correlation_graph.timeline", "filesystem_index_entries.path"],
+                        references=[
+                            "correlation_graph.timeline",
+                            "filesystem_index_entries.path",
+                        ],
                     ),
                     case_summary=case_summary,
                     expected_destination=expected_destination,
@@ -3072,7 +3299,10 @@ class OperationsService:
             )
 
         for item in recommendations.items:
-            if item.target_type == "download_object" and item.target_id in download_by_path:
+            if (
+                item.target_type == "download_object"
+                and item.target_id in download_by_path
+            ):
                 continue
             stage_key = self._stage_for_recommendation(item)
             matched_download = (
@@ -3102,9 +3332,19 @@ class OperationsService:
                 target_type=item.target_type,
                 target_id=item.target_id,
                 policy_name=policy_name,
-                download_location=(matched_download.path if matched_download is not None else None),
-                library_location=(matched_download.library_path if matched_download is not None else None),
-                torrent_state=(matched_download.torrent_state if matched_download is not None else None),
+                download_location=(
+                    matched_download.path if matched_download is not None else None
+                ),
+                library_location=(
+                    matched_download.library_path
+                    if matched_download is not None
+                    else None
+                ),
+                torrent_state=(
+                    matched_download.torrent_state
+                    if matched_download is not None
+                    else None
+                ),
                 summary=item.summary,
                 reason=(item.reasons[0] if item.reasons else item.summary),
                 recommendation=item.explanation or item.summary,
@@ -3134,7 +3374,9 @@ class OperationsService:
                     current_stage=cast(Any, stage_key),
                     current_status=item.summary,
                     library_location=(
-                        matched_download.library_path if matched_download is not None else None
+                        matched_download.library_path
+                        if matched_download is not None
+                        else None
                     ),
                     download_location=(
                         matched_download.path if matched_download is not None else None
@@ -3805,7 +4047,12 @@ class OperationsService:
         imported_ids = [int(value) for value in (imported_filter_ids or [])]
         decision_ids = [int(value) for value in (decision_filter_ids or [])]
         smart_ids = [int(value) for value in (smart_filter_ids or [])]
-        if not candidates_only and not imported_ids and not decision_ids and not smart_ids:
+        if (
+            not candidates_only
+            and not imported_ids
+            and not decision_ids
+            and not smart_ids
+        ):
             return None, None
         movie_ids = await self._filtered_media_ids(
             media_type=MediaType.MOVIE,
@@ -3837,17 +4084,14 @@ class OperationsService:
         if not candidate_ids:
             return {}
         rows = (
-            (
-                await self.db.execute(
-                    select(
-                        ReclaimCandidate.id,
-                        ReclaimCandidate.movie_id,
-                        ReclaimCandidate.series_id,
-                    ).where(ReclaimCandidate.id.in_(candidate_ids))
-                )
+            await self.db.execute(
+                select(
+                    ReclaimCandidate.id,
+                    ReclaimCandidate.movie_id,
+                    ReclaimCandidate.series_id,
+                ).where(ReclaimCandidate.id.in_(candidate_ids))
             )
-            .all()
-        )
+        ).all()
         mapping: dict[int, tuple[MediaType, int]] = {}
         for candidate_id, movie_id, series_id in rows:
             if movie_id is not None:
